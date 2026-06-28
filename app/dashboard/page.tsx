@@ -9,7 +9,6 @@ import { api, type RevenueMonth } from "@/lib/api";
 import { StatCard } from "@/components/shared/StatCard";
 import { Badge } from "@/components/shared/Badge";
 import { LoadingState, ErrorState } from "@/components/shared/EmptyState";
-import { Modal } from "@/components/shared/Modal";
 import { ProjectHealthDetailModal } from "@/components/health/ProjectHealthDetailModal";
 import { rootCauseLabel } from "@/lib/utils";
 import { EmployeeProfileModal } from "@/components/shared/EmployeeProfileModal";
@@ -33,15 +32,14 @@ export default function DashboardPage() {
 
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [selectedEmployee, setSelectedEmployee] = useState<string | null>(null);
-  const [showRevenueProof, setShowRevenueProof] = useState(false);
 
   if (tables.isLoading || health.isLoading || allocations.isLoading) return <LoadingState label="Loading dashboard…" />;
   if (tables.error || health.error || allocations.error) return <ErrorState message="Could not reach the ResourceIQ backend. Is it running on :8000?" />;
 
-  const highRisk = (health.data ?? []).filter((p) => p.risk_band === "high");
+  const highRisk = (health.data ?? []).filter((p) => p.risk_band === "high").sort((a, b) => b.risk_score - a.risk_score);
   const mediumRisk = (health.data ?? []).filter((p) => p.risk_band === "medium");
   const understaffed = (health.data ?? []).filter((p) => p.is_understaffed);
-  const endingSoon = (allocations.data ?? []).filter((a) => a.ending_soon);
+  const endingSoon = (allocations.data ?? []).filter((a) => a.ending_soon).sort((a, b) => a.days_to_end - b.days_to_end);
   const overAllocated = (allocations.data ?? []).filter((a) => a.utilization_band === "over_allocated");
   const revenueChartData: RevenueRow[] = [...(revenue.data ?? [])].reverse().map((m, i, arr) => {
     const prev = i > 0 ? arr[i - 1] : null;
@@ -51,7 +49,12 @@ export default function DashboardPage() {
   });
   const latestRevenue = revenueChartData.length > 0 ? revenueChartData[revenueChartData.length - 1] : null;
   const totalUnbilledValue = (health.data ?? []).reduce((sum, p) => sum + p.monthly_unbilled_value_usd, 0);
-  const onLeaveNow = (leave.data ?? []).filter((i) => i.is_currently_on_leave);
+  const onLeaveNow = (leave.data ?? [])
+    .filter((i) => i.is_currently_on_leave)
+    .sort((a, b) => {
+      if (a.backfill_available !== b.backfill_available) return a.backfill_available ? 1 : -1;
+      return a.leave_end_date.localeCompare(b.leave_end_date);
+    });
   const leaveNoBackfill = (leave.data ?? []).filter((i) => i.is_currently_on_leave && !i.backfill_available);
 
   const allocationsByType = new Map<string, number>();
@@ -259,19 +262,9 @@ export default function DashboardPage() {
       </div>
 
       <div className="rounded-xl border border-gray-200 bg-white p-4">
-        <div className="flex items-start justify-between gap-3 mb-1">
-          <div>
-            <h2 className="text-sm font-semibold text-gray-700">Revenue Trend</h2>
-            <p className="text-[11px] text-gray-400 mt-0.5">Monthly revenue, from the Pipeline workbook.</p>
-          </div>
-          {revenueChartData.length > 0 && (
-            <button
-              onClick={() => setShowRevenueProof(true)}
-              className="text-xs text-primary hover:underline flex-shrink-0 whitespace-nowrap"
-            >
-              View proof
-            </button>
-          )}
+        <div className="mb-1">
+          <h2 className="text-sm font-semibold text-gray-700">Revenue Trend</h2>
+          <p className="text-[11px] text-gray-400 mt-0.5">Monthly revenue, from the Pipeline workbook.</p>
         </div>
         {latestRevenue && (
           <p className="text-xs text-gray-500 mb-2">
@@ -315,7 +308,6 @@ export default function DashboardPage() {
       {selectedEmployee && (
         <EmployeeProfileModal employeeId={selectedEmployee} initialTab="overview" onClose={() => setSelectedEmployee(null)} />
       )}
-      {showRevenueProof && <RevenueProofModal data={revenueChartData} onClose={() => setShowRevenueProof(false)} />}
     </div>
   );
 }
@@ -336,37 +328,5 @@ function RevenueTooltip({ active, payload }: { active?: boolean; payload?: Array
         </p>
       )}
     </div>
-  );
-}
-
-function RevenueProofModal({ data, onClose }: { data: RevenueRow[]; onClose: () => void }) {
-  return (
-    <Modal title="Revenue Trend — Proof" subtitle="Pipeline workbook → &quot;6 Months Revenue&quot; sheet" onClose={onClose} widthClassName="max-w-lg">
-      <div className="p-5 space-y-3 text-xs">
-        <p className="text-gray-500">One figure per month, straight from the source sheet -- no further breakdown exists.</p>
-        <table className="w-full text-[11px]">
-          <thead>
-            <tr className="text-gray-400 border-b border-gray-200">
-              <th className="text-left font-medium py-1">Month</th>
-              <th className="text-left font-medium py-1">Raw source cell</th>
-              <th className="text-right font-medium py-1">Parsed value</th>
-              <th className="text-right font-medium py-1">vs prior month</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.map((m) => (
-              <tr key={m.month} className="border-b border-gray-100 last:border-0">
-                <td className="py-1.5 text-gray-700 font-medium">{m.month}</td>
-                <td className="py-1.5 text-gray-500">&quot;{m.raw}&quot;</td>
-                <td className="py-1.5 text-gray-700 text-right">{m.value.toLocaleString()}</td>
-                <td className={cn("py-1.5 text-right", m.deltaAbs == null ? "text-gray-400" : m.deltaAbs >= 0 ? "text-emerald-600" : "text-red-500")}>
-                  {m.deltaAbs == null ? "-" : `${m.deltaAbs >= 0 ? "+" : ""}${m.deltaAbs.toLocaleString()} (${m.deltaPct!.toFixed(1)}%)`}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </Modal>
   );
 }
