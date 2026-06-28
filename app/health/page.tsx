@@ -9,6 +9,7 @@ import { Badge } from "@/components/shared/Badge";
 import { StatCard } from "@/components/shared/StatCard";
 import { LoadingState, ErrorState } from "@/components/shared/EmptyState";
 import { StatCardGridSkeleton, TableSkeleton } from "@/components/shared/Skeleton";
+import { Modal } from "@/components/shared/Modal";
 import { ProjectHealthDetailModal } from "@/components/health/ProjectHealthDetailModal";
 import { cn, formatUsd, rootCauseLabel, ROOT_CAUSE_LABEL } from "@/lib/utils";
 
@@ -130,6 +131,7 @@ function HealthPageInner() {
   const projects = useQuery({ queryKey: ["health-projects"], queryFn: api.healthProjects });
   const overtimeRisk = useQuery({ queryKey: ["overtime-risk-summary"], queryFn: api.overtimeRiskSummary });
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
+  const [unbilledProofProject, setUnbilledProofProject] = useState<{ code: string; client: string | null } | null>(null);
   const searchParams = useSearchParams();
 
   const [search, setSearch] = useState("");
@@ -299,8 +301,14 @@ function HealthPageInner() {
                       </button>
                     </td>
                     <td className="px-3 py-1.5 text-gray-500 whitespace-nowrap">{p.client_id ?? "-"}</td>
-                    <td className="px-3 py-1.5 text-right text-gray-700 whitespace-nowrap">
-                      {formatUsd(convertRevenue(p.monthly_unbilled_value_usd, revenuePeriod))}
+                    <td className="px-3 py-1.5 text-right whitespace-nowrap">
+                      <button
+                        onClick={() => setUnbilledProofProject({ code: p.project_code, client: p.client_id })}
+                        className="text-gray-700 font-medium hover:underline hover:text-primary"
+                        title="Click to see exactly which allocations this figure comes from"
+                      >
+                        {formatUsd(convertRevenue(p.monthly_unbilled_value_usd, revenuePeriod))}
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -491,7 +499,98 @@ function HealthPageInner() {
       {selectedProject && (
         <ProjectHealthDetailModal projectCode={selectedProject} onClose={() => setSelectedProject(null)} />
       )}
+      {unbilledProofProject && (
+        <UnbilledValueProofModal
+          projectCode={unbilledProofProject.code}
+          client={unbilledProofProject.client}
+          period={revenuePeriod}
+          onClose={() => setUnbilledProofProject(null)}
+        />
+      )}
     </div>
+  );
+}
+
+function UnbilledValueProofModal({
+  projectCode,
+  client,
+  period,
+  onClose,
+}: {
+  projectCode: string;
+  client: string | null;
+  period: RevenuePeriod;
+  onClose: () => void;
+}) {
+  const detail = useQuery({
+    queryKey: ["health-project-detail", projectCode],
+    queryFn: () => api.healthProjectDetail(projectCode),
+  });
+
+  return (
+    <Modal title={`${projectCode}${client ? ` — ${client}` : ""} — Unbilled Value Proof`} onClose={onClose} widthClassName="max-w-2xl">
+      <div className="p-5 space-y-3 text-xs">
+        {detail.isLoading ? (
+          <LoadingState label="Loading allocation proof…" />
+        ) : detail.error || !detail.data ? (
+          <ErrorState message="Could not load this project's allocation detail." />
+        ) : (
+          (() => {
+            const proof = detail.data.shadow_heavy;
+            const rows = proof.qualifying_allocations;
+            return (
+              <>
+                <p className="text-gray-500">
+                  Every currently-active SHADOW/UNBILLED allocation on this project, each converted from its real
+                  monthly $ figure (allocation % × Rate Card hourly rate × 160 standard monthly hours) to{" "}
+                  <strong>per {period}</strong>. These rows are exactly what sums to the {formatUsd(convertRevenue(proof.monthly_unbilled_value_usd, period))}/{period} shown in the table.
+                </p>
+                {rows.length === 0 ? (
+                  <p className="text-gray-400 italic">No currently-active shadow/unbilled allocations on this project.</p>
+                ) : (
+                  <table className="w-full text-[11px]">
+                    <thead>
+                      <tr className="text-gray-400 border-b border-gray-200">
+                        <th className="text-left font-medium py-1.5">Employee</th>
+                        <th className="text-left font-medium py-1.5">Designation</th>
+                        <th className="text-left font-medium py-1.5">Status</th>
+                        <th className="text-right font-medium py-1.5">Alloc %</th>
+                        <th className="text-right font-medium py-1.5">Rate/hr</th>
+                        <th className="text-right font-medium py-1.5">$/{period}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((r, i) => (
+                        <tr key={i} className="border-b border-gray-50 last:border-0">
+                          <td className="py-1.5 font-medium text-gray-700 whitespace-nowrap">{r.employee_id}</td>
+                          <td className="py-1.5 text-gray-600 whitespace-nowrap">{r.job_name ?? "-"}</td>
+                          <td className="py-1.5 text-gray-500 whitespace-nowrap">{r.resourcing_status}</td>
+                          <td className="py-1.5 text-right text-gray-700">{r.allocation_by_percentage}%</td>
+                          <td className="py-1.5 text-right text-gray-500">
+                            {r.hourly_rate_usd != null ? `$${r.hourly_rate_usd}` : "-"}
+                          </td>
+                          <td className="py-1.5 text-right text-gray-700 font-medium">
+                            {formatUsd(convertRevenue(r.monthly_unbilled_value_usd, period))}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="border-t border-gray-200">
+                        <td colSpan={5} className="py-1.5 text-right font-semibold text-gray-700">Total</td>
+                        <td className="py-1.5 text-right font-semibold text-gray-900">
+                          {formatUsd(rows.reduce((sum, r) => sum + convertRevenue(r.monthly_unbilled_value_usd, period), 0))}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                )}
+              </>
+            );
+          })()
+        )}
+      </div>
+    </Modal>
   );
 }
 
