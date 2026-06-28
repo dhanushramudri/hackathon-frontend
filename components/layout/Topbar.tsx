@@ -32,7 +32,6 @@ export function Topbar() {
       </button>
       <h1 className="text-sm font-semibold text-gray-700 truncate">{title}</h1>
       <div className="flex-1" />
-      <span className="hidden sm:inline text-[11px] text-gray-400">From negotiation to evidence</span>
     </header>
   );
 }
