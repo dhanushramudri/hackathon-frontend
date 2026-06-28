@@ -203,9 +203,12 @@ export function Sidebar() {
               </Link>
             ) : (
               <button onClick={() => setOpen(true)} className="flex-1 flex items-center justify-center" title="ResourceIQ — expand sidebar">
-                <span className="leading-none select-none">
-                  <span className="text-[15px] font-serif font-bold text-sidebar-foreground">R</span>
-                  <span className="text-[13px] font-mono font-normal" style={{ color: "hsl(var(--primary))" }}>IQ</span>
+                <span
+                  className="w-9 h-9 flex items-center justify-center rounded-md border leading-none select-none"
+                  style={{ borderColor: "hsl(var(--primary) / 0.35)" }}
+                >
+                  <span className="text-[17px] font-serif font-bold text-sidebar-foreground">R</span>
+                  <span className="text-[9px] font-mono font-normal relative top-0.5" style={{ color: "hsl(var(--primary))" }}>IQ</span>
                 </span>
               </button>
             )}
