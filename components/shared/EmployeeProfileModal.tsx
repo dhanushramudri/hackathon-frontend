@@ -171,9 +171,20 @@ function OverviewTab({ profile }: { profile: EmployeeProfile }) {
       label: "Over-allocated",
       fired: s.over_allocated,
       detail:
-        profile.employee_total_allocation_pct != null
-          ? `${profile.employee_total_allocation_pct}% total allocation across current projects — threshold >${s.over_allocated_threshold}%`
-          : "no current allocations",
+        profile.employee_client_allocation_pct != null ? (
+          <>
+            {profile.employee_client_allocation_pct}% client allocation (Client Project / Managed Services / BAU /
+            Sales) — threshold &gt;{s.over_allocated_threshold}%
+            {s.over_allocated_due_to_internal && profile.employee_internal_allocation_pct != null && (
+              <span className="block mt-1 text-amber-600">
+                Total shows {profile.employee_total_allocation_pct}% only because of +{profile.employee_internal_allocation_pct}%
+                internal-project work on top -- discretionary, not a hard commitment, so not flagged as over capacity.
+              </span>
+            )}
+          </>
+        ) : (
+          "no current allocations"
+        ),
     },
     {
       key: "under_utilized",

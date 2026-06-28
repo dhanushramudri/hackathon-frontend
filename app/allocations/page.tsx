@@ -395,7 +395,17 @@ function ResourceRow({
       )}
       <td className="px-3 py-2 whitespace-nowrap"><Badge variant={row.resourcing_status}>{row.resourcing_status}</Badge></td>
       <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{row.allocation_by_percentage}%</td>
-      <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{row.employee_total_allocation_pct}%</td>
+      <td className="px-3 py-2 text-gray-500 whitespace-nowrap">
+        {row.employee_total_allocation_pct}%
+        {row.over_allocated_due_to_internal && (
+          <span
+            className="ml-1 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-amber-700"
+            title={`Includes +${row.employee_internal_allocation_pct}% internal-project work; client-only allocation is ${row.employee_client_allocation_pct}%, at or under capacity.`}
+          >
+            incl. internal
+          </span>
+        )}
+      </td>
       <td className="px-3 py-2 whitespace-nowrap"><Badge variant={row.utilization_band}>{row.utilization_band.replace("_", " ")}</Badge></td>
       <td className="px-3 py-2 whitespace-nowrap">
         <button

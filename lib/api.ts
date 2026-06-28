@@ -30,6 +30,11 @@ export interface AllocationRow {
   allocated_start_date: string;
   allocated_end_date: string;
   employee_total_allocation_pct: number;
+  // Excludes Internal Project allocation -- this is what utilization_band's
+  // "over_allocated" is actually judged on, since internal work is discretionary.
+  employee_client_allocation_pct: number;
+  employee_internal_allocation_pct: number;
+  over_allocated_due_to_internal: boolean;
   utilization_band: "over_allocated" | "normal" | "under_utilized";
   actual_hours_logged: number;
   expected_hours: number;
@@ -713,6 +718,9 @@ export interface EmployeeLeaveRow {
 export interface EmployeeSignals {
   over_allocated: boolean;
   over_allocated_threshold: number;
+  // True when the only reason total allocation exceeds 100% is internal-project work
+  // stacked on top of an at-or-under-100% client commitment -- not a real overload.
+  over_allocated_due_to_internal: boolean;
   under_utilized: boolean;
   under_utilized_threshold: number;
   sustained_overtime: boolean;
@@ -730,6 +738,8 @@ export interface EmployeeProfile {
   date_of_join: string | null;
   account_status: boolean | null;
   employee_total_allocation_pct: number | null;
+  employee_client_allocation_pct: number | null;
+  employee_internal_allocation_pct: number | null;
   skills: EmployeeSkillRow[];
   competencies: EmployeeCompetencyRow[];
   allocations: EmployeeAllocationRow[];
