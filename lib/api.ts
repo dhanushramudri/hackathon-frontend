@@ -394,11 +394,6 @@ export interface RevenueMonth {
   raw: string;
 }
 
-export interface ValidationSummary {
-  projects_with_real_wsr: number;
-  projects_total: number;
-  derived_risk_agrees_with_wsr_pct: number | null;
-}
 
 export interface RedeployCandidate {
   employee_id: string;
@@ -773,6 +768,13 @@ export interface EmployeeHeadcountSummary {
   in_notice_period: number;
 }
 
+export interface OvertimeRiskSummary {
+  employees_at_risk: number;
+  threshold_days: number;
+  window_days: number;
+  daily_hours_threshold: number;
+}
+
 export interface EmployeeListRow {
   employee_id: string;
   job_name: string | null;
@@ -795,6 +797,7 @@ export const api = {
     postJSON<BuddyAnswer>("/buddy/ask", { message, history }),
   employeeProfile: (employeeId: string) => getJSON<EmployeeProfile>(`/employees/${encodeURIComponent(employeeId)}/profile`),
   employeeHeadcountSummary: () => getJSON<EmployeeHeadcountSummary>("/employees/headcount-summary"),
+  overtimeRiskSummary: () => getJSON<OvertimeRiskSummary>("/employees/overtime-risk-summary"),
   employeesList: () => getJSON<EmployeeListRow[]>("/employees"),
   employeeDesignations: () => getJSON<string[]>("/employees/designations"),
   allocations: () => getJSON<AllocationRow[]>("/allocations/current"),
@@ -813,7 +816,6 @@ export const api = {
     ),
   pipelineForecast: () => getJSON<PipelineDemandRow[]>("/pipeline/forecast"),
   healthProjects: () => getJSON<HealthProject[]>("/health-monitor/projects"),
-  healthValidation: () => getJSON<ValidationSummary>("/health-monitor/validation"),
   projectRoster: (projectCode: string) => getJSON<ProjectRoster>(`/health-monitor/projects/${encodeURIComponent(projectCode)}/roster`),
   healthProjectDetail: (projectCode: string) => getJSON<ProjectHealthDetail>(`/health-monitor/projects/${encodeURIComponent(projectCode)}/detail`),
   projectInfo: (projectCode: string) => getJSON<ProjectInfo>(`/health-monitor/projects/${encodeURIComponent(projectCode)}/info`),

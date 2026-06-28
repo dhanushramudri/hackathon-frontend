@@ -127,7 +127,6 @@ export default function HealthPage() {
 
 function HealthPageInner() {
   const projects = useQuery({ queryKey: ["health-projects"], queryFn: api.healthProjects });
-  const validation = useQuery({ queryKey: ["health-validation"], queryFn: api.healthValidation });
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const searchParams = useSearchParams();
 
@@ -157,9 +156,6 @@ function HealthPageInner() {
 
   const toggleRiskFilter = (band: "high" | "medium" | "low") => {
     setRiskFilter((current) => (current === band ? "all" : band));
-  };
-  const toggleWsrHasReport = () => {
-    setWsrFilter((current) => (current === "has_report" ? "all" : "has_report"));
   };
   const toggleRevenue = () => {
     setHasUnbilledValueOnly((v) => {
@@ -248,7 +244,7 @@ function HealthPageInner() {
           active={riskFilter === "low"}
         />
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <StatCard
           label="Understaffed"
           value={understaffedCount}
@@ -263,13 +259,6 @@ function HealthPageInner() {
           onPeriodChange={setRevenuePeriod}
           active={hasUnbilledValueOnly}
           onToggle={toggleRevenue}
-        />
-        <StatCard
-          label="Validated vs Real WSR"
-          value={validation.data?.derived_risk_agrees_with_wsr_pct != null ? `${validation.data.derived_risk_agrees_with_wsr_pct}%` : "-"}
-          sub={validation.data ? `${validation.data.projects_with_real_wsr} projects had real WSR data` : undefined}
-          onClick={toggleWsrHasReport}
-          active={wsrFilter === "has_report"}
         />
       </div>
 

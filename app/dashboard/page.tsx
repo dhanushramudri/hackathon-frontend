@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
-import { Users, Briefcase, ShieldAlert, Clock, ArrowRight, UserCheck, AlertOctagon, DollarSign, CalendarOff } from "lucide-react";
+import { Users, Briefcase, ShieldAlert, Clock, ArrowRight, UserCheck, AlertOctagon, DollarSign, CalendarOff, Flame } from "lucide-react";
 import { api, type RevenueMonth } from "@/lib/api";
 import { StatCard } from "@/components/shared/StatCard";
 import { Badge } from "@/components/shared/Badge";
@@ -30,6 +30,7 @@ export default function DashboardPage() {
   const revenue = useQuery({ queryKey: ["revenue-trend"], queryFn: api.revenueTrend });
   const leave = useQuery({ queryKey: ["leave-impact"], queryFn: api.leaveImpact });
   const pipeline = useQuery({ queryKey: ["pipeline-forecast"], queryFn: api.pipelineForecast });
+  const overtimeRisk = useQuery({ queryKey: ["overtime-risk-summary"], queryFn: api.overtimeRiskSummary });
 
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [selectedEmployee, setSelectedEmployee] = useState<string | null>(null);
@@ -170,6 +171,20 @@ export default function DashboardPage() {
           color={leaveNoBackfill.length > 0 ? "red" : "default"}
           icon={<CalendarOff className="w-4 h-4" />}
           href="/leave?onLeaveNow=true"
+        />
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard
+          label="Sustained Overtime Risk"
+          value={overtimeRisk.data?.employees_at_risk ?? "-"}
+          sub={
+            overtimeRisk.data
+              ? `${overtimeRisk.data.threshold_days}+ days over ${overtimeRisk.data.daily_hours_threshold}h in the last ${overtimeRisk.data.window_days}d`
+              : undefined
+          }
+          color={(overtimeRisk.data?.employees_at_risk ?? 0) > 0 ? "red" : "default"}
+          icon={<Flame className="w-4 h-4" />}
         />
       </div>
 
@@ -349,6 +364,7 @@ function DashboardSkeleton() {
     <div className="p-4 sm:p-6 space-y-6 max-w-6xl mx-auto">
       <StatCardGridSkeleton count={4} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" />
       <StatCardGridSkeleton count={4} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" />
+      <StatCardGridSkeleton count={1} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" />
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
           <Skeleton className="h-4 w-40" />
