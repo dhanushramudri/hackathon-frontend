@@ -10,6 +10,7 @@ const inter = Inter({ subsets: ["latin"] });
 export const metadata: Metadata = {
   title: "JMAN | ResourceIQ",
   description: "The resourcing co-pilot for JMAN -- evidence-driven staffing, forecasting, and health monitoring.",
+  icons: { icon: "/favicon_logo.png" },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
