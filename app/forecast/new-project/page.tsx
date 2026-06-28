@@ -224,6 +224,8 @@ function roleMixSourceLabel(spec: SpecState): string {
 export default function NewProjectForecastPage() {
   const coeOptions = useQuery({ queryKey: ["role-mix-coes"], queryFn: api.roleMixCoes });
   const categories = useQuery({ queryKey: ["role-mix-categories"], queryFn: api.roleMixCategories });
+  const designations = useQuery({ queryKey: ["employee-designations"], queryFn: api.employeeDesignations });
+  const knownDesignations = new Set((designations.data ?? []).map((d) => d.toLowerCase()));
 
   const [specs, setSpecs] = useState<SpecState[]>([blankSpec()]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -398,6 +400,11 @@ export default function NewProjectForecastPage() {
     <div className="p-6 max-w-4xl mx-auto space-y-5">
       <div className="space-y-4">
         <p className="text-xs text-gray-500">What if these new projects started on a given date?</p>
+        <datalist id="known-designations">
+          {(designations.data ?? []).map((d) => (
+            <option key={d} value={d} />
+          ))}
+        </datalist>
 
         {specs.map((spec, i) => (
           <div key={i} className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
@@ -556,6 +563,7 @@ export default function NewProjectForecastPage() {
                       [i]: { designation: e.target.value, headcount: prev[i]?.headcount ?? "", pct: prev[i]?.pct ?? "" },
                     }))
                   }
+                  list="known-designations"
                   placeholder="Add a role (designation)…"
                   className="flex-1 text-[11px] px-2 py-1 rounded-lg border border-gray-200 outline-none"
                 />
@@ -585,6 +593,15 @@ export default function NewProjectForecastPage() {
                   + Add role
                 </button>
               </div>
+              {roleDrafts[i]?.designation.trim() &&
+                designations.data &&
+                !knownDesignations.has(roleDrafts[i]!.designation.trim().toLowerCase()) && (
+                  <p className="text-[10px] text-amber-600 flex items-center gap-1">
+                    <AlertTriangle className="w-3 h-3 flex-shrink-0" />
+                    No employee currently holds this exact title -- it will show as a pure hire need with zero
+                    redeploy candidates. Pick a suggestion from the list to match a real designation.
+                  </p>
+                )}
             </div>
 
             <div className="border-t border-gray-100 pt-3">

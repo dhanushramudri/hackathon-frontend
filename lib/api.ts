@@ -783,6 +783,7 @@ export const api = {
   employeeProfile: (employeeId: string) => getJSON<EmployeeProfile>(`/employees/${encodeURIComponent(employeeId)}/profile`),
   employeeHeadcountSummary: () => getJSON<EmployeeHeadcountSummary>("/employees/headcount-summary"),
   employeesList: () => getJSON<EmployeeListRow[]>("/employees"),
+  employeeDesignations: () => getJSON<string[]>("/employees/designations"),
   allocations: () => getJSON<AllocationRow[]>("/allocations/current"),
   allocationTimesheet: (employeeId: string, projectId: string) =>
     getJSON<AllocationTimesheet>(`/allocations/timesheet?employee_id=${encodeURIComponent(employeeId)}&project_id=${encodeURIComponent(projectId)}`),
