@@ -753,12 +753,29 @@ export interface EmployeeHeadcountSummary {
   in_notice_period: number;
 }
 
+export interface EmployeeListRow {
+  employee_id: string;
+  job_name: string | null;
+  department_name: string | null;
+  location: string | null;
+  manager_employee_id: string | null;
+  date_of_join: string | null;
+  date_of_resignation: string | null;
+  status: "active" | "departed" | "notice_period";
+  // Real primary CoE for this employee (employee_coe.py) -- null when not determined
+  // (no observed Skill Details row on record), never a guessed default.
+  coe: string | null;
+  // Current total allocation % across active projects -- null if no active allocation.
+  current_allocation_pct: number | null;
+}
+
 export const api = {
   tables: () => getJSON<Record<string, number>>("/meta/tables"),
   buddyAsk: (message: string, history: { role: "user" | "assistant"; content: string }[] = []) =>
     postJSON<BuddyAnswer>("/buddy/ask", { message, history }),
   employeeProfile: (employeeId: string) => getJSON<EmployeeProfile>(`/employees/${encodeURIComponent(employeeId)}/profile`),
   employeeHeadcountSummary: () => getJSON<EmployeeHeadcountSummary>("/employees/headcount-summary"),
+  employeesList: () => getJSON<EmployeeListRow[]>("/employees"),
   allocations: () => getJSON<AllocationRow[]>("/allocations/current"),
   allocationTimesheet: (employeeId: string, projectId: string) =>
     getJSON<AllocationTimesheet>(`/allocations/timesheet?employee_id=${encodeURIComponent(employeeId)}&project_id=${encodeURIComponent(projectId)}`),

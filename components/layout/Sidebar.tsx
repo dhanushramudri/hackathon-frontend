@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import {
-  LayoutDashboard, Users, Sparkles, ShieldAlert, TrendingUp, CalendarRange, UserCheck, CalendarOff,
+  LayoutDashboard, Users, Contact, Sparkles, ShieldAlert, TrendingUp, CalendarRange, UserCheck, CalendarOff,
   ChevronLeft,
 } from "lucide-react";
 import Image from "next/image";
@@ -19,6 +19,7 @@ const NAV_GROUPS: { label: string; links: NavLinkSpec[] }[] = [
   {
     label: "Allocation",
     links: [
+      { label: "Employees", href: "/employees", icon: Contact },
       { label: "Allocations", href: "/allocations", icon: Users },
       { label: "Free Pool", href: "/free-pool", icon: UserCheck },
       { label: "Leave", href: "/leave", icon: CalendarOff },

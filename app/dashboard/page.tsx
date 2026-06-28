@@ -75,6 +75,7 @@ export default function DashboardPage() {
           value={headcount.data?.currently_active ?? "-"}
           sub={headcount.data ? `of ${headcount.data.total_ever} ever on roster` : undefined}
           icon={<Users className="w-4 h-4" />}
+          href="/employees"
           tooltip={
             headcount.data && (
               <div className="space-y-1">
