@@ -582,9 +582,17 @@ function RecommendationsPageInner() {
 
               {recommendation.data.candidates.length > 0 && (
                 <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-2">
+                  {!recommendation.data.has_skillset && (
+                    <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
+                      No skillset was specified for this request -- the candidates below could not be skill-matched at
+                      all. They&apos;re ranked by competency and availability only (all show &quot;Not assessed&quot;);
+                      treat this as a hire-vs-redeploy unknown, not a real shortlist.
+                    </p>
+                  )}
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-xs font-semibold text-gray-700">
-                      Candidates ({filteredCandidates.length}/{recommendation.data.candidates.length})
+                      Candidates ({filteredCandidates.length} shown of top {recommendation.data.candidates.length} -- {recommendation.data.total_employees_considered} employees considered
+                      {recommendation.data.has_skillset && `, ${recommendation.data.candidates_with_real_skill_match} with a real skill match`})
                     </p>
                     <div className="flex items-center gap-2">
                       {hasActiveCandidateFilters && (

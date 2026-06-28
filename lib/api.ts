@@ -98,6 +98,12 @@ export interface RecommendationResult {
   candidates: RecommendationCandidate[];
   hire_vs_redeploy_flag: boolean;
   top_candidate_signal: StaffingSignal;
+  // false when no skillset was specified at all -- candidates are then ranked by
+  // competency/availability only, with zero skill match performed (bucket "not_assessed"
+  // for all of them). The fixed top-15 display cap looks identical either way without this.
+  has_skillset: boolean;
+  total_employees_considered: number;
+  candidates_with_real_skill_match: number;
   deal_composition: DealCompositionRow[];
   pipeline_row?: {
     row_index: number;
