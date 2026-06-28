@@ -3,6 +3,12 @@ import Link from "next/link";
 import { ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+interface BreakdownItem {
+  label: string;
+  value: number;
+  colorClass: string;
+}
+
 interface StatCardProps {
   label: string;
   value: string | number;
@@ -13,6 +19,7 @@ interface StatCardProps {
   href?: string;
   active?: boolean;
   tooltip?: ReactNode;
+  breakdown?: BreakdownItem[];
 }
 const colorMap = {
   default: "bg-white border-gray-200 text-gray-900",
@@ -28,7 +35,7 @@ const activeRingMap = {
   amber: "ring-2 ring-amber-300",
   red: "ring-2 ring-red-300",
 };
-export function StatCard({ label, value, sub, color = "default", icon, onClick, href, active, tooltip }: StatCardProps) {
+export function StatCard({ label, value, sub, color = "default", icon, onClick, href, active, tooltip, breakdown }: StatCardProps) {
   const interactive = Boolean(onClick || href);
   const body = (
     <>
@@ -38,6 +45,15 @@ export function StatCard({ label, value, sub, color = "default", icon, onClick, 
       </div>
       <p className="text-2xl font-bold leading-tight">{value}</p>
       {sub && <p className="text-xs text-gray-400 mt-0.5">{sub}</p>}
+      {breakdown && breakdown.length > 0 && (
+        <div className="flex items-center gap-1 mt-1.5 flex-wrap">
+          {breakdown.map((b) => (
+            <span key={b.label} className={cn("text-[10px] px-1.5 py-0.5 rounded-full font-medium whitespace-nowrap", b.colorClass)}>
+              {b.value} {b.label}
+            </span>
+          ))}
+        </div>
+      )}
       {interactive && (
         <ChevronRight
           className={cn(

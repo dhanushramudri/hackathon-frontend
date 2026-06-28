@@ -42,6 +42,11 @@ export default function DashboardPage() {
   const understaffed = (health.data ?? []).filter((p) => p.is_understaffed);
   const endingSoon = (allocations.data ?? []).filter((a) => a.ending_soon).sort((a, b) => a.days_to_end - b.days_to_end);
   const overAllocated = (allocations.data ?? []).filter((a) => a.utilization_band === "over_allocated");
+  const freePoolCounts = {
+    fully_free: (freePool.data ?? []).filter((c) => c.reason === "fully_free").length,
+    under_utilized: (freePool.data ?? []).filter((c) => c.reason === "under_utilized").length,
+    ending_soon: (freePool.data ?? []).filter((c) => c.reason === "ending_soon").length,
+  };
   const revenueChartData: RevenueRow[] = [...(revenue.data ?? [])].reverse().map((m, i, arr) => {
     const prev = i > 0 ? arr[i - 1] : null;
     const deltaAbs = prev ? m.value - prev.value : null;
@@ -130,10 +135,17 @@ export default function DashboardPage() {
         <StatCard
           label="Free Pool Available"
           value={freePool.data?.length ?? "-"}
-          sub="fully free, under-utilized, or ending soon"
+          sub="right now vs. freeing up within 30 days"
           color="green"
           icon={<UserCheck className="w-4 h-4" />}
           href="/free-pool"
+          breakdown={
+            freePool.data && [
+              { label: "fully free", value: freePoolCounts.fully_free, colorClass: "bg-emerald-100 text-emerald-800" },
+              { label: "under-utilized", value: freePoolCounts.under_utilized, colorClass: "bg-blue-100 text-blue-800" },
+              { label: "ending soon", value: freePoolCounts.ending_soon, colorClass: "bg-amber-100 text-amber-800" },
+            ]
+          }
         />
         <StatCard
           label="Understaffed Projects"
