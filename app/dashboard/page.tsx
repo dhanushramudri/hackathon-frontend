@@ -71,8 +71,8 @@ export default function DashboardPage() {
     .slice(0, 5);
 
   return (
-    <div className="p-6 space-y-6 max-w-6xl mx-auto">
-      <div className="grid grid-cols-4 gap-4">
+    <div className="p-4 sm:p-6 space-y-6 max-w-6xl mx-auto">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           label="Total Employees"
           value={headcount.data?.currently_active ?? "-"}
@@ -125,7 +125,7 @@ export default function DashboardPage() {
         />
       </div>
 
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           label="Free Pool Available"
           value={freePool.data?.length ?? "-"}
@@ -160,7 +160,7 @@ export default function DashboardPage() {
         />
       </div>
 
-      <div className="grid grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="rounded-xl border border-gray-200 bg-white p-4">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-semibold text-gray-700">Highest-Risk Projects</h2>
@@ -209,7 +209,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="rounded-xl border border-gray-200 bg-white p-4">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-semibold text-gray-700">Urgent Pipeline Needing Action</h2>

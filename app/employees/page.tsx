@@ -93,8 +93,8 @@ export default function EmployeesPage() {
   if (error || !data) return <ErrorState message="Could not load employees." />;
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-4">
-      <div className="grid grid-cols-4 gap-4">
+    <div className="p-4 sm:p-6 max-w-6xl mx-auto space-y-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard label="Total" value={data.length} sub="ever on roster" />
         <StatCard
           label="Active"
@@ -170,26 +170,27 @@ export default function EmployeesPage() {
       </div>
 
       <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+        <div className="overflow-x-auto">
         <table className="w-full text-xs data-table">
           <thead className="bg-gray-50 text-gray-500">
             <tr>
               {["Employee", "Designation", "Department", "Location", "CoE", "Status", "Allocation %", "Joined"].map((h) => (
-                <th key={h} className="text-left font-medium px-3 py-2">{h}</th>
+                <th key={h} className="text-left font-medium px-3 py-2 whitespace-nowrap">{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {filtered.map((r) => (
               <tr key={r.employee_id} className="border-b border-gray-50 last:border-0 hover:bg-gray-50/50">
-                <td className="px-3 py-2">
+                <td className="px-3 py-2 whitespace-nowrap">
                   <button onClick={() => setSelectedEmployee(r.employee_id)} className="font-medium text-primary hover:underline">
                     {r.employee_id}
                   </button>
                 </td>
-                <td className="px-3 py-2 text-gray-500">{r.job_name ?? "-"}</td>
-                <td className="px-3 py-2 text-gray-500">{r.department_name ?? "-"}</td>
-                <td className="px-3 py-2 text-gray-500">{r.location ?? "-"}</td>
-                <td className="px-3 py-2">
+                <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{r.job_name ?? "-"}</td>
+                <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{r.department_name ?? "-"}</td>
+                <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{r.location ?? "-"}</td>
+                <td className="px-3 py-2 whitespace-nowrap">
                   {r.coe ? (
                     <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-violet-50 border border-violet-200 text-violet-600 whitespace-nowrap">
                       {r.coe}
@@ -198,9 +199,9 @@ export default function EmployeesPage() {
                     <span className="text-gray-300">not determined</span>
                   )}
                 </td>
-                <td className="px-3 py-2"><Badge variant={STATUS_VARIANT[r.status]}>{STATUS_LABEL[r.status]}</Badge></td>
-                <td className="px-3 py-2 text-gray-500">{r.current_allocation_pct != null ? `${r.current_allocation_pct}%` : "-"}</td>
-                <td className="px-3 py-2 text-gray-500">{r.date_of_join ?? "-"}</td>
+                <td className="px-3 py-2 whitespace-nowrap"><Badge variant={STATUS_VARIANT[r.status]}>{STATUS_LABEL[r.status]}</Badge></td>
+                <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{r.current_allocation_pct != null ? `${r.current_allocation_pct}%` : "-"}</td>
+                <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{r.date_of_join ?? "-"}</td>
               </tr>
             ))}
             {filtered.length === 0 && (
@@ -210,6 +211,7 @@ export default function EmployeesPage() {
             )}
           </tbody>
         </table>
+        </div>
       </div>
 
       {selectedEmployee && (

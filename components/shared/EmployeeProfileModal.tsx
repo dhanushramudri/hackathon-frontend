@@ -111,11 +111,12 @@ function RedeployMatchesTab({ employeeId }: { employeeId: string }) {
         </p>
       ) : (
         <div className="rounded-xl border border-gray-200 overflow-hidden">
+          <div className="overflow-x-auto">
           <table className="w-full text-[11px]">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
                 {["Match", "Client", "Role requested", "Likely start", "Priority", "Matched skills", ""].map((h) => (
-                  <th key={h} className="text-left font-semibold text-gray-500 px-2.5 py-1.5">{h}</th>
+                  <th key={h} className="text-left font-semibold text-gray-500 px-2.5 py-1.5 whitespace-nowrap">{h}</th>
                 ))}
               </tr>
             </thead>
@@ -143,6 +144,7 @@ function RedeployMatchesTab({ employeeId }: { employeeId: string }) {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
     </div>
@@ -210,7 +212,7 @@ function OverviewTab({ profile }: { profile: EmployeeProfile }) {
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-4 gap-3 text-xs">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
         <Field label="Designation" value={profile.job_name ?? "-"} />
         <Field label="Department" value={profile.department_name ?? "-"} />
         <Field label="Location" value={profile.location ?? "-"} />
@@ -225,26 +227,28 @@ function OverviewTab({ profile }: { profile: EmployeeProfile }) {
         </span>
       </div>
       <div className="rounded-xl border border-gray-200 overflow-hidden">
+        <div className="overflow-x-auto">
         <table className="w-full text-[11px]">
           <thead>
             <tr className="bg-gray-50 border-b border-gray-200">
-              <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5">Signal</th>
-              <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5">Status</th>
-              <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5">Actual vs. threshold</th>
+              <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5 whitespace-nowrap">Signal</th>
+              <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5 whitespace-nowrap">Status</th>
+              <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5 whitespace-nowrap">Actual vs. threshold</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r.key} className="border-b border-gray-50 last:border-0">
                 <td className="px-2.5 py-2 text-gray-700 font-medium whitespace-nowrap">{r.label}</td>
-                <td className="px-2.5 py-2">
+                <td className="px-2.5 py-2 whitespace-nowrap">
                   <FiredBadge fired={r.fired} />
                 </td>
-                <td className="px-2.5 py-2 text-gray-500">{r.detail}</td>
+                <td className="px-2.5 py-2 text-gray-500 whitespace-nowrap">{r.detail}</td>
               </tr>
             ))}
           </tbody>
         </table>
+        </div>
       </div>
       {timesheetProject && (
         <TimesheetProofModal employeeId={profile.employee_id} projectId={timesheetProject} onClose={() => setTimesheetProject(null)} />
@@ -308,11 +312,12 @@ function AllocationsTab({ profile }: { profile: EmployeeProfile }) {
         }}
       />
       <div className="rounded-xl border border-gray-200 overflow-hidden">
+        <div className="overflow-x-auto">
         <table className="w-full text-[11px]">
           <thead>
             <tr className="bg-gray-50 border-b border-gray-200">
               {["Project", "Client", "Type", "Status", "Alloc %", "Start", "End", "Active?", "Hours Util."].map((h) => (
-                <th key={h} className="text-left font-semibold text-gray-500 px-2.5 py-1.5">{h}</th>
+                <th key={h} className="text-left font-semibold text-gray-500 px-2.5 py-1.5 whitespace-nowrap">{h}</th>
               ))}
             </tr>
           </thead>
@@ -324,14 +329,14 @@ function AllocationsTab({ profile }: { profile: EmployeeProfile }) {
                   <td className="px-2.5 py-1.5 text-gray-700 font-medium whitespace-nowrap">{a.project_id}</td>
                   <td className="px-2.5 py-1.5 text-gray-600 whitespace-nowrap">{a.client_id ?? "-"}</td>
                   <td className="px-2.5 py-1.5 text-gray-500 whitespace-nowrap">{a.type_of_project ?? "-"}</td>
-                  <td className="px-2.5 py-1.5"><Badge variant={a.resourcing_status}>{a.resourcing_status}</Badge></td>
-                  <td className="px-2.5 py-1.5 text-gray-700">{a.allocation_by_percentage ?? 0}%</td>
+                  <td className="px-2.5 py-1.5 whitespace-nowrap"><Badge variant={a.resourcing_status}>{a.resourcing_status}</Badge></td>
+                  <td className="px-2.5 py-1.5 text-gray-700 whitespace-nowrap">{a.allocation_by_percentage ?? 0}%</td>
                   <td className="px-2.5 py-1.5 text-gray-500 whitespace-nowrap">{a.allocated_start_date ?? "-"}</td>
                   <td className="px-2.5 py-1.5 text-gray-500 whitespace-nowrap">{a.allocated_end_date ?? "-"}</td>
-                  <td className="px-2.5 py-1.5">
+                  <td className="px-2.5 py-1.5 whitespace-nowrap">
                     {a.is_allocation_active ? <Badge variant="billable">Active</Badge> : <Badge variant="default">Past</Badge>}
                   </td>
-                  <td className="px-2.5 py-1.5">
+                  <td className="px-2.5 py-1.5 whitespace-nowrap">
                     {hours ? (
                       <button
                         onClick={() => setTimesheetProject(a.project_id)}
@@ -354,6 +359,7 @@ function AllocationsTab({ profile }: { profile: EmployeeProfile }) {
             })}
           </tbody>
         </table>
+        </div>
         {rows.length === 0 && <p className="text-xs text-gray-400 italic text-center py-4">No allocations match the current filters.</p>}
       </div>
       {timesheetProject && (
@@ -457,15 +463,16 @@ function SkillsTab({ profile, matchContext }: { profile: EmployeeProfile; matchC
             sort={{ value: sort, onChange: (v) => setSort(v as SkillSort), options: [["source_asc", "Observed first"], ["score_desc", "Score ↓"], ["skill_asc", "Skill A–Z"]] }}
           />
           <div className="rounded-xl border border-gray-200 overflow-hidden">
+            <div className="overflow-x-auto">
             <table className="w-full text-[11px]">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200">
-                  <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5">COE Skill</th>
-                  <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5">Skill</th>
-                  <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5">Sub-skill</th>
-                  <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5">Experience</th>
-                  <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5">Score</th>
-                  <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5">Source</th>
+                  <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5 whitespace-nowrap">COE Skill</th>
+                  <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5 whitespace-nowrap">Skill</th>
+                  <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5 whitespace-nowrap">Sub-skill</th>
+                  <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5 whitespace-nowrap">Experience</th>
+                  <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5 whitespace-nowrap">Score</th>
+                  <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5 whitespace-nowrap">Source</th>
                 </tr>
               </thead>
               <tbody>
@@ -473,16 +480,17 @@ function SkillsTab({ profile, matchContext }: { profile: EmployeeProfile; matchC
                   <tr key={i} className="border-b border-gray-50 last:border-0">
                     <td className="px-2.5 py-1.5 text-gray-600 whitespace-nowrap">{s.coe_skill ?? "-"}</td>
                     <td className="px-2.5 py-1.5 text-gray-700 font-medium whitespace-nowrap">{s.skill ?? "-"}</td>
-                    <td className="px-2.5 py-1.5 text-gray-600">{s.subskill ?? "-"}</td>
+                    <td className="px-2.5 py-1.5 text-gray-600 whitespace-nowrap">{s.subskill ?? "-"}</td>
                     <td className="px-2.5 py-1.5 text-gray-500 whitespace-nowrap">{s.experience ?? "-"}</td>
                     <td className="px-2.5 py-1.5 text-gray-700 whitespace-nowrap">{s.score != null ? s.score.toFixed(1) : "-"}/5</td>
-                    <td className="px-2.5 py-1.5">
+                    <td className="px-2.5 py-1.5 whitespace-nowrap">
                       <SourceTag value={s.skill_source} />
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            </div>
             {rows.length === 0 && <p className="text-xs text-gray-400 italic text-center py-4">No skill records match this search.</p>}
           </div>
         </div>
@@ -512,28 +520,30 @@ function CompetencyTab({ profile }: { profile: EmployeeProfile }) {
         sort={{ value: sort, onChange: (v) => setSort(v as CompetencySort), options: [["score_desc", "Score ↓"], ["source_asc", "Observed first"]] }}
       />
       <div className="rounded-xl border border-gray-200 overflow-hidden">
+        <div className="overflow-x-auto">
         <table className="w-full text-[11px]">
           <thead>
             <tr className="bg-gray-50 border-b border-gray-200">
-              <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5">Competency question</th>
-              <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5">Response</th>
-              <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5">Score</th>
-              <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5">Source</th>
+              <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5 whitespace-nowrap">Competency question</th>
+              <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5 whitespace-nowrap">Response</th>
+              <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5 whitespace-nowrap">Score</th>
+              <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5 whitespace-nowrap">Source</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((c, i) => (
               <tr key={i} className="border-b border-gray-50 last:border-0">
-                <td className="px-2.5 py-2 text-gray-700">{c.competency_question ?? "-"}</td>
+                <td className="px-2.5 py-2 text-gray-700 whitespace-nowrap">{c.competency_question ?? "-"}</td>
                 <td className="px-2.5 py-2 text-gray-600 whitespace-nowrap">{c.response ?? "-"}</td>
                 <td className="px-2.5 py-2 text-gray-700 whitespace-nowrap">{c.score != null ? c.score.toFixed(1) : "-"}/5</td>
-                <td className="px-2.5 py-2">
+                <td className="px-2.5 py-2 whitespace-nowrap">
                   <SourceTag value={c.competency_source} />
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   );
@@ -549,26 +559,28 @@ function LeaveTab({ profile }: { profile: EmployeeProfile }) {
         {profile.leaves.length} leave record(s) -- synthetic (no real leave/absence dataset exists in the source files; see clean_datasets.py).
       </p>
       <div className="rounded-xl border border-gray-200 overflow-hidden">
+        <div className="overflow-x-auto">
         <table className="w-full text-[11px]">
           <thead>
             <tr className="bg-gray-50 border-b border-gray-200">
               {["Type", "Start", "End", "Status", "Currently on leave?"].map((h) => (
-                <th key={h} className="text-left font-semibold text-gray-500 px-2.5 py-1.5">{h}</th>
+                <th key={h} className="text-left font-semibold text-gray-500 px-2.5 py-1.5 whitespace-nowrap">{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {profile.leaves.map((l, i) => (
               <tr key={i} className="border-b border-gray-50 last:border-0">
-                <td className="px-2.5 py-1.5 text-gray-700 font-medium">{l.leave_type}</td>
+                <td className="px-2.5 py-1.5 text-gray-700 font-medium whitespace-nowrap">{l.leave_type}</td>
                 <td className="px-2.5 py-1.5 text-gray-500 whitespace-nowrap">{l.leave_start_date ?? "-"}</td>
                 <td className="px-2.5 py-1.5 text-gray-500 whitespace-nowrap">{l.leave_end_date ?? "-"}</td>
-                <td className="px-2.5 py-1.5 text-gray-500">{l.status}</td>
-                <td className="px-2.5 py-1.5">{l.is_currently_on_leave && <Badge variant="amber">Currently on leave</Badge>}</td>
+                <td className="px-2.5 py-1.5 text-gray-500 whitespace-nowrap">{l.status}</td>
+                <td className="px-2.5 py-1.5 whitespace-nowrap">{l.is_currently_on_leave && <Badge variant="amber">Currently on leave</Badge>}</td>
               </tr>
             ))}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   );

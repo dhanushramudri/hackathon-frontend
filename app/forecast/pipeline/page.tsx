@@ -112,7 +112,7 @@ export default function PipelineOutlookPage() {
   const open = (sel: DrilldownSel) => setDrilldown(sel);
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-5">
+    <div className="p-4 sm:p-6 max-w-6xl mx-auto space-y-5">
       <div className="rounded-xl border border-gray-200 bg-white p-4 flex flex-wrap items-end gap-4">
         <div>
           <label className="text-[10px] text-gray-400 block mb-0.5">Start date</label>
@@ -205,11 +205,12 @@ export default function PipelineOutlookPage() {
       </div>
 
       <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+        <div className="overflow-x-auto">
         <table className="w-full text-xs data-table">
           <thead className="bg-gray-50 text-gray-500">
             <tr>
               {["Period", "Confirmed", "Unconfirmed", "Supply", "Net", "Confirmed $", "Unconfirmed $", "Probable $", "Flags"].map((h) => (
-                <th key={h} className="text-left font-medium px-3 py-2">{h}</th>
+                <th key={h} className="text-left font-medium px-3 py-2 whitespace-nowrap">{h}</th>
               ))}
             </tr>
           </thead>
@@ -295,6 +296,7 @@ export default function PipelineOutlookPage() {
             ))}
           </tbody>
         </table>
+        </div>
       </div>
 
       <div className="rounded-xl border border-gray-200 bg-white p-4">
@@ -347,11 +349,12 @@ export default function PipelineOutlookPage() {
           )}
         </div>
         <div className="overflow-hidden rounded-lg border border-gray-100">
+          <div className="overflow-x-auto">
           <table className="w-full text-xs data-table">
             <thead className="bg-gray-50 text-gray-500">
               <tr>
                 {["Period", "Role", "Needed", "Available", "Shortfall", "Shortfall $", "Value $", "Probable $"].map((h) => (
-                  <th key={h} className="text-left font-medium px-3 py-2">{h}</th>
+                  <th key={h} className="text-left font-medium px-3 py-2 whitespace-nowrap">{h}</th>
                 ))}
               </tr>
             </thead>
@@ -388,6 +391,7 @@ export default function PipelineOutlookPage() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
         {allRoleRowsInFilter.length > 12 && (
           <button onClick={() => setShowAllRoles((v) => !v)} className="mt-2 flex items-center gap-1 text-[11px] text-primary hover:underline">

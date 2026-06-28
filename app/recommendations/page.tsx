@@ -254,7 +254,7 @@ function RecommendationsPageInner() {
   };
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-4">
+    <div className="p-4 sm:p-6 max-w-6xl mx-auto space-y-4">
       {coverage.data && (
         <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 flex items-center gap-5 text-xs flex-wrap">
           <span className="font-semibold text-gray-700">
@@ -277,8 +277,8 @@ function RecommendationsPageInner() {
         </div>
       )}
 
-      <div className="grid grid-cols-[360px_1fr] gap-6">
-        <div className="rounded-xl border border-gray-200 bg-white overflow-hidden flex flex-col max-h-[calc(100vh-180px)]">
+      <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-6">
+        <div className="rounded-xl border border-gray-200 bg-white overflow-hidden flex flex-col max-h-[60vh] lg:max-h-[calc(100vh-180px)]">
           <div className="px-3 py-2.5 border-b border-gray-100 space-y-2">
             <div className="flex items-center justify-between gap-2">
               <p className="text-xs font-semibold text-gray-700">
@@ -313,7 +313,7 @@ function RecommendationsPageInner() {
             />
             {demandFiltersOpen && (
               <div className="rounded-lg border border-gray-100 bg-gray-50/70 p-2.5 space-y-2.5">
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <FilterSelect label="Status" value={demandStatus} onChange={setDemandStatus}>
                     <option value="all">All</option>
                     {statusOptions.map((s) => (
@@ -370,7 +370,7 @@ function RecommendationsPageInner() {
                   </FilterSelect>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <div>
                     <label className="text-[10px] text-gray-400 block mb-0.5">Likely start from</label>
                     <input
@@ -474,7 +474,7 @@ function RecommendationsPageInner() {
                     </p>
                   </div>
 
-                  <div className="grid grid-cols-3 gap-2.5 text-[11px] border-t border-gray-100 pt-3">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 text-[11px] border-t border-gray-100 pt-3">
                     <DealField label="Status" value={selected.status} />
                     <DealField label="Priority" value={selected.priority} />
                     <DealField label="Client Priority" value={selected.client_priority} />
@@ -705,7 +705,7 @@ function RecommendationsPageInner() {
                           ))}
                         </div>
                       </div>
-                      <div className="grid grid-cols-3 gap-2">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                         <FilterSelect label="Designation" value={candidateDesignation} onChange={setCandidateDesignation}>
                           <option value="all">All</option>
                           {designationOptions.map((d) => (
@@ -730,7 +730,7 @@ function RecommendationsPageInner() {
                           ))}
                         </FilterSelect>
                       </div>
-                      <div className="grid grid-cols-3 gap-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <RangeFilter label="Min skill" value={minSkill} onChange={setMinSkill} max={100} step={10} suffix="%" />
                         <RangeFilter label="Min competency" value={minCompetency} onChange={setMinCompetency} max={100} step={10} suffix="%" />
                         <RangeFilter label="Min available" value={minAvailable} onChange={setMinAvailable} max={100} step={10} suffix="%" />

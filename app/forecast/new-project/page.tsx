@@ -397,7 +397,7 @@ export default function NewProjectForecastPage() {
   const anyPreviewLoading = specs.some((s) => s.previewLoading);
 
   return (
-    <div className="p-6 max-w-4xl mx-auto space-y-5">
+    <div className="p-4 sm:p-6 max-w-4xl mx-auto space-y-5">
       <div className="space-y-4">
         <p className="text-xs text-gray-500">What if these new projects started on a given date?</p>
         <datalist id="known-designations">
@@ -431,7 +431,7 @@ export default function NewProjectForecastPage() {
               </div>
             </div>
 
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 flex-wrap">
               <div>
                 <label className="text-[10px] text-gray-400 block mb-0.5">Start date</label>
                 <input
@@ -476,11 +476,11 @@ export default function NewProjectForecastPage() {
                   </button>
                 ))}
               </div>
-              <div className="flex items-center gap-2 mt-2">
+              <div className="flex items-center gap-2 mt-2 flex-wrap">
                 <select
                   value={spec.typeOfProject}
                   onChange={(e) => changeTypeOfProject(i, e.target.value)}
-                  className="text-[11px] px-1.5 py-1 rounded-lg border border-gray-200 bg-white text-gray-600"
+                  className="text-[11px] px-1.5 py-1 rounded-lg border border-gray-200 bg-white text-gray-600 max-w-full"
                 >
                   <option value="">Any project type</option>
                   {TYPE_OPTIONS.map((t) => (
@@ -490,7 +490,7 @@ export default function NewProjectForecastPage() {
                 <select
                   value={spec.category ?? ""}
                   onChange={(e) => quickFillCategory(i, e.target.value)}
-                  className="text-[11px] px-1.5 py-1 rounded-lg border border-gray-200 bg-white text-gray-600"
+                  className="text-[11px] px-1.5 py-1 rounded-lg border border-gray-200 bg-white text-gray-600 max-w-full"
                 >
                   <option value="">Or quick-fill from a project category…</option>
                   {(categories.data ?? []).map((c) => (
@@ -554,7 +554,7 @@ export default function NewProjectForecastPage() {
                     ))}
                 </div>
               )}
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1.5 flex-wrap">
                 <input
                   value={roleDrafts[i]?.designation ?? ""}
                   onChange={(e) =>
@@ -565,7 +565,7 @@ export default function NewProjectForecastPage() {
                   }
                   list="known-designations"
                   placeholder="Add a role (designation)…"
-                  className="flex-1 text-[11px] px-2 py-1 rounded-lg border border-gray-200 outline-none"
+                  className="flex-1 min-w-[140px] text-[11px] px-2 py-1 rounded-lg border border-gray-200 outline-none"
                 />
                 <input
                   value={roleDrafts[i]?.headcount ?? ""}
@@ -697,11 +697,12 @@ export default function NewProjectForecastPage() {
           )}
 
           <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+            <div className="overflow-x-auto">
             <table className="w-full text-xs data-table">
               <thead className="bg-gray-50 text-gray-500">
                 <tr>
                   {["", "Designation", "Needed By", "Needed Headcount", "Available to Redeploy", "Shortfall", "Shortfall $/mo", "Signal"].map((h) => (
-                    <th key={h} className="text-left font-medium px-3 py-2">{h}</th>
+                    <th key={h} className="text-left font-medium px-3 py-2 whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -801,6 +802,7 @@ export default function NewProjectForecastPage() {
                 })}
               </tbody>
             </table>
+            </div>
           </div>
         </div>
       )}

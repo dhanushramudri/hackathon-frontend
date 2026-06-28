@@ -74,7 +74,7 @@ export function ProjectBasicModal({ projectCode, onClose }: ProjectBasicModalPro
               allocations only, no root-cause scoring.
             </div>
 
-            <div className="grid grid-cols-4 gap-3 text-xs">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
               <Field label="Client" value={info.data.client_id ?? "-"} />
               <Field label="Type" value={info.data.type_of_project ?? "-"} />
               <Field label="Tech COE" value={info.data.tech_coe ?? "-"} />
@@ -87,11 +87,12 @@ export function ProjectBasicModal({ projectCode, onClose }: ProjectBasicModalPro
                 <p className="text-xs text-gray-400 italic">No current allocations on this project.</p>
               ) : (
                 <div className="rounded-xl border border-gray-200 overflow-hidden">
+                  <div className="overflow-x-auto">
                   <table className="w-full text-[11px]">
                     <thead>
                       <tr className="bg-gray-50 border-b border-gray-200">
                         {["Employee", "Designation", "Status", "Alloc %", "Hours Util.", "Ends"].map((h) => (
-                          <th key={h} className="text-left font-semibold text-gray-500 px-2.5 py-1.5">{h}</th>
+                          <th key={h} className="text-left font-semibold text-gray-500 px-2.5 py-1.5 whitespace-nowrap">{h}</th>
                         ))}
                       </tr>
                     </thead>
@@ -100,9 +101,9 @@ export function ProjectBasicModal({ projectCode, onClose }: ProjectBasicModalPro
                         <tr key={i} className="border-b border-gray-50 last:border-0">
                           <td className="px-2.5 py-1.5 font-medium text-gray-700 whitespace-nowrap">{c.employee_id}</td>
                           <td className="px-2.5 py-1.5 text-gray-600 whitespace-nowrap">{c.job_name ?? "-"}</td>
-                          <td className="px-2.5 py-1.5"><Badge variant={c.resourcing_status}>{c.resourcing_status}</Badge></td>
-                          <td className="px-2.5 py-1.5 text-gray-700">{c.allocation_by_percentage}%</td>
-                          <td className="px-2.5 py-1.5">
+                          <td className="px-2.5 py-1.5 whitespace-nowrap"><Badge variant={c.resourcing_status}>{c.resourcing_status}</Badge></td>
+                          <td className="px-2.5 py-1.5 text-gray-700 whitespace-nowrap">{c.allocation_by_percentage}%</td>
+                          <td className="px-2.5 py-1.5 whitespace-nowrap">
                             <button
                               onClick={() => setTimesheetEmployee(c.employee_id)}
                               className="flex items-center gap-1.5 hover:opacity-75 transition"
@@ -121,6 +122,7 @@ export function ProjectBasicModal({ projectCode, onClose }: ProjectBasicModalPro
                       ))}
                     </tbody>
                   </table>
+                  </div>
                 </div>
               )}
             </div>
@@ -138,11 +140,12 @@ export function ProjectBasicModal({ projectCode, onClose }: ProjectBasicModalPro
                 }}
               />
               <div className="rounded-xl border border-gray-200 overflow-hidden">
+                <div className="overflow-x-auto">
                 <table className="w-full text-[11px]">
                   <thead>
                     <tr className="bg-gray-50 border-b border-gray-200">
                       {["Employee", "Designation", "Status", "Alloc %", "Start", "End", "Active?"].map((h) => (
-                        <th key={h} className="text-left font-semibold text-gray-500 px-2.5 py-1.5">{h}</th>
+                        <th key={h} className="text-left font-semibold text-gray-500 px-2.5 py-1.5 whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
                   </thead>
@@ -151,17 +154,18 @@ export function ProjectBasicModal({ projectCode, onClose }: ProjectBasicModalPro
                       <tr key={i} className="border-b border-gray-50 last:border-0">
                         <td className="px-2.5 py-1.5 font-medium text-gray-700 whitespace-nowrap">{r.employee_id}</td>
                         <td className="px-2.5 py-1.5 text-gray-600 whitespace-nowrap">{r.job_name ?? "-"}</td>
-                        <td className="px-2.5 py-1.5"><Badge variant={r.resourcing_status}>{r.resourcing_status}</Badge></td>
-                        <td className="px-2.5 py-1.5 text-gray-500">{r.allocation_by_percentage}%</td>
+                        <td className="px-2.5 py-1.5 whitespace-nowrap"><Badge variant={r.resourcing_status}>{r.resourcing_status}</Badge></td>
+                        <td className="px-2.5 py-1.5 text-gray-500 whitespace-nowrap">{r.allocation_by_percentage}%</td>
                         <td className="px-2.5 py-1.5 text-gray-500 whitespace-nowrap">{r.allocated_start_date ?? "-"}</td>
                         <td className="px-2.5 py-1.5 text-gray-500 whitespace-nowrap">{r.allocated_end_date ?? "-"}</td>
-                        <td className="px-2.5 py-1.5">
+                        <td className="px-2.5 py-1.5 whitespace-nowrap">
                           {r.is_allocation_active ? <Badge variant="billable">Active</Badge> : <Badge variant="default">Past</Badge>}
                         </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
+                </div>
                 {rosterRows.length === 0 && <p className="text-xs text-gray-400 italic text-center py-4">No roster rows match the current search.</p>}
               </div>
             </div>

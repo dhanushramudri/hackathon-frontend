@@ -121,8 +121,8 @@ function LeavePageInner() {
   };
 
   return (
-    <div className="p-6 max-w-5xl mx-auto space-y-4">
-      <div className="grid grid-cols-3 gap-4">
+    <div className="p-4 sm:p-6 max-w-5xl mx-auto space-y-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <StatCard
           label="Currently On Leave"
           value={onLeaveNow.length}
@@ -186,32 +186,33 @@ function LeavePageInner() {
       </div>
 
       <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+        <div className="overflow-x-auto">
         <table className="w-full text-xs data-table">
           <thead className="bg-gray-50 text-gray-500">
             <tr>
               {["Employee", "Designation", "Leave Type", "Dates", "Status", "Project", "Alloc %", "Backfill"].map((h) => (
-                <th key={h} className="text-left font-medium px-3 py-2">{h}</th>
+                <th key={h} className="text-left font-medium px-3 py-2 whitespace-nowrap">{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {filtered.map((i, idx) => (
               <tr key={`${i.employee_id}-${i.project_id}-${idx}`} className="border-b border-gray-50 last:border-0 hover:bg-gray-50/50">
-                <td className="px-3 py-2 font-medium">
+                <td className="px-3 py-2 font-medium whitespace-nowrap">
                   <button onClick={() => setSelectedEmployee(i.employee_id)} className="text-primary hover:underline">
                     {i.employee_id}
                   </button>
                 </td>
-                <td className="px-3 py-2 text-gray-500">{i.job_name ?? "-"}</td>
-                <td className="px-3 py-2"><Badge variant={i.leave_type === "Emergency" ? "red" : i.leave_type === "Sick" ? "amber" : "default"}>{i.leave_type}</Badge></td>
-                <td className="px-3 py-2 text-gray-500">{i.leave_start_date} → {i.leave_end_date}</td>
-                <td className="px-3 py-2">{i.is_currently_on_leave ? <Badge variant="red">on leave now</Badge> : <Badge variant="amber">upcoming</Badge>}</td>
-                <td className="px-3 py-2">
+                <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{i.job_name ?? "-"}</td>
+                <td className="px-3 py-2 whitespace-nowrap"><Badge variant={i.leave_type === "Emergency" ? "red" : i.leave_type === "Sick" ? "amber" : "default"}>{i.leave_type}</Badge></td>
+                <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{i.leave_start_date} → {i.leave_end_date}</td>
+                <td className="px-3 py-2 whitespace-nowrap">{i.is_currently_on_leave ? <Badge variant="red">on leave now</Badge> : <Badge variant="amber">upcoming</Badge>}</td>
+                <td className="px-3 py-2 whitespace-nowrap">
                   <button onClick={() => setSelectedProject(i.project_id)} className="text-primary hover:underline">
                     {i.project_id}
                   </button>
                 </td>
-                <td className="px-3 py-2 text-gray-500">{i.allocation_by_percentage}%</td>
+                <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{i.allocation_by_percentage}%</td>
                 <td className="px-3 py-2">
                   {i.backfill_available ? (
                     <div className="flex items-center gap-1 flex-wrap">
@@ -242,6 +243,7 @@ function LeavePageInner() {
             )}
           </tbody>
         </table>
+        </div>
       </div>
 
       {selectedEmployee && (

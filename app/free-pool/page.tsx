@@ -72,12 +72,12 @@ export default function FreePoolPage() {
   const totalIdleValue = data.reduce((s, c) => s + (c.idle_value_usd_per_month ?? 0), 0);
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-4">
+    <div className="p-4 sm:p-6 max-w-6xl mx-auto space-y-4">
       <p className="text-xs text-gray-500">
         Who has spare capacity right now. Click anyone to see their profile and matching open pipeline roles.
       </p>
 
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard label="Fully Free" value={counts.fully_free} sub="no active allocation at all" color="green" />
         <StatCard label="Under-Utilized" value={counts.under_utilized} sub="below 70% total allocation" color="blue" />
         <StatCard label="Ending Soon" value={counts.ending_soon} sub="freeing up within 30 days" color="amber" />
@@ -133,7 +133,7 @@ export default function FreePoolPage() {
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <select
             value={coeFilter}
             onChange={(e) => setCoeFilter(e.target.value)}
@@ -158,30 +158,31 @@ export default function FreePoolPage() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search employee, role, location, CoE…"
-            className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs w-64 outline-none focus:border-gray-300"
+            className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs w-full sm:w-64 outline-none focus:border-gray-300"
           />
         </div>
       </div>
 
       <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+        <div className="overflow-x-auto">
         <table className="w-full text-xs data-table">
           <thead className="bg-gray-50 text-gray-500">
             <tr>
               {["Employee", "Designation", "CoE", "Location", "Status", "Detail", "Idle value /mo"].map((h) => (
-                <th key={h} className="text-left font-medium px-3 py-2">{h}</th>
+                <th key={h} className="text-left font-medium px-3 py-2 whitespace-nowrap">{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {filtered.map((c) => (
               <tr key={c.employee_id} className="border-b border-gray-50 last:border-0 hover:bg-gray-50/50">
-                <td className="px-3 py-2">
+                <td className="px-3 py-2 whitespace-nowrap">
                   <button onClick={() => setSelectedEmployee(c.employee_id)} className="font-medium text-primary hover:underline flex items-center gap-1">
                     {c.employee_id}
                   </button>
                 </td>
-                <td className="px-3 py-2 text-gray-500">{c.job_name ?? "-"}</td>
-                <td className="px-3 py-2 text-gray-500">
+                <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{c.job_name ?? "-"}</td>
+                <td className="px-3 py-2 text-gray-500 whitespace-nowrap">
                   {c.primary_coe ? (
                     <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-violet-50 border border-violet-200 text-violet-600 whitespace-nowrap">
                       {c.primary_coe}
@@ -190,13 +191,13 @@ export default function FreePoolPage() {
                     <span className="text-gray-300">not determined</span>
                   )}
                 </td>
-                <td className="px-3 py-2 text-gray-500">{c.location ?? "-"}</td>
-                <td className="px-3 py-2">
+                <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{c.location ?? "-"}</td>
+                <td className="px-3 py-2 whitespace-nowrap">
                   <Badge variant={c.reason === "ending_soon" ? "amber" : c.reason === "fully_free" ? "green" : "under_utilized"}>
                     {REASON_LABEL[c.reason]}
                   </Badge>
                 </td>
-                <td className="px-3 py-2 text-gray-500">
+                <td className="px-3 py-2 text-gray-500 whitespace-nowrap">
                   {c.reason === "ending_soon" && c.days_to_end != null && (
                     <>
                       {c.days_to_end}d left on {c.project_id}
@@ -208,7 +209,7 @@ export default function FreePoolPage() {
                   {c.reason === "under_utilized" && c.current_allocation_pct != null && `${c.current_allocation_pct}% allocated`}
                   {c.reason === "fully_free" && (c.days_free != null ? `free for ${c.days_free}d` : "no allocation history")}
                 </td>
-                <td className="px-3 py-2 text-gray-700 font-medium">
+                <td className="px-3 py-2 text-gray-700 font-medium whitespace-nowrap">
                   <button onClick={() => setProofFor(c)} className="hover:underline">
                     {c.idle_value_usd_per_month != null ? formatUsd(c.idle_value_usd_per_month) : <span className="text-gray-300 font-normal">non-billable</span>}
                   </button>
@@ -217,6 +218,7 @@ export default function FreePoolPage() {
             ))}
           </tbody>
         </table>
+        </div>
         {filtered.length === 0 && <p className="text-xs text-gray-400 italic text-center py-6">No one in the free pool matches these filters.</p>}
       </div>
 
@@ -245,7 +247,7 @@ function IdleValueProofModal({ c, onClose }: { c: FreePoolCandidate; onClose: ()
   return (
     <Modal title={`${c.employee_id} -- Idle Value Proof`} onClose={onClose} widthClassName="max-w-md">
       <div className="p-5 space-y-3 text-xs">
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           <div>
             <p className="text-[10px] uppercase tracking-wide text-gray-400">Designation</p>
             <p className="text-gray-700 font-medium">{c.job_name ?? "-"}</p>

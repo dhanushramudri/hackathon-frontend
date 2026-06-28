@@ -162,8 +162,8 @@ function AllocationsPageInner() {
   const openProject = (projectId: string) => setSelectedProject(projectId);
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-4">
-      <div className="flex items-center justify-between">
+    <div className="p-4 sm:p-6 max-w-6xl mx-auto space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center bg-gray-100 rounded-full p-0.5 text-xs font-medium">
           {(["resource", "project"] as Tab[]).map((t) => (
             <button
@@ -277,11 +277,12 @@ function AllocationsPageInner() {
 
       {tab === "resource" ? (
         <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+          <div className="overflow-x-auto">
           <table className="w-full text-xs data-table">
             <thead className="bg-gray-50 text-gray-500">
               <tr>
                 {["Employee", "Designation", "Location", "Project", "Billing", "Alloc %", "Total %", "Utilization", "Hours Util.", "Ends", "Soon?"].map((h) => (
-                  <th key={h} className="text-left font-medium px-3 py-2">{h}</th>
+                  <th key={h} className="text-left font-medium px-3 py-2 whitespace-nowrap">{h}</th>
                 ))}
               </tr>
             </thead>
@@ -302,6 +303,7 @@ function AllocationsPageInner() {
               )}
             </tbody>
           </table>
+          </div>
         </div>
       ) : (
         <div className="space-y-3">
@@ -313,6 +315,7 @@ function AllocationsPageInner() {
                 </button>
                 <span className="text-gray-400 font-normal">· {rows.length} resources</span>
               </div>
+              <div className="overflow-x-auto">
               <table className="w-full text-xs data-table">
                 <tbody>
                   {rows.map((r) => (
@@ -327,6 +330,7 @@ function AllocationsPageInner() {
                   ))}
                 </tbody>
               </table>
+              </div>
             </div>
           ))}
           {Object.keys(byProject).length === 0 && (
@@ -368,25 +372,25 @@ function ResourceRow({
 }) {
   return (
     <tr className="border-b border-gray-50 last:border-0 hover:bg-gray-50/50">
-      <td className="px-3 py-2">
+      <td className="px-3 py-2 whitespace-nowrap">
         <button onClick={onOpenEmployee} className="font-medium text-primary hover:underline" title="View full employee proof">
           {row.employee_id}
         </button>
       </td>
-      <td className="px-3 py-2 text-gray-500">{row.job_name ?? "-"}</td>
-      <td className="px-3 py-2 text-gray-500">{row.location ?? "-"}</td>
+      <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{row.job_name ?? "-"}</td>
+      <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{row.location ?? "-"}</td>
       {!hideProject && (
-        <td className="px-3 py-2">
+        <td className="px-3 py-2 whitespace-nowrap">
           <button onClick={onOpenProject} className="text-primary hover:underline" title="View full project detail">
             {row.project_id}
           </button>
         </td>
       )}
-      <td className="px-3 py-2"><Badge variant={row.resourcing_status}>{row.resourcing_status}</Badge></td>
-      <td className="px-3 py-2 text-gray-500">{row.allocation_by_percentage}%</td>
-      <td className="px-3 py-2 text-gray-500">{row.employee_total_allocation_pct}%</td>
-      <td className="px-3 py-2"><Badge variant={row.utilization_band}>{row.utilization_band.replace("_", " ")}</Badge></td>
-      <td className="px-3 py-2">
+      <td className="px-3 py-2 whitespace-nowrap"><Badge variant={row.resourcing_status}>{row.resourcing_status}</Badge></td>
+      <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{row.allocation_by_percentage}%</td>
+      <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{row.employee_total_allocation_pct}%</td>
+      <td className="px-3 py-2 whitespace-nowrap"><Badge variant={row.utilization_band}>{row.utilization_band.replace("_", " ")}</Badge></td>
+      <td className="px-3 py-2 whitespace-nowrap">
         <button
           onClick={onOpenTimesheet}
           className="flex items-center gap-1.5 hover:opacity-75 transition"
@@ -400,8 +404,8 @@ function ResourceRow({
           {row.possible_unplanned_absence && <Badge variant="unbilled">quiet 14d+</Badge>}
         </button>
       </td>
-      <td className="px-3 py-2 text-gray-500">{row.allocated_end_date}</td>
-      <td className="px-3 py-2">{row.ending_soon && <Badge variant="amber">{row.days_to_end}d</Badge>}</td>
+      <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{row.allocated_end_date}</td>
+      <td className="px-3 py-2 whitespace-nowrap">{row.ending_soon && <Badge variant="amber">{row.days_to_end}d</Badge>}</td>
     </tr>
   );
 }

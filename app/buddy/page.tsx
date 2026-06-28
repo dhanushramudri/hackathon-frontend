@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Send, Sparkles, Loader2, Plus, Trash2, MessageSquare, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { Send, Sparkles, Loader2, Plus, Trash2, MessageSquare, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Mascot } from "@/components/shared/Mascot";
 import { api, type BuddyStat, type BuddyTable } from "@/lib/api";
@@ -124,7 +124,7 @@ function ChatTable({
 
 function ChatStats({ items }: { items: BuddyStat[] }) {
   return (
-    <div className="w-full grid grid-cols-2 gap-2">
+    <div className="w-full grid grid-cols-1 sm:grid-cols-2 gap-2">
       {items.map((s) => (
         <div key={s.label} className="rounded-xl border border-gray-200 px-3 py-2">
           <p className="text-[10px] text-gray-400 mb-0.5">{s.label}</p>
@@ -141,12 +141,16 @@ function ConversationRail({
   onSelect,
   onCreate,
   onDelete,
+  mobileOpen,
+  onMobileClose,
 }: {
   conversations: BuddyConversation[];
   activeId: string | null;
   onSelect: (id: string) => void;
   onCreate: () => void;
   onDelete: (id: string) => void;
+  mobileOpen: boolean;
+  onMobileClose: () => void;
 }) {
   const [collapsed, setCollapsed] = useState(() => {
     if (typeof window === "undefined") return false;
@@ -159,9 +163,9 @@ function ConversationRail({
 
   const sorted = [...conversations].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 
-  if (collapsed) {
+  if (collapsed && !mobileOpen) {
     return (
-      <div className="w-12 flex-shrink-0 border-r border-gray-100 flex flex-col items-center bg-gray-50/50 py-2.5 gap-2 transition-all">
+      <div className="hidden md:flex w-12 flex-shrink-0 border-r border-gray-100 flex-col items-center bg-gray-50/50 py-2.5 gap-2 transition-all">
         <button
           onClick={() => setCollapsed(false)}
           title="Expand conversations"
@@ -181,53 +185,72 @@ function ConversationRail({
   }
 
   return (
-    <div className="w-56 flex-shrink-0 border-r border-gray-100 flex flex-col bg-gray-50/50 transition-all">
-      <div className="p-2.5 flex items-center gap-1.5">
-        <button
-          onClick={onCreate}
-          className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium text-white bg-primary transition hover:opacity-90"
-        >
-          <Plus className="w-3.5 h-3.5" />
-          New chat
-        </button>
-        <button
-          onClick={() => setCollapsed(true)}
-          title="Collapse"
-          className="w-8 h-8 flex-shrink-0 flex items-center justify-center rounded-lg text-gray-400 hover:bg-white hover:text-gray-600 transition"
-        >
-          <PanelLeftClose className="w-4 h-4" />
-        </button>
-      </div>
-      <div className="flex-1 overflow-y-auto scrollbar-thin px-2 pb-2 space-y-0.5">
-        {sorted.map((c) => (
+    <>
+      {mobileOpen && (
+        <div className="fixed inset-0 z-30 bg-black/40 md:hidden" onClick={onMobileClose} aria-hidden="true" />
+      )}
+      <div
+        className={cn(
+          "w-56 flex-shrink-0 border-r border-gray-100 flex flex-col bg-gray-50/50",
+          "fixed inset-y-0 left-0 z-40 transition-transform duration-300",
+          mobileOpen ? "translate-x-0" : "-translate-x-full",
+          "md:static md:translate-x-0 md:z-auto md:transition-all"
+        )}
+      >
+        <div className="p-2.5 flex items-center gap-1.5">
           <button
-            key={c.id}
-            onClick={() => onSelect(c.id)}
-            className={cn(
-              "w-full group flex items-center gap-2 px-2.5 py-2 rounded-lg text-left transition",
-              c.id === activeId ? "bg-white shadow-sm" : "hover:bg-white/70"
-            )}
+            onClick={onCreate}
+            className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium text-white bg-primary transition hover:opacity-90"
           >
-            <MessageSquare className="w-3.5 h-3.5 flex-shrink-0 text-gray-400" />
-            <div className="flex-1 min-w-0">
-              <p className={cn("text-xs truncate", c.id === activeId ? "text-gray-900 font-medium" : "text-gray-600")}>{c.title}</p>
-              <p className="text-[10px] text-gray-400">{relativeTime(c.updatedAt)}</p>
-            </div>
-            <span
-              role="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete(c.id);
-              }}
-              className="opacity-0 group-hover:opacity-100 p-1 rounded-md hover:bg-gray-100 text-gray-300 hover:text-red-400 transition flex-shrink-0"
-            >
-              <Trash2 className="w-3 h-3" />
-            </span>
+            <Plus className="w-3.5 h-3.5" />
+            New chat
           </button>
-        ))}
-        {sorted.length === 0 && <p className="text-[11px] text-gray-300 text-center py-6 px-2">No conversations yet</p>}
+          <button
+            onClick={onMobileClose}
+            title="Close"
+            className="md:hidden w-8 h-8 flex-shrink-0 flex items-center justify-center rounded-lg text-gray-400 hover:bg-white hover:text-gray-600 transition"
+          >
+            <X className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => setCollapsed(true)}
+            title="Collapse"
+            className="hidden md:flex w-8 h-8 flex-shrink-0 items-center justify-center rounded-lg text-gray-400 hover:bg-white hover:text-gray-600 transition"
+          >
+            <PanelLeftClose className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto scrollbar-thin px-2 pb-2 space-y-0.5">
+          {sorted.map((c) => (
+            <button
+              key={c.id}
+              onClick={() => onSelect(c.id)}
+              className={cn(
+                "w-full group flex items-center gap-2 px-2.5 py-2 rounded-lg text-left transition",
+                c.id === activeId ? "bg-white shadow-sm" : "hover:bg-white/70"
+              )}
+            >
+              <MessageSquare className="w-3.5 h-3.5 flex-shrink-0 text-gray-400" />
+              <div className="flex-1 min-w-0">
+                <p className={cn("text-xs truncate", c.id === activeId ? "text-gray-900 font-medium" : "text-gray-600")}>{c.title}</p>
+                <p className="text-[10px] text-gray-400">{relativeTime(c.updatedAt)}</p>
+              </div>
+              <span
+                role="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDelete(c.id);
+                }}
+                className="opacity-0 group-hover:opacity-100 p-1 rounded-md hover:bg-gray-100 text-gray-300 hover:text-red-400 transition flex-shrink-0"
+              >
+                <Trash2 className="w-3 h-3" />
+              </span>
+            </button>
+          ))}
+          {sorted.length === 0 && <p className="text-[11px] text-gray-300 text-center py-6 px-2">No conversations yet</p>}
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -238,6 +261,7 @@ export default function BuddyPage() {
   const [sending, setSending] = useState(false);
   const [selectedEmployee, setSelectedEmployee] = useState<string | null>(null);
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
+  const [railMobileOpen, setRailMobileOpen] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -297,22 +321,37 @@ export default function BuddyPage() {
       <ConversationRail
         conversations={conversations}
         activeId={activeId}
-        onSelect={setActiveId}
-        onCreate={() => setActiveId(null)}
+        onSelect={(id) => {
+          setActiveId(id);
+          setRailMobileOpen(false);
+        }}
+        onCreate={() => {
+          setActiveId(null);
+          setRailMobileOpen(false);
+        }}
         onDelete={handleDelete}
+        mobileOpen={railMobileOpen}
+        onMobileClose={() => setRailMobileOpen(false)}
       />
       <div className="flex-1 flex flex-col min-w-0">
-        <div className="flex items-center justify-between px-6 py-3.5 border-b border-gray-100 flex-shrink-0">
-          <div className="flex items-center gap-2.5">
-            <Mascot className="w-8 h-8" />
-            <div>
+        <div className="flex items-center justify-between px-3 sm:px-6 py-3.5 border-b border-gray-100 flex-shrink-0 gap-2">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <button
+              onClick={() => setRailMobileOpen(true)}
+              title="Conversations"
+              className="md:hidden flex-shrink-0 p-1.5 -ml-1 rounded-lg text-gray-500 hover:bg-gray-100 transition"
+            >
+              <MessageSquare className="w-5 h-5" />
+            </button>
+            <Mascot className="w-8 h-8 flex-shrink-0" />
+            <div className="min-w-0">
               <h1 className="text-sm font-bold text-gray-900 leading-tight">Buddy</h1>
-              <p className="text-[11px] text-gray-400 leading-tight">Your resourcing buddy -- staffing, health, free pool, leave, profiles, forecasts, rate card, and more</p>
+              <p className="text-[11px] text-gray-400 leading-tight truncate">Your resourcing buddy -- staffing, health, free pool, leave, profiles, forecasts, rate card, and more</p>
             </div>
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto scrollbar-thin px-6 py-5">
+        <div className="flex-1 overflow-y-auto scrollbar-thin px-3 sm:px-6 py-5">
           {messages.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-center max-w-lg mx-auto gap-5">
               <Mascot className="w-14 h-14" glow />
@@ -367,7 +406,7 @@ export default function BuddyPage() {
           )}
         </div>
 
-        <div className="border-t border-gray-100 px-6 py-4 flex-shrink-0">
+        <div className="border-t border-gray-100 px-3 sm:px-6 py-4 flex-shrink-0">
           <div className="max-w-2xl mx-auto flex items-end gap-2.5">
             <div className="flex-1 flex items-end gap-2 rounded-2xl border border-gray-200 bg-white px-4 py-2.5 focus-within:border-gray-300 transition">
               <textarea

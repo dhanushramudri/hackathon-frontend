@@ -2,14 +2,15 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   LayoutDashboard, Users, Contact, Sparkles, ShieldAlert, TrendingUp, CalendarRange, UserCheck, CalendarOff,
-  ChevronLeft,
+  ChevronLeft, X,
 } from "lucide-react";
 import Image from "next/image";
 import { cn } from "@/lib/utils";
 import { Mascot } from "@/components/shared/Mascot";
+import { useSidebarContext } from "@/components/layout/SidebarContext";
 
 type NavLinkSpec = { label: string; href: string; icon: React.ComponentType<{ className?: string }> };
 
@@ -167,98 +168,126 @@ function SidebarBackground() {
 export function Sidebar() {
   const pathname = usePathname();
   const [open, setOpen] = useState(true);
+  const { mobileOpen, setMobileOpen } = useSidebarContext();
+
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [pathname, setMobileOpen]);
+
+  const showExpanded = open || mobileOpen;
 
   return (
-    <aside
-      className={cn(
-        "relative h-full bg-sidebar flex flex-col border-r border-sidebar-border shadow-sm transition-all duration-300 overflow-hidden",
-        open ? "w-64" : "w-20"
+    <>
+      {mobileOpen && (
+        <div className="fixed inset-0 z-40 bg-black/40 md:hidden" onClick={() => setMobileOpen(false)} aria-hidden="true" />
       )}
-    >
-      <SidebarBackground />
-      <div className="relative z-10 flex flex-col flex-1 h-full">
-        <div className="px-3 min-h-14 flex items-center gap-2">
-          {open ? (
-            <Link href="/dashboard" className="flex-1 flex flex-col items-stretch justify-center min-w-0 py-4 gap-0 pl-3 pr-3 px-3">
-              <Image src="/jman_logo.svg" alt="JMAN" width={80} height={20} className="h-5 w-auto object-contain mt-1" />
-              <span className="leading-none select-none w-full text-right -mt-0.5 pr-10">
-                <span className="text-[14px] font-serif font-bold text-sidebar-foreground">Resource</span>
-                <span className="text-[12px] font-mono font-normal" style={{ color: "hsl(var(--primary))" }}>IQ</span>
-              </span>
-            </Link>
-          ) : (
-            <button onClick={() => setOpen(true)} className="flex-1 flex items-center justify-center" title="ResourceIQ — expand sidebar">
-              <span className="leading-none select-none">
-                <span className="text-[15px] font-serif font-bold text-sidebar-foreground">R</span>
-                <span className="text-[13px] font-mono font-normal" style={{ color: "hsl(var(--primary))" }}>M</span>
-              </span>
-            </button>
-          )}
-          {open && (
-            <button onClick={() => setOpen(false)} className="flex-shrink-0 p-1.5 rounded-lg hover:bg-sidebar-accent transition-colors text-sidebar-foreground" title="Collapse sidebar">
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-          )}
-        </div>
-
-        <nav className="flex-1 overflow-y-auto py-4 scrollbar-thin px-3 space-y-0.5">
-          <NavLink link={TOP_LINK} open={open} isActive={pathname.startsWith(TOP_LINK.href)} />
-
-          {NAV_GROUPS.map((group, gi) => (
-            <div key={group.label}>
-              {open && <div className={cn("border-t border-sidebar-border/50", gi === 0 ? "mt-3 mb-1" : "mt-2 mb-1")} />}
-              <SectionLabel collapsed={!open}>{group.label}</SectionLabel>
-              <div className="space-y-0.5">
-                {group.links.map((link) => (
-                  <NavLink key={link.href} link={link} open={open} isActive={pathname.startsWith(link.href)} />
-                ))}
-              </div>
-            </div>
-          ))}
-
-          {open && <div className="my-3 border-t border-sidebar-border/50" />}
-
-          <Link
-            href="/buddy"
-            title={open ? undefined : "Buddy"}
-            className={cn(
-              "flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors",
-              open ? "justify-start" : "justify-center",
-              pathname.startsWith("/buddy") ? "" : "text-sidebar-foreground hover:bg-sidebar-accent"
+      <aside
+        className={cn(
+          "relative h-full bg-sidebar flex flex-col border-r border-sidebar-border shadow-sm overflow-hidden",
+          "fixed inset-y-0 left-0 z-50 w-64 transition-transform duration-300",
+          mobileOpen ? "translate-x-0" : "-translate-x-full",
+          "md:static md:translate-x-0 md:z-auto md:transition-all",
+          open ? "md:w-64" : "md:w-20"
+        )}
+      >
+        <SidebarBackground />
+        <div className="relative z-10 flex flex-col flex-1 h-full">
+          <div className="px-3 min-h-14 flex items-center gap-2">
+            {showExpanded ? (
+              <Link href="/dashboard" className="flex-1 flex flex-col items-stretch justify-center min-w-0 py-4 gap-0 pl-3 pr-3 px-3">
+                <Image src="/jman_logo.svg" alt="JMAN" width={80} height={20} className="h-5 w-auto object-contain mt-1" />
+                <span className="leading-none select-none w-full text-right -mt-0.5 pr-10">
+                  <span className="text-[14px] font-serif font-bold text-sidebar-foreground">Resource</span>
+                  <span className="text-[12px] font-mono font-normal" style={{ color: "hsl(var(--primary))" }}>IQ</span>
+                </span>
+              </Link>
+            ) : (
+              <button onClick={() => setOpen(true)} className="flex-1 flex items-center justify-center" title="ResourceIQ — expand sidebar">
+                <span className="leading-none select-none">
+                  <span className="text-[15px] font-serif font-bold text-sidebar-foreground">R</span>
+                  <span className="text-[13px] font-mono font-normal" style={{ color: "hsl(var(--primary))" }}>M</span>
+                </span>
+              </button>
             )}
-            style={
-              pathname.startsWith("/buddy")
-                ? { backgroundColor: "hsl(var(--primary) / 0.10)", color: "hsl(var(--primary))", fontWeight: 600, borderLeft: "1px solid hsl(var(--primary))" }
-                : {}
-            }
-          >
-            <Mascot className="w-3.5 h-3.5 flex-shrink-0" />
-            {open && <span>Buddy</span>}
-            {open && (
-              <span className="text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full flex-shrink-0" style={{ color: "#ff6196", backgroundColor: "rgba(255, 97, 150, 0.12)" }}>
-                Beta
-              </span>
+            {showExpanded && (
+              <button
+                onClick={() => setMobileOpen(false)}
+                className="flex-shrink-0 p-1.5 rounded-lg hover:bg-sidebar-accent transition-colors text-sidebar-foreground md:hidden"
+                title="Close menu"
+              >
+                <X className="w-4 h-4" />
+              </button>
             )}
-          </Link>
-        </nav>
-
-        <div className="border-t border-sidebar-border px-3 py-3">
-          <div className={cn("flex items-center gap-2.5 px-2 py-2 rounded-lg", open ? "justify-start" : "justify-center")} title={open ? undefined : "Resource Manager — Admin"}>
-            <div
-              className="w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold flex-shrink-0"
-              style={{ backgroundColor: "#FF6196", color: "#FFF3E0" }}
-            >
-              RM
-            </div>
             {open && (
-              <div className="flex-1 min-w-0 text-left">
-                <p className="text-xs font-medium text-sidebar-foreground truncate leading-tight">Resource Manager</p>
-                <p className="text-[10px] leading-tight" style={{ color: "hsl(var(--primary))" }}>Admin</p>
-              </div>
+              <button
+                onClick={() => setOpen(false)}
+                className="hidden md:flex flex-shrink-0 p-1.5 rounded-lg hover:bg-sidebar-accent transition-colors text-sidebar-foreground"
+                title="Collapse sidebar"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
             )}
           </div>
+
+          <nav className="flex-1 overflow-y-auto py-4 scrollbar-thin px-3 space-y-0.5">
+            <NavLink link={TOP_LINK} open={showExpanded} isActive={pathname.startsWith(TOP_LINK.href)} />
+
+            {NAV_GROUPS.map((group, gi) => (
+              <div key={group.label}>
+                {showExpanded && <div className={cn("border-t border-sidebar-border/50", gi === 0 ? "mt-3 mb-1" : "mt-2 mb-1")} />}
+                <SectionLabel collapsed={!showExpanded}>{group.label}</SectionLabel>
+                <div className="space-y-0.5">
+                  {group.links.map((link) => (
+                    <NavLink key={link.href} link={link} open={showExpanded} isActive={pathname.startsWith(link.href)} />
+                  ))}
+                </div>
+              </div>
+            ))}
+
+            {showExpanded && <div className="my-3 border-t border-sidebar-border/50" />}
+
+            <Link
+              href="/buddy"
+              title={showExpanded ? undefined : "Buddy"}
+              className={cn(
+                "flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors",
+                showExpanded ? "justify-start" : "justify-center",
+                pathname.startsWith("/buddy") ? "" : "text-sidebar-foreground hover:bg-sidebar-accent"
+              )}
+              style={
+                pathname.startsWith("/buddy")
+                  ? { backgroundColor: "hsl(var(--primary) / 0.10)", color: "hsl(var(--primary))", fontWeight: 600, borderLeft: "1px solid hsl(var(--primary))" }
+                  : {}
+              }
+            >
+              <Mascot className="w-3.5 h-3.5 flex-shrink-0" />
+              {showExpanded && <span>Buddy</span>}
+              {showExpanded && (
+                <span className="text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full flex-shrink-0" style={{ color: "#ff6196", backgroundColor: "rgba(255, 97, 150, 0.12)" }}>
+                  Beta
+                </span>
+              )}
+            </Link>
+          </nav>
+
+          <div className="border-t border-sidebar-border px-3 py-3">
+            <div className={cn("flex items-center gap-2.5 px-2 py-2 rounded-lg", showExpanded ? "justify-start" : "justify-center")} title={showExpanded ? undefined : "Resource Manager — Admin"}>
+              <div
+                className="w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold flex-shrink-0"
+                style={{ backgroundColor: "#FF6196", color: "#FFF3E0" }}
+              >
+                RM
+              </div>
+              {showExpanded && (
+                <div className="flex-1 min-w-0 text-left">
+                  <p className="text-xs font-medium text-sidebar-foreground truncate leading-tight">Resource Manager</p>
+                  <p className="text-[10px] leading-tight" style={{ color: "hsl(var(--primary))" }}>Admin</p>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
-      </div>
-    </aside>
+      </aside>
+    </>
   );
 }

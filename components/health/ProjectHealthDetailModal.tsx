@@ -169,7 +169,7 @@ function OverviewTab({ d }: { d: ProjectHealthDetail }) {
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-4 gap-3 text-xs">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
         <Field label="Client" value={d.client_id ?? "-"} />
         <Field label="Type" value={d.type_of_project} />
         <Field label="Tech COE" value={d.tech_coe ?? "-"} />
@@ -180,26 +180,28 @@ function OverviewTab({ d }: { d: ProjectHealthDetail }) {
         <span className="text-xs text-gray-400">{d.risk_score} of {rows.length} tracked root causes are flagged</span>
       </div>
       <div className="rounded-xl border border-gray-200 overflow-hidden">
+        <div className="overflow-x-auto">
         <table className="w-full text-[11px]">
           <thead>
             <tr className="bg-gray-50 border-b border-gray-200">
-              <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5">Root cause</th>
-              <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5">Status</th>
-              <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5">Actual vs. threshold</th>
+              <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5 whitespace-nowrap">Root cause</th>
+              <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5 whitespace-nowrap">Status</th>
+              <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5 whitespace-nowrap">Actual vs. threshold</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r.key} className="border-b border-gray-50 last:border-0">
                 <td className="px-2.5 py-2 text-gray-700 font-medium whitespace-nowrap">{r.label}</td>
-                <td className="px-2.5 py-2">
+                <td className="px-2.5 py-2 whitespace-nowrap">
                   <FiredBadge fired={r.fired} />
                 </td>
-                <td className="px-2.5 py-2 text-gray-500">{r.detail}</td>
+                <td className="px-2.5 py-2 text-gray-500 whitespace-nowrap">{r.detail}</td>
               </tr>
             ))}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   );
@@ -264,11 +266,12 @@ function AllocationsTab({ d }: { d: ProjectHealthDetail }) {
         }}
       />
       <div className="rounded-xl border border-gray-200 overflow-hidden">
+        <div className="overflow-x-auto">
         <table className="w-full text-[11px]">
           <thead>
             <tr className="bg-gray-50 border-b border-gray-200">
               {["Employee", "Designation", "Status", "Alloc %", "Start", "End", "Active?"].map((h) => (
-                <th key={h} className="text-left font-semibold text-gray-500 px-2.5 py-1.5">{h}</th>
+                <th key={h} className="text-left font-semibold text-gray-500 px-2.5 py-1.5 whitespace-nowrap">{h}</th>
               ))}
             </tr>
           </thead>
@@ -277,17 +280,18 @@ function AllocationsTab({ d }: { d: ProjectHealthDetail }) {
               <tr key={i} className="border-b border-gray-50 last:border-0">
                 <td className="px-2.5 py-1.5 font-medium text-gray-700 whitespace-nowrap">{r.employee_id}</td>
                 <td className="px-2.5 py-1.5 text-gray-600 whitespace-nowrap">{r.job_name ?? "-"}</td>
-                <td className="px-2.5 py-1.5"><Badge variant={r.resourcing_status}>{r.resourcing_status}</Badge></td>
-                <td className="px-2.5 py-1.5 text-gray-500">{r.allocation_by_percentage}%</td>
+                <td className="px-2.5 py-1.5 whitespace-nowrap"><Badge variant={r.resourcing_status}>{r.resourcing_status}</Badge></td>
+                <td className="px-2.5 py-1.5 text-gray-500 whitespace-nowrap">{r.allocation_by_percentage}%</td>
                 <td className="px-2.5 py-1.5 text-gray-500 whitespace-nowrap">{r.allocated_start_date ?? "-"}</td>
                 <td className="px-2.5 py-1.5 text-gray-500 whitespace-nowrap">{r.allocated_end_date ?? "-"}</td>
-                <td className="px-2.5 py-1.5">
+                <td className="px-2.5 py-1.5 whitespace-nowrap">
                   {r.is_allocation_active ? <Badge variant="billable">Active</Badge> : <Badge variant="default">Past</Badge>}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
+        </div>
         {rows.length === 0 && <p className="text-xs text-gray-400 italic text-center py-4">No allocations match the current filters.</p>}
       </div>
     </div>
@@ -388,11 +392,13 @@ function StaffingTab({ d }: { d: ProjectHealthDetail }) {
                 ],
               }}
             />
-            <table className="w-full text-[11px] rounded-xl border border-gray-200 overflow-hidden">
+            <div className="rounded-xl border border-gray-200 overflow-hidden">
+            <div className="overflow-x-auto">
+            <table className="w-full text-[11px]">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200">
                   {["Employee", "Designation", "Status", "Alloc %", "Start", "End", "Rate/hr", "$/mo"].map((h) => (
-                    <th key={h} className="text-left font-semibold text-gray-500 px-2.5 py-1.5">{h}</th>
+                    <th key={h} className="text-left font-semibold text-gray-500 px-2.5 py-1.5 whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -401,16 +407,18 @@ function StaffingTab({ d }: { d: ProjectHealthDetail }) {
                   <tr key={i} className="border-b border-gray-50 last:border-0">
                     <td className="px-2.5 py-1.5 font-medium text-gray-700 whitespace-nowrap">{q.employee_id}</td>
                     <td className="px-2.5 py-1.5 text-gray-600 whitespace-nowrap">{q.job_name ?? "-"}</td>
-                    <td className="px-2.5 py-1.5"><Badge variant={q.resourcing_status}>{q.resourcing_status}</Badge></td>
-                    <td className="px-2.5 py-1.5 text-gray-500">{q.allocation_by_percentage}%</td>
+                    <td className="px-2.5 py-1.5 whitespace-nowrap"><Badge variant={q.resourcing_status}>{q.resourcing_status}</Badge></td>
+                    <td className="px-2.5 py-1.5 text-gray-500 whitespace-nowrap">{q.allocation_by_percentage}%</td>
                     <td className="px-2.5 py-1.5 text-gray-500 whitespace-nowrap">{q.allocated_start_date ?? "-"}</td>
                     <td className="px-2.5 py-1.5 text-gray-500 whitespace-nowrap">{q.allocated_end_date ?? "-"}</td>
-                    <td className="px-2.5 py-1.5 text-gray-500">{q.hourly_rate_usd != null ? `$${q.hourly_rate_usd}` : "-"}</td>
-                    <td className="px-2.5 py-1.5 text-gray-700 font-medium">{formatUsd(q.monthly_unbilled_value_usd)}</td>
+                    <td className="px-2.5 py-1.5 text-gray-500 whitespace-nowrap">{q.hourly_rate_usd != null ? `$${q.hourly_rate_usd}` : "-"}</td>
+                    <td className="px-2.5 py-1.5 text-gray-700 font-medium whitespace-nowrap">{formatUsd(q.monthly_unbilled_value_usd)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            </div>
+            </div>
             {shadowRows.length === 0 && <p className="text-xs text-gray-400 italic text-center py-3">No rows match the current filters.</p>}
           </>
         )}
@@ -445,11 +453,13 @@ function StaffingTab({ d }: { d: ProjectHealthDetail }) {
                 ],
               }}
             />
-            <table className="w-full text-[11px] rounded-xl border border-gray-200 overflow-hidden">
+            <div className="rounded-xl border border-gray-200 overflow-hidden">
+            <div className="overflow-x-auto">
+            <table className="w-full text-[11px]">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200">
                   {["Role", "Status", "Usually needs", "Currently staffed", "Short by"].map((h) => (
-                    <th key={h} className="text-left font-semibold text-gray-500 px-2.5 py-1.5">{h}</th>
+                    <th key={h} className="text-left font-semibold text-gray-500 px-2.5 py-1.5 whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -508,6 +518,8 @@ function StaffingTab({ d }: { d: ProjectHealthDetail }) {
                 })}
               </tbody>
             </table>
+            </div>
+            </div>
             {roleRows.length === 0 && (
               <p className="text-xs text-gray-400 italic text-center py-3">
                 {showAllRoles ? "No designations match the current search." : "No roles with a real staffing gap right now — try \"Show all roles\"."}
@@ -606,11 +618,13 @@ function OvertimeTab({ d }: { d: ProjectHealthDetail }) {
                 options: [["week_desc", "Latest week first"], ["week_asc", "Earliest week first"]],
               }}
             />
-            <table className="w-full text-[11px] rounded-xl border border-gray-200 overflow-hidden">
+            <div className="rounded-xl border border-gray-200 overflow-hidden">
+            <div className="overflow-x-auto">
+            <table className="w-full text-[11px]">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200">
-                  <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5">Week</th>
-                  <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5">Hours logged</th>
+                  <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5 whitespace-nowrap">Week</th>
+                  <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5 whitespace-nowrap">Hours logged</th>
                 </tr>
               </thead>
               <tbody>
@@ -618,16 +632,18 @@ function OvertimeTab({ d }: { d: ProjectHealthDetail }) {
                   const isLatest = w.week === maxWeek;
                   return (
                     <tr key={w.week} className={cn("border-b border-gray-50 last:border-0", isLatest && "bg-amber-50/50")}>
-                      <td className="px-2.5 py-1.5 text-gray-600">
+                      <td className="px-2.5 py-1.5 text-gray-600 whitespace-nowrap">
                         {w.week}
                         {isLatest && <span className="ml-1.5 text-[10px] text-amber-600 font-medium">latest</span>}
                       </td>
-                      <td className="px-2.5 py-1.5 text-gray-700 font-medium">{w.hours}h</td>
+                      <td className="px-2.5 py-1.5 text-gray-700 font-medium whitespace-nowrap">{w.hours}h</td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
+            </div>
+            </div>
           </>
         )}
       </div>
@@ -696,11 +712,12 @@ function WsrTab({ d }: { d: ProjectHealthDetail }) {
         sort={{ value: sort, onChange: (v) => setSort(v as WsrSort), options: [["week_desc", "Latest week first"], ["week_asc", "Earliest week first"]] }}
       />
       <div className="rounded-xl border border-gray-200 overflow-hidden">
+        <div className="overflow-x-auto">
         <table className="w-full text-[11px]">
           <thead>
             <tr className="bg-gray-50 border-b border-gray-200">
               {["Week", "Scope", "Schedule", "Quality", "CSAT", "Team", "Worst"].map((h) => (
-                <th key={h} className="text-left font-semibold text-gray-500 px-2.5 py-1.5">{h}</th>
+                <th key={h} className="text-left font-semibold text-gray-500 px-2.5 py-1.5 whitespace-nowrap">{h}</th>
               ))}
             </tr>
           </thead>
@@ -710,16 +727,17 @@ function WsrTab({ d }: { d: ProjectHealthDetail }) {
                 <td className="px-2.5 py-1.5 text-gray-600 whitespace-nowrap">
                   {r.week_start_date ?? "-"}{r.week_end_date ? ` → ${r.week_end_date}` : ""}
                 </td>
-                <td className="px-2.5 py-1.5"><Badge variant={r.scope_status}>{r.scope_status}</Badge></td>
-                <td className="px-2.5 py-1.5"><Badge variant={r.schedule_status}>{r.schedule_status}</Badge></td>
-                <td className="px-2.5 py-1.5"><Badge variant={r.quality_status}>{r.quality_status}</Badge></td>
-                <td className="px-2.5 py-1.5"><Badge variant={r.csat_status}>{r.csat_status}</Badge></td>
-                <td className="px-2.5 py-1.5"><Badge variant={r.team_status}>{r.team_status}</Badge></td>
-                <td className="px-2.5 py-1.5"><Badge variant={r.worst_signal}>{r.worst_signal}</Badge></td>
+                <td className="px-2.5 py-1.5 whitespace-nowrap"><Badge variant={r.scope_status}>{r.scope_status}</Badge></td>
+                <td className="px-2.5 py-1.5 whitespace-nowrap"><Badge variant={r.schedule_status}>{r.schedule_status}</Badge></td>
+                <td className="px-2.5 py-1.5 whitespace-nowrap"><Badge variant={r.quality_status}>{r.quality_status}</Badge></td>
+                <td className="px-2.5 py-1.5 whitespace-nowrap"><Badge variant={r.csat_status}>{r.csat_status}</Badge></td>
+                <td className="px-2.5 py-1.5 whitespace-nowrap"><Badge variant={r.team_status}>{r.team_status}</Badge></td>
+                <td className="px-2.5 py-1.5 whitespace-nowrap"><Badge variant={r.worst_signal}>{r.worst_signal}</Badge></td>
               </tr>
             ))}
           </tbody>
         </table>
+        </div>
         {rows.length === 0 && <p className="text-xs text-gray-400 italic text-center py-4">No WSR reports match this filter.</p>}
       </div>
     </div>

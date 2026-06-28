@@ -215,8 +215,8 @@ function HealthPageInner() {
     .sort((a, b) => b.monthly_unbilled_value_usd - a.monthly_unbilled_value_usd);
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-4">
-      <div className="grid grid-cols-3 gap-4">
+    <div className="p-4 sm:p-6 max-w-6xl mx-auto space-y-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <StatCard
           label="High Risk"
           value={counts.high}
@@ -239,7 +239,7 @@ function HealthPageInner() {
           active={riskFilter === "low"}
         />
       </div>
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <StatCard
           label="Understaffed"
           value={understaffedCount}
@@ -270,24 +270,25 @@ function HealthPageInner() {
             Projected unbilled value for the selected period (allocation % × hourly rate × 160 monthly hours).
           </p>
           <div className="rounded-lg border border-gray-200 bg-white overflow-hidden">
+            <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead className="bg-gray-50 text-gray-500">
                 <tr>
-                  <th className="text-left font-medium px-3 py-1.5">Project</th>
-                  <th className="text-left font-medium px-3 py-1.5">Client</th>
-                  <th className="text-right font-medium px-3 py-1.5">$ at risk / {revenuePeriod}</th>
+                  <th className="text-left font-medium px-3 py-1.5 whitespace-nowrap">Project</th>
+                  <th className="text-left font-medium px-3 py-1.5 whitespace-nowrap">Client</th>
+                  <th className="text-right font-medium px-3 py-1.5 whitespace-nowrap">$ at risk / {revenuePeriod}</th>
                 </tr>
               </thead>
               <tbody>
                 {unbilledProjects.map((p) => (
                   <tr key={p.project_code} className="border-b border-gray-50 last:border-0 hover:bg-gray-50/50">
-                    <td className="px-3 py-1.5">
+                    <td className="px-3 py-1.5 whitespace-nowrap">
                       <button onClick={() => setSelectedProject(p.project_code)} className="font-medium text-primary hover:underline">
                         {p.project_code}
                       </button>
                     </td>
-                    <td className="px-3 py-1.5 text-gray-500">{p.client_id ?? "-"}</td>
-                    <td className="px-3 py-1.5 text-right text-gray-700">
+                    <td className="px-3 py-1.5 text-gray-500 whitespace-nowrap">{p.client_id ?? "-"}</td>
+                    <td className="px-3 py-1.5 text-right text-gray-700 whitespace-nowrap">
                       {formatUsd(convertRevenue(p.monthly_unbilled_value_usd, revenuePeriod))}
                     </td>
                   </tr>
@@ -299,6 +300,7 @@ function HealthPageInner() {
                 )}
               </tbody>
             </table>
+            </div>
           </div>
         </div>
       )}
@@ -410,18 +412,19 @@ function HealthPageInner() {
       </div>
 
       <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+        <div className="overflow-x-auto">
         <table className="w-full text-xs data-table">
           <thead className="bg-gray-50 text-gray-500">
             <tr>
               {["Project", "Client", "Type", "Team (actual/expected)", "Risk", "Root Causes", "Unbilled $/mo", "Real WSR (latest)", "Ramp-down?"].map((h) => (
-                <th key={h} className="text-left font-medium px-3 py-2">{h}</th>
+                <th key={h} className="text-left font-medium px-3 py-2 whitespace-nowrap">{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {filtered.map((p) => (
               <tr key={p.project_code} className="border-b border-gray-50 last:border-0 hover:bg-gray-50/50">
-                <td className="px-3 py-2">
+                <td className="px-3 py-2 whitespace-nowrap">
                   <button
                     onClick={() => setSelectedProject(p.project_code)}
                     className="font-medium text-primary hover:underline"
@@ -430,16 +433,16 @@ function HealthPageInner() {
                     {p.project_code}
                   </button>
                 </td>
-                <td className="px-3 py-2 text-gray-500">{p.client_id ?? "-"}</td>
-                <td className="px-3 py-2 text-gray-500">{p.type_of_project}</td>
-                <td className="px-3 py-2 text-gray-500">
+                <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{p.client_id ?? "-"}</td>
+                <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{p.type_of_project}</td>
+                <td className="px-3 py-2 text-gray-500 whitespace-nowrap">
                   {p.n_employees} / {p.expected_headcount ?? "?"}
                   {p.is_understaffed && <Badge variant="amber">understaffed</Badge>}
                 </td>
-                <td className="px-3 py-2"><Badge variant={p.risk_band}>{p.risk_band}</Badge></td>
-                <td className="px-3 py-2 text-gray-500">{p.root_causes.map(rootCauseLabel).join(", ") || "-"}</td>
-                <td className="px-3 py-2 text-gray-500">{p.monthly_unbilled_value_usd > 0 ? formatUsd(p.monthly_unbilled_value_usd) : "-"}</td>
-                <td className="px-3 py-2">
+                <td className="px-3 py-2 whitespace-nowrap"><Badge variant={p.risk_band}>{p.risk_band}</Badge></td>
+                <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{p.root_causes.map(rootCauseLabel).join(", ") || "-"}</td>
+                <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{p.monthly_unbilled_value_usd > 0 ? formatUsd(p.monthly_unbilled_value_usd) : "-"}</td>
+                <td className="px-3 py-2 whitespace-nowrap">
                   <div className="flex items-center gap-1.5">
                     {p.wsr_latest_signal ? (
                       <span title={`Most recent real WSR report. Worst ever recorded for this project: ${p.wsr_worst_signal ?? "n/a"}.`}>
@@ -461,7 +464,7 @@ function HealthPageInner() {
                     )}
                   </div>
                 </td>
-                <td className="px-3 py-2">{p.is_ramp_down_candidate && <Badge variant="amber">{p.days_to_ramp_down}d</Badge>}</td>
+                <td className="px-3 py-2 whitespace-nowrap">{p.is_ramp_down_candidate && <Badge variant="amber">{p.days_to_ramp_down}d</Badge>}</td>
               </tr>
             ))}
             {filtered.length === 0 && (
@@ -471,6 +474,7 @@ function HealthPageInner() {
             )}
           </tbody>
         </table>
+        </div>
       </div>
 
       {selectedProject && (
