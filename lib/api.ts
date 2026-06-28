@@ -421,6 +421,9 @@ export interface ForecastBreakdownRow {
   needed_fte: number;
   needed_headcount: number;
   available_for_redeploy: number;
+  // <= available_for_redeploy when skills were requested -- only those who actually meet the
+  // skill threshold (not just hold the title) count toward covering the need.
+  qualifying_for_redeploy: number;
   redeploy_candidates: RedeployCandidate[];
   adjacent_level_candidates: RedeployCandidate[];
   adjacent_fill_count: number;

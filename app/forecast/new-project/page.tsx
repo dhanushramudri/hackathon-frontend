@@ -727,6 +727,11 @@ export default function NewProjectForecastPage() {
                         <td className="px-3 py-2 text-gray-500">{b.needed_headcount}</td>
                         <td className="px-3 py-2 text-gray-500">
                           {b.available_for_redeploy}
+                          {b.qualifying_for_redeploy < b.available_for_redeploy && (
+                            <span className="text-amber-600" title="Holds the title but doesn't meet the requested skillset">
+                              {" "}({b.qualifying_for_redeploy} skill-matched)
+                            </span>
+                          )}
                           {b.adjacent_fill_count > 0 && <span className="text-emerald-600 font-medium"> +{b.adjacent_fill_count} flexible fit</span>}
                         </td>
                         <td className="px-3 py-2 text-gray-500">{b.shortfall}</td>
