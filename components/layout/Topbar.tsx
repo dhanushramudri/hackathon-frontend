@@ -1,6 +1,7 @@
 "use client";
 
 import { usePathname } from "next/navigation";
+import { Menu } from "lucide-react";
 import { useSidebarContext } from "@/components/layout/SidebarContext";
 
 const TITLES: Record<string, string> = {
@@ -24,16 +25,10 @@ export function Topbar() {
     <header className="h-14 border-b border-gray-200 bg-white flex items-center px-3 sm:px-6 gap-3 sm:gap-4 flex-shrink-0">
       <button
         onClick={() => setMobileOpen(true)}
-        className="md:hidden flex-shrink-0 -ml-1 rounded-lg hover:bg-gray-100 transition"
+        className="md:hidden flex-shrink-0 p-1.5 -ml-1 rounded-lg text-gray-500 hover:bg-gray-100 transition"
         title="Open menu"
       >
-        <span
-          className="w-9 h-9 flex items-center justify-center rounded-md border leading-none select-none"
-          style={{ borderColor: "hsl(var(--primary) / 0.35)" }}
-        >
-          <span className="text-[17px] font-serif font-bold text-gray-900">R</span>
-          <span className="text-[9px] font-mono font-normal relative top-0.5" style={{ color: "hsl(var(--primary))" }}>IQ</span>
-        </span>
+        <Menu className="w-5 h-5" />
       </button>
       <h1 className="text-sm font-semibold text-gray-700 truncate">{title}</h1>
       <div className="flex-1" />
