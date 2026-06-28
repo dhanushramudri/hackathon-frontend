@@ -205,7 +205,7 @@ export function Sidebar() {
               <button onClick={() => setOpen(true)} className="flex-1 flex items-center justify-center" title="ResourceIQ — expand sidebar">
                 <span className="leading-none select-none">
                   <span className="text-[15px] font-serif font-bold text-sidebar-foreground">R</span>
-                  <span className="text-[13px] font-mono font-normal" style={{ color: "hsl(var(--primary))" }}>M</span>
+                  <span className="text-[13px] font-mono font-normal" style={{ color: "hsl(var(--primary))" }}>IQ</span>
                 </span>
               </button>
             )}

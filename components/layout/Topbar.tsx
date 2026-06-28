@@ -29,7 +29,7 @@ export function Topbar() {
       >
         <span className="leading-none select-none">
           <span className="text-[16px] font-serif font-bold text-gray-900">R</span>
-          <span className="text-[14px] font-mono font-normal" style={{ color: "hsl(var(--primary))" }}>M</span>
+          <span className="text-[14px] font-mono font-normal" style={{ color: "hsl(var(--primary))" }}>IQ</span>
         </span>
       </button>
       <h1 className="text-sm font-semibold text-gray-700 truncate">{title}</h1>
