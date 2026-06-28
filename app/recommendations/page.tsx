@@ -109,6 +109,8 @@ function RecommendationsPageInner() {
   const [minAvailable, setMinAvailable] = useState(0);
   const [meetsCapacityOnly, setMeetsCapacityOnly] = useState(false);
   const [candidateSort, setCandidateSort] = useState<CandidateSort>("composite");
+  const [topN, setTopN] = useState(15);
+  const [topNInput, setTopNInput] = useState("15");
 
   useEffect(() => {
     setCandidateSearch("");
@@ -120,14 +122,16 @@ function RecommendationsPageInner() {
     setMinCompetency(0);
     setMinAvailable(0);
     setMeetsCapacityOnly(false);
+    setTopN(15);
+    setTopNInput("15");
     semanticMatchMutation.reset();
   }, [selectedRow]);
 
   const pipeline = useQuery({ queryKey: ["pipeline-forecast"], queryFn: api.pipelineForecast });
   const coverage = useQuery({ queryKey: ["recommendations-coverage-summary"], queryFn: api.recommendationsCoverageSummary });
   const recommendation = useQuery({
-    queryKey: ["recommendation", selectedRow],
-    queryFn: () => api.recommendationsForPipelineRow(selectedRow!),
+    queryKey: ["recommendation", selectedRow, topN],
+    queryFn: () => api.recommendationsForPipelineRow(selectedRow!, topN),
     enabled: selectedRow !== null,
   });
 
@@ -591,8 +595,7 @@ function RecommendationsPageInner() {
                   )}
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-xs font-semibold text-gray-700">
-                      Candidates ({filteredCandidates.length} shown of top {recommendation.data.candidates.length} -- {recommendation.data.total_employees_considered} employees considered
-                      {recommendation.data.has_skillset && `, ${recommendation.data.candidates_with_real_skill_match} with a real skill match`})
+                      Candidates ({filteredCandidates.length}/{recommendation.data.candidates.length} shown)
                     </p>
                     <div className="flex items-center gap-2">
                       {hasActiveCandidateFilters && (
@@ -612,6 +615,62 @@ function RecommendationsPageInner() {
                         <SlidersHorizontal className="w-3 h-3" />
                         Filters{candidateFilterCount > 0 && ` (${candidateFilterCount})`}
                         <ChevronDown className={cn("w-3 h-3 transition-transform", candidateFiltersOpen && "rotate-180")} />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <p className="text-[11px] text-gray-400">
+                      Showing top {recommendation.data.candidates.length} of {recommendation.data.candidate_pool_size} viable candidates
+                      {" "}({recommendation.data.total_employees_considered} employees scored
+                      {recommendation.data.has_skillset && `, ${recommendation.data.candidates_with_real_skill_match} with a real skill match`})
+                    </p>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[11px] text-gray-500 whitespace-nowrap">Show top</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={2000}
+                        value={topNInput}
+                        onChange={(e) => setTopNInput(e.target.value)}
+                        onBlur={() => {
+                          const parsed = Math.max(1, Math.min(2000, Number(topNInput) || 15));
+                          setTopN(parsed);
+                          setTopNInput(String(parsed));
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                        }}
+                        className="w-16 text-[11px] px-1.5 py-1 rounded-lg border border-gray-200 outline-none focus:border-gray-300"
+                      />
+                      {[15, 25, 50].map((n) => (
+                        <button
+                          key={n}
+                          onClick={() => {
+                            setTopN(n);
+                            setTopNInput(String(n));
+                          }}
+                          className={cn(
+                            "text-[11px] px-2 py-1 rounded-lg border whitespace-nowrap transition",
+                            topN === n ? "bg-primary/10 border-primary text-primary" : "border-gray-200 text-gray-500"
+                          )}
+                        >
+                          {n}
+                        </button>
+                      ))}
+                      <button
+                        onClick={() => {
+                          const all = recommendation.data!.candidate_pool_size;
+                          setTopN(all);
+                          setTopNInput(String(all));
+                        }}
+                        className={cn(
+                          "text-[11px] px-2 py-1 rounded-lg border whitespace-nowrap transition",
+                          topN === recommendation.data.candidate_pool_size
+                            ? "bg-primary/10 border-primary text-primary"
+                            : "border-gray-200 text-gray-500"
+                        )}
+                      >
+                        Everyone
                       </button>
                     </div>
                   </div>

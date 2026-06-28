@@ -103,6 +103,7 @@ export interface RecommendationResult {
   // for all of them). The fixed top-15 display cap looks identical either way without this.
   has_skillset: boolean;
   total_employees_considered: number;
+  candidate_pool_size: number;
   candidates_with_real_skill_match: number;
   deal_composition: DealCompositionRow[];
   pipeline_row?: {
@@ -787,8 +788,8 @@ export const api = {
     getJSON<AllocationTimesheet>(`/allocations/timesheet?employee_id=${encodeURIComponent(employeeId)}&project_id=${encodeURIComponent(projectId)}`),
   roleMixTemplates: () => getJSON<RoleMixTemplate[]>("/role-mix/templates"),
   roleMixCategories: () => getJSON<DocxCategoryRoleMix[]>("/role-mix/categories"),
-  recommendationsForPipelineRow: (rowIndex: number) =>
-    getJSON<RecommendationResult>(`/recommendations/pipeline-row/${rowIndex}`),
+  recommendationsForPipelineRow: (rowIndex: number, topN: number = 15) =>
+    getJSON<RecommendationResult>(`/recommendations/pipeline-row/${rowIndex}?top_n=${topN}`),
   recommendationsCoverageSummary: () => getJSON<CoverageSummary>("/recommendations/coverage-summary"),
   semanticMatch: (rowIndex: number) =>
     postJSON<SemanticMatchResult>(`/recommendations/pipeline-row/${rowIndex}/semantic-match`, {}),
