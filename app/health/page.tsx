@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 import { api, type HealthProject } from "@/lib/api";
@@ -117,6 +117,14 @@ function filterAndSortHealth(rows: HealthProject[], opts: HealthFilterOptions): 
 }
 
 export default function HealthPage() {
+  return (
+    <Suspense fallback={<LoadingState label="Loading…" />}>
+      <HealthPageInner />
+    </Suspense>
+  );
+}
+
+function HealthPageInner() {
   const projects = useQuery({ queryKey: ["health-projects"], queryFn: api.healthProjects });
   const validation = useQuery({ queryKey: ["health-validation"], queryFn: api.healthValidation });
   const [selectedProject, setSelectedProject] = useState<string | null>(null);

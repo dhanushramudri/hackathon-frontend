@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 import { api, type AllocationRow } from "@/lib/api";
@@ -92,6 +92,14 @@ function filterAndSortAllocations(rows: AllocationRow[], opts: FilterOptions): A
 }
 
 export default function AllocationsPage() {
+  return (
+    <Suspense fallback={<LoadingState label="Loading…" />}>
+      <AllocationsPageInner />
+    </Suspense>
+  );
+}
+
+function AllocationsPageInner() {
   const { data, isLoading, error } = useQuery({ queryKey: ["allocations"], queryFn: api.allocations });
   const healthProjects = useQuery({ queryKey: ["health-projects"], queryFn: api.healthProjects });
   const [tab, setTab] = useState<Tab>("resource");

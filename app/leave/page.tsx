@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 import { AlertTriangle } from "lucide-react";
@@ -68,6 +68,14 @@ function filterAndSortLeave(rows: LeaveImpact[], opts: FilterOptions): LeaveImpa
 }
 
 export default function LeavePage() {
+  return (
+    <Suspense fallback={<LoadingState label="Loading…" />}>
+      <LeavePageInner />
+    </Suspense>
+  );
+}
+
+function LeavePageInner() {
   const { data, isLoading, error } = useQuery({ queryKey: ["leave-impact"], queryFn: api.leaveImpact });
   const healthProjects = useQuery({ queryKey: ["health-projects"], queryFn: api.healthProjects });
   const searchParams = useSearchParams();

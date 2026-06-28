@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { Suspense, useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 import { AlertTriangle, CheckCircle2, ChevronDown, Sparkles, SlidersHorizontal, XCircle } from "lucide-react";
@@ -63,6 +63,14 @@ function rankOf(map: Record<string, number>, value: string | null): number {
 }
 
 export default function RecommendationsPage() {
+  return (
+    <Suspense fallback={<LoadingState label="Loading…" />}>
+      <RecommendationsPageInner />
+    </Suspense>
+  );
+}
+
+function RecommendationsPageInner() {
   const [selectedRow, setSelectedRow] = useState<number | null>(null);
   const [openProfile, setOpenProfile] = useState<{ employeeId: string; tab: ProfileTab; skillMatchContext?: SkillMatchContext } | null>(null);
   const searchParams = useSearchParams();
