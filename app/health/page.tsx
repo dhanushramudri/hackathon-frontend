@@ -547,11 +547,6 @@ function OvertimeRiskModal({
           <ErrorState message="Could not load overtime risk." />
         ) : (
           <>
-            <p className="text-gray-500">
-              Real timesheet hours, not estimated -- flagged when an employee logged{" "}
-              <strong>more than {summary.daily_hours_threshold}h on {summary.threshold_days}+ separate days</strong> within
-              the last {summary.window_days} days. Click a name for their full daily-hours history.
-            </p>
             {summary.employees.length === 0 ? (
               <p className="text-gray-400 italic">No employees currently meet this threshold.</p>
             ) : (
