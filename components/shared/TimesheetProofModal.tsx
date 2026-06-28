@@ -96,7 +96,7 @@ export function TimesheetProofModal({ employeeId, projectId, onClose }: Timeshee
             {rows.length === 0 ? (
               <p className="text-xs text-gray-400 italic">No real timesheet rows logged against this project yet.</p>
             ) : (
-              <div className="rounded-xl border border-gray-200 overflow-hidden max-h-80 overflow-y-auto scrollbar-thin">
+              <div className="rounded-xl border border-[hsl(var(--primary)/0.3)] overflow-hidden max-h-80 overflow-y-auto scrollbar-thin">
                 <div className="overflow-x-auto">
                 <table className="w-full text-[11px]">
                   <thead className="sticky top-0">

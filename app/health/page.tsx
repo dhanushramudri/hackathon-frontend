@@ -278,7 +278,7 @@ function HealthPageInner() {
           <p className="text-[11px] text-gray-500">
             Projected unbilled value for the selected period (allocation % × hourly rate × 160 monthly hours).
           </p>
-          <div className="rounded-lg border border-gray-200 bg-white overflow-hidden">
+          <div className="rounded-lg border border-[hsl(var(--primary)/0.3)] bg-white overflow-hidden">
             <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead className="bg-gray-50 text-gray-500">
@@ -420,7 +420,7 @@ function HealthPageInner() {
         </div>
       </div>
 
-      <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+      <div className="rounded-xl border border-[hsl(var(--primary)/0.3)] bg-white overflow-hidden">
         <div className="overflow-x-auto">
         <table className="w-full text-xs data-table">
           <thead className="bg-gray-50 text-gray-500">

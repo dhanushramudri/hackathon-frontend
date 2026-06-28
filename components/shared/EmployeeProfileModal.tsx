@@ -111,7 +111,7 @@ function RedeployMatchesTab({ employeeId }: { employeeId: string }) {
           employee, or nothing open right now asks for what they have.
         </p>
       ) : (
-        <div className="rounded-xl border border-gray-200 overflow-hidden">
+        <div className="rounded-xl border border-[hsl(var(--primary)/0.3)] overflow-hidden">
           <div className="overflow-x-auto">
           <table className="w-full text-[11px]">
             <thead>
@@ -227,7 +227,7 @@ function OverviewTab({ profile }: { profile: EmployeeProfile }) {
           {profile.employee_total_allocation_pct != null ? `${profile.employee_total_allocation_pct}% total allocation right now` : "no current allocations"}
         </span>
       </div>
-      <div className="rounded-xl border border-gray-200 overflow-hidden">
+      <div className="rounded-xl border border-[hsl(var(--primary)/0.3)] overflow-hidden">
         <div className="overflow-x-auto">
         <table className="w-full text-[11px]">
           <thead>
@@ -312,7 +312,7 @@ function AllocationsTab({ profile }: { profile: EmployeeProfile }) {
           ],
         }}
       />
-      <div className="rounded-xl border border-gray-200 overflow-hidden">
+      <div className="rounded-xl border border-[hsl(var(--primary)/0.3)] overflow-hidden">
         <div className="overflow-x-auto">
         <table className="w-full text-[11px]">
           <thead>
@@ -463,7 +463,7 @@ function SkillsTab({ profile, matchContext }: { profile: EmployeeProfile; matchC
             search={{ value: search, onChange: setSearch, placeholder: "Search skill, sub-skill, or COE…" }}
             sort={{ value: sort, onChange: (v) => setSort(v as SkillSort), options: [["source_asc", "Observed first"], ["score_desc", "Score ↓"], ["skill_asc", "Skill A–Z"]] }}
           />
-          <div className="rounded-xl border border-gray-200 overflow-hidden">
+          <div className="rounded-xl border border-[hsl(var(--primary)/0.3)] overflow-hidden">
             <div className="overflow-x-auto">
             <table className="w-full text-[11px]">
               <thead>
@@ -520,7 +520,7 @@ function CompetencyTab({ profile }: { profile: EmployeeProfile }) {
       <TableControls
         sort={{ value: sort, onChange: (v) => setSort(v as CompetencySort), options: [["score_desc", "Score ↓"], ["source_asc", "Observed first"]] }}
       />
-      <div className="rounded-xl border border-gray-200 overflow-hidden">
+      <div className="rounded-xl border border-[hsl(var(--primary)/0.3)] overflow-hidden">
         <div className="overflow-x-auto">
         <table className="w-full text-[11px]">
           <thead>
@@ -559,7 +559,7 @@ function LeaveTab({ profile }: { profile: EmployeeProfile }) {
       <p className="text-[11px] text-gray-400 mb-2">
         {profile.leaves.length} leave record(s) -- synthetic (no real leave/absence dataset exists in the source files; see clean_datasets.py).
       </p>
-      <div className="rounded-xl border border-gray-200 overflow-hidden">
+      <div className="rounded-xl border border-[hsl(var(--primary)/0.3)] overflow-hidden">
         <div className="overflow-x-auto">
         <table className="w-full text-[11px]">
           <thead>

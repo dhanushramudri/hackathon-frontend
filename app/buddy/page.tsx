@@ -91,7 +91,7 @@ function ChatTable({
   const employeeColIdx = columns.findIndex((c) => EMPLOYEE_COLUMNS.has(c));
   const projectColIdx = columns.findIndex((c) => PROJECT_COLUMNS.has(c));
   return (
-    <div className="w-full rounded-xl border border-gray-200 overflow-x-auto">
+    <div className="w-full rounded-xl border border-[hsl(var(--primary)/0.3)] overflow-x-auto">
       <table className="w-full text-[11px]">
         <thead>
           <tr className="bg-gray-50 border-b border-gray-200">

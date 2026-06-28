@@ -180,7 +180,7 @@ function OverviewTab({ d }: { d: ProjectHealthDetail }) {
         <Badge variant={d.risk_band}>{d.risk_band} risk</Badge>
         <span className="text-xs text-gray-400">{d.risk_score} of {rows.length} tracked root causes are flagged</span>
       </div>
-      <div className="rounded-xl border border-gray-200 overflow-hidden">
+      <div className="rounded-xl border border-[hsl(var(--primary)/0.3)] overflow-hidden">
         <div className="overflow-x-auto">
         <table className="w-full text-[11px]">
           <thead>
@@ -266,7 +266,7 @@ function AllocationsTab({ d }: { d: ProjectHealthDetail }) {
           ],
         }}
       />
-      <div className="rounded-xl border border-gray-200 overflow-hidden">
+      <div className="rounded-xl border border-[hsl(var(--primary)/0.3)] overflow-hidden">
         <div className="overflow-x-auto">
         <table className="w-full text-[11px]">
           <thead>
@@ -393,7 +393,7 @@ function StaffingTab({ d }: { d: ProjectHealthDetail }) {
                 ],
               }}
             />
-            <div className="rounded-xl border border-gray-200 overflow-hidden">
+            <div className="rounded-xl border border-[hsl(var(--primary)/0.3)] overflow-hidden">
             <div className="overflow-x-auto">
             <table className="w-full text-[11px]">
               <thead>
@@ -454,7 +454,7 @@ function StaffingTab({ d }: { d: ProjectHealthDetail }) {
                 ],
               }}
             />
-            <div className="rounded-xl border border-gray-200 overflow-hidden">
+            <div className="rounded-xl border border-[hsl(var(--primary)/0.3)] overflow-hidden">
             <div className="overflow-x-auto">
             <table className="w-full text-[11px]">
               <thead>
@@ -619,7 +619,7 @@ function OvertimeTab({ d }: { d: ProjectHealthDetail }) {
                 options: [["week_desc", "Latest week first"], ["week_asc", "Earliest week first"]],
               }}
             />
-            <div className="rounded-xl border border-gray-200 overflow-hidden">
+            <div className="rounded-xl border border-[hsl(var(--primary)/0.3)] overflow-hidden">
             <div className="overflow-x-auto">
             <table className="w-full text-[11px]">
               <thead>
@@ -712,7 +712,7 @@ function WsrTab({ d }: { d: ProjectHealthDetail }) {
         ]}
         sort={{ value: sort, onChange: (v) => setSort(v as WsrSort), options: [["week_desc", "Latest week first"], ["week_asc", "Earliest week first"]] }}
       />
-      <div className="rounded-xl border border-gray-200 overflow-hidden">
+      <div className="rounded-xl border border-[hsl(var(--primary)/0.3)] overflow-hidden">
         <div className="overflow-x-auto">
         <table className="w-full text-[11px]">
           <thead>

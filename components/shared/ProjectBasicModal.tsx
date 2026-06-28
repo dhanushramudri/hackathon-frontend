@@ -98,7 +98,7 @@ export function ProjectBasicModal({ projectCode, onClose }: ProjectBasicModalPro
               {current.length === 0 ? (
                 <p className="text-xs text-gray-400 italic">No current allocations on this project.</p>
               ) : (
-                <div className="rounded-xl border border-gray-200 overflow-hidden">
+                <div className="rounded-xl border border-[hsl(var(--primary)/0.3)] overflow-hidden">
                   <div className="overflow-x-auto">
                   <table className="w-full text-[11px]">
                     <thead>
@@ -151,7 +151,7 @@ export function ProjectBasicModal({ projectCode, onClose }: ProjectBasicModalPro
                   options: [["start_desc", "Start date ↓ (latest first)"], ["start_asc", "Start date ↑"], ["employee_asc", "Employee A–Z"]],
                 }}
               />
-              <div className="rounded-xl border border-gray-200 overflow-hidden">
+              <div className="rounded-xl border border-[hsl(var(--primary)/0.3)] overflow-hidden">
                 <div className="overflow-x-auto">
                 <table className="w-full text-[11px]">
                   <thead>

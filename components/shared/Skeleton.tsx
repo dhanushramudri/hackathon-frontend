@@ -38,7 +38,7 @@ export function TableSkeleton({
   className?: string;
 }) {
   return (
-    <div className={cn("rounded-xl border border-gray-200 bg-white overflow-hidden", className)}>
+    <div className={cn("rounded-xl border border-[hsl(var(--primary)/0.3)] bg-white overflow-hidden", className)}>
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
           <thead className="bg-gray-50">

@@ -283,7 +283,7 @@ function AllocationsPageInner() {
       </div>
 
       {tab === "resource" ? (
-        <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+        <div className="rounded-xl border border-[hsl(var(--primary)/0.3)] bg-white overflow-hidden">
           <div className="overflow-x-auto">
           <table className="w-full text-xs data-table">
             <thead className="bg-gray-50 text-gray-500">
@@ -315,7 +315,7 @@ function AllocationsPageInner() {
       ) : (
         <div className="space-y-3">
           {Object.entries(byProject).map(([projectId, rows]) => (
-            <div key={projectId} className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+            <div key={projectId} className="rounded-xl border border-[hsl(var(--primary)/0.3)] bg-white overflow-hidden">
               <div className="px-3 py-2 bg-gray-50 border-b border-gray-100 text-xs font-semibold text-gray-700 flex items-center gap-2">
                 <button onClick={() => openProject(projectId)} className="text-primary hover:underline" title="View full project detail">
                   {projectId}

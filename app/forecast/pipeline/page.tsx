@@ -221,7 +221,7 @@ export default function PipelineOutlookPage() {
         </ResponsiveContainer>
       </div>
 
-      <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+      <div className="rounded-xl border border-[hsl(var(--primary)/0.3)] bg-white overflow-hidden">
         <div className="overflow-x-auto">
         <table className="w-full text-xs data-table">
           <thead className="bg-gray-50 text-gray-500">
@@ -365,7 +365,7 @@ export default function PipelineOutlookPage() {
             </button>
           )}
         </div>
-        <div className="overflow-hidden rounded-lg border border-gray-100">
+        <div className="overflow-hidden rounded-lg border border-[hsl(var(--primary)/0.3)]">
           <div className="overflow-x-auto">
           <table className="w-full text-xs data-table">
             <thead className="bg-gray-50 text-gray-500">

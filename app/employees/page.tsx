@@ -177,7 +177,7 @@ export default function EmployeesPage() {
         </div>
       </div>
 
-      <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+      <div className="rounded-xl border border-[hsl(var(--primary)/0.3)] bg-white overflow-hidden">
         <div className="overflow-x-auto">
         <table className="w-full text-xs data-table">
           <thead className="bg-gray-50 text-gray-500">
