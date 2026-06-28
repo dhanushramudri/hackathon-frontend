@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
+import { Flame } from "lucide-react";
 import { api, type HealthProject } from "@/lib/api";
 import { Badge } from "@/components/shared/Badge";
 import { StatCard } from "@/components/shared/StatCard";
@@ -127,6 +128,7 @@ export default function HealthPage() {
 
 function HealthPageInner() {
   const projects = useQuery({ queryKey: ["health-projects"], queryFn: api.healthProjects });
+  const overtimeRisk = useQuery({ queryKey: ["overtime-risk-summary"], queryFn: api.overtimeRiskSummary });
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const searchParams = useSearchParams();
 
@@ -244,7 +246,7 @@ function HealthPageInner() {
           active={riskFilter === "low"}
         />
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <StatCard
           label="Understaffed"
           value={understaffedCount}
@@ -259,6 +261,17 @@ function HealthPageInner() {
           onPeriodChange={setRevenuePeriod}
           active={hasUnbilledValueOnly}
           onToggle={toggleRevenue}
+        />
+        <StatCard
+          label="Sustained Overtime Risk"
+          value={overtimeRisk.data?.employees_at_risk ?? "-"}
+          sub={
+            overtimeRisk.data
+              ? `${overtimeRisk.data.threshold_days}+ days over ${overtimeRisk.data.daily_hours_threshold}h in the last ${overtimeRisk.data.window_days}d`
+              : undefined
+          }
+          color={(overtimeRisk.data?.employees_at_risk ?? 0) > 0 ? "red" : "default"}
+          icon={<Flame className="w-4 h-4" />}
         />
       </div>
 
