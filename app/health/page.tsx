@@ -4,13 +4,14 @@ import { Suspense, useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 import { Flame } from "lucide-react";
-import { api, type HealthProject } from "@/lib/api";
+import { api, type HealthProject, type OvertimeRiskSummary } from "@/lib/api";
 import { Badge } from "@/components/shared/Badge";
 import { StatCard } from "@/components/shared/StatCard";
 import { LoadingState, ErrorState } from "@/components/shared/EmptyState";
 import { StatCardGridSkeleton, TableSkeleton } from "@/components/shared/Skeleton";
 import { Modal } from "@/components/shared/Modal";
 import { ProjectHealthDetailModal } from "@/components/health/ProjectHealthDetailModal";
+import { EmployeeProfileModal } from "@/components/shared/EmployeeProfileModal";
 import { cn, formatUsd, rootCauseLabel, ROOT_CAUSE_LABEL } from "@/lib/utils";
 
 type RiskFilter = "all" | "high" | "medium" | "low";
@@ -132,6 +133,8 @@ function HealthPageInner() {
   const overtimeRisk = useQuery({ queryKey: ["overtime-risk-summary"], queryFn: api.overtimeRiskSummary });
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [unbilledProofProject, setUnbilledProofProject] = useState<{ code: string; client: string | null } | null>(null);
+  const [overtimeRiskModalOpen, setOvertimeRiskModalOpen] = useState(false);
+  const [selectedEmployee, setSelectedEmployee] = useState<string | null>(null);
   const searchParams = useSearchParams();
 
   const [search, setSearch] = useState("");
@@ -274,6 +277,8 @@ function HealthPageInner() {
           }
           color={(overtimeRisk.data?.employees_at_risk ?? 0) > 0 ? "red" : "default"}
           icon={<Flame className="w-4 h-4" />}
+          onClick={() => setOvertimeRiskModalOpen(true)}
+          active={overtimeRiskModalOpen}
         />
       </div>
 
@@ -507,7 +512,78 @@ function HealthPageInner() {
           onClose={() => setUnbilledProofProject(null)}
         />
       )}
+      {overtimeRiskModalOpen && (
+        <OvertimeRiskModal
+          summary={overtimeRisk.data}
+          isLoading={overtimeRisk.isLoading}
+          onOpenEmployee={setSelectedEmployee}
+          onClose={() => setOvertimeRiskModalOpen(false)}
+        />
+      )}
+      {selectedEmployee && (
+        <EmployeeProfileModal employeeId={selectedEmployee} initialTab="overtime" onClose={() => setSelectedEmployee(null)} />
+      )}
     </div>
+  );
+}
+
+function OvertimeRiskModal({
+  summary,
+  isLoading,
+  onOpenEmployee,
+  onClose,
+}: {
+  summary: OvertimeRiskSummary | undefined;
+  isLoading: boolean;
+  onOpenEmployee: (id: string) => void;
+  onClose: () => void;
+}) {
+  return (
+    <Modal title="Sustained Overtime Risk -- Proof" onClose={onClose} widthClassName="max-w-lg">
+      <div className="p-5 space-y-3 text-xs">
+        {isLoading ? (
+          <LoadingState label="Loading overtime risk…" />
+        ) : !summary ? (
+          <ErrorState message="Could not load overtime risk." />
+        ) : (
+          <>
+            <p className="text-gray-500">
+              Real timesheet hours, not estimated -- flagged when an employee logged{" "}
+              <strong>more than {summary.daily_hours_threshold}h on {summary.threshold_days}+ separate days</strong> within
+              the last {summary.window_days} days. Click a name for their full daily-hours history.
+            </p>
+            {summary.employees.length === 0 ? (
+              <p className="text-gray-400 italic">No employees currently meet this threshold.</p>
+            ) : (
+              <table className="w-full text-[11px]">
+                <thead>
+                  <tr className="text-gray-400 border-b border-gray-200">
+                    <th className="text-left font-medium py-1.5">Employee</th>
+                    <th className="text-left font-medium py-1.5">Designation</th>
+                    <th className="text-right font-medium py-1.5">Days over {summary.daily_hours_threshold}h</th>
+                    <th className="text-right font-medium py-1.5">Max hours/day</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {summary.employees.map((e) => (
+                    <tr key={e.employee_id} className="border-b border-gray-50 last:border-0">
+                      <td className="py-1.5">
+                        <button onClick={() => onOpenEmployee(e.employee_id)} className="font-medium text-primary hover:underline">
+                          {e.employee_id}
+                        </button>
+                      </td>
+                      <td className="py-1.5 text-gray-600 whitespace-nowrap">{e.job_name ?? "-"}</td>
+                      <td className="py-1.5 text-right text-gray-700">{e.overtime_days_recent}</td>
+                      <td className="py-1.5 text-right text-gray-700 font-medium">{e.max_daily_hours_recent}h</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </>
+        )}
+      </div>
+    </Modal>
   );
 }
 

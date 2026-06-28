@@ -773,6 +773,12 @@ export interface OvertimeRiskSummary {
   threshold_days: number;
   window_days: number;
   daily_hours_threshold: number;
+  employees: {
+    employee_id: string;
+    job_name: string | null;
+    overtime_days_recent: number;
+    max_daily_hours_recent: number;
+  }[];
 }
 
 export interface EmployeeListRow {
