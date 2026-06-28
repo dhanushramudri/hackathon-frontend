@@ -8,7 +8,8 @@ import { Users, Briefcase, ShieldAlert, Clock, ArrowRight, UserCheck, AlertOctag
 import { api, type RevenueMonth } from "@/lib/api";
 import { StatCard } from "@/components/shared/StatCard";
 import { Badge } from "@/components/shared/Badge";
-import { LoadingState, ErrorState } from "@/components/shared/EmptyState";
+import { ErrorState } from "@/components/shared/EmptyState";
+import { StatCardGridSkeleton, ListSkeleton, ChartSkeleton, Skeleton } from "@/components/shared/Skeleton";
 import { ProjectHealthDetailModal } from "@/components/health/ProjectHealthDetailModal";
 import { rootCauseLabel } from "@/lib/utils";
 import { EmployeeProfileModal } from "@/components/shared/EmployeeProfileModal";
@@ -33,7 +34,7 @@ export default function DashboardPage() {
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [selectedEmployee, setSelectedEmployee] = useState<string | null>(null);
 
-  if (tables.isLoading || health.isLoading || allocations.isLoading) return <LoadingState label="Loading dashboard…" />;
+  if (tables.isLoading || health.isLoading || allocations.isLoading) return <DashboardSkeleton />;
   if (tables.error || health.error || allocations.error) return <ErrorState message="Could not reach the ResourceIQ backend. Is it running on :8000?" />;
 
   const highRisk = (health.data ?? []).filter((p) => p.risk_band === "high").sort((a, b) => b.risk_score - a.risk_score);
@@ -327,6 +328,39 @@ function RevenueTooltip({ active, payload }: { active?: boolean; payload?: Array
           {d.deltaAbs >= 0 ? "▲" : "▼"} {Math.abs(d.deltaAbs).toLocaleString()} ({d.deltaPct!.toFixed(1)}%) vs prior month
         </p>
       )}
+    </div>
+  );
+}
+
+function DashboardSkeleton() {
+  return (
+    <div className="p-4 sm:p-6 space-y-6 max-w-6xl mx-auto">
+      <StatCardGridSkeleton count={4} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" />
+      <StatCardGridSkeleton count={4} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" />
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
+          <Skeleton className="h-4 w-40" />
+          <ListSkeleton rows={5} />
+        </div>
+        <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
+          <Skeleton className="h-4 w-40" />
+          <ListSkeleton rows={5} />
+        </div>
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
+          <Skeleton className="h-4 w-48" />
+          <ListSkeleton rows={5} />
+        </div>
+        <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
+          <Skeleton className="h-4 w-40" />
+          <ListSkeleton rows={5} />
+        </div>
+      </div>
+      <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
+        <Skeleton className="h-4 w-32" />
+        <ChartSkeleton height={180} />
+      </div>
     </div>
   );
 }

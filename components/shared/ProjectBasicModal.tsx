@@ -5,7 +5,8 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Modal } from "@/components/shared/Modal";
 import { Badge } from "@/components/shared/Badge";
-import { LoadingState, ErrorState } from "@/components/shared/EmptyState";
+import { ErrorState } from "@/components/shared/EmptyState";
+import { FieldGridSkeleton, TableSkeleton, Skeleton } from "@/components/shared/Skeleton";
 import { TableControls } from "@/components/shared/TableControls";
 import { TimesheetProofModal } from "@/components/shared/TimesheetProofModal";
 
@@ -63,7 +64,18 @@ export function ProjectBasicModal({ projectCode, onClose }: ProjectBasicModalPro
     >
       <div className="p-5 space-y-5">
         {isLoading ? (
-          <LoadingState label="Loading project…" />
+          <div className="space-y-5">
+            <Skeleton className="h-10 w-full rounded-lg" />
+            <FieldGridSkeleton count={4} />
+            <div className="space-y-2">
+              <Skeleton className="h-3 w-44" />
+              <TableSkeleton columns={6} rows={4} />
+            </div>
+            <div className="space-y-2">
+              <Skeleton className="h-3 w-56" />
+              <TableSkeleton columns={7} rows={5} />
+            </div>
+          </div>
         ) : hasError || !info.data ? (
           <ErrorState message="Could not load this project." />
         ) : (

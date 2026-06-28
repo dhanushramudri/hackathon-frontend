@@ -5,7 +5,8 @@ import { useQuery } from "@tanstack/react-query";
 import { api, type FreePoolCandidate } from "@/lib/api";
 import { Badge } from "@/components/shared/Badge";
 import { StatCard } from "@/components/shared/StatCard";
-import { LoadingState, ErrorState } from "@/components/shared/EmptyState";
+import { ErrorState } from "@/components/shared/EmptyState";
+import { StatCardGridSkeleton, ChipRowSkeleton, TableSkeleton, Skeleton } from "@/components/shared/Skeleton";
 import { Modal } from "@/components/shared/Modal";
 import { EmployeeProfileModal } from "@/components/shared/EmployeeProfileModal";
 import { cn, formatUsd } from "@/lib/utils";
@@ -61,7 +62,19 @@ export default function FreePoolPage() {
     return rows;
   }, [data, filter, coeFilter, designationFilter, search, sort]);
 
-  if (isLoading) return <LoadingState label="Building the free pool…" />;
+  if (isLoading) {
+    return (
+      <div className="p-4 sm:p-6 max-w-6xl mx-auto space-y-4">
+        <Skeleton className="h-3 w-80" />
+        <StatCardGridSkeleton count={4} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" />
+        <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-2">
+          <Skeleton className="h-3 w-56" />
+          <ChipRowSkeleton count={14} />
+        </div>
+        <TableSkeleton columns={7} rows={10} />
+      </div>
+    );
+  }
   if (error || !data) return <ErrorState message="Could not load the free pool." />;
 
   const counts = {

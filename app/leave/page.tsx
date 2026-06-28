@@ -8,6 +8,7 @@ import { api, type LeaveImpact } from "@/lib/api";
 import { Badge } from "@/components/shared/Badge";
 import { StatCard } from "@/components/shared/StatCard";
 import { LoadingState, ErrorState } from "@/components/shared/EmptyState";
+import { StatCardGridSkeleton, TableSkeleton } from "@/components/shared/Skeleton";
 import { TableControls } from "@/components/shared/TableControls";
 import { EmployeeProfileModal } from "@/components/shared/EmployeeProfileModal";
 import { ProjectBasicModal } from "@/components/shared/ProjectBasicModal";
@@ -100,7 +101,14 @@ function LeavePageInner() {
     [healthProjects.data]
   );
 
-  if (isLoading) return <LoadingState label="Cross-referencing leave records against active allocations…" />;
+  if (isLoading) {
+    return (
+      <div className="p-4 sm:p-6 max-w-5xl mx-auto space-y-4">
+        <StatCardGridSkeleton count={3} className="grid grid-cols-1 sm:grid-cols-3 gap-4" />
+        <TableSkeleton columns={8} rows={8} />
+      </div>
+    );
+  }
   if (error || !data) return <ErrorState message="Could not load leave impact." />;
 
   const onLeaveNow = data.filter((i) => i.is_currently_on_leave);

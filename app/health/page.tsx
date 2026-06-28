@@ -7,6 +7,7 @@ import { api, type HealthProject } from "@/lib/api";
 import { Badge } from "@/components/shared/Badge";
 import { StatCard } from "@/components/shared/StatCard";
 import { LoadingState, ErrorState } from "@/components/shared/EmptyState";
+import { StatCardGridSkeleton, TableSkeleton } from "@/components/shared/Skeleton";
 import { ProjectHealthDetailModal } from "@/components/health/ProjectHealthDetailModal";
 import { cn, formatUsd, rootCauseLabel, ROOT_CAUSE_LABEL } from "@/lib/utils";
 
@@ -168,7 +169,15 @@ function HealthPageInner() {
     });
   };
 
-  if (projects.isLoading) return <LoadingState label="Scoring project health…" />;
+  if (projects.isLoading) {
+    return (
+      <div className="p-4 sm:p-6 max-w-6xl mx-auto space-y-4">
+        <StatCardGridSkeleton count={3} className="grid grid-cols-1 sm:grid-cols-3 gap-4" />
+        <StatCardGridSkeleton count={3} className="grid grid-cols-1 sm:grid-cols-3 gap-4" />
+        <TableSkeleton columns={9} rows={10} />
+      </div>
+    );
+  }
   if (projects.error) return <ErrorState message="Could not load health data." />;
 
   const data = projects.data ?? [];

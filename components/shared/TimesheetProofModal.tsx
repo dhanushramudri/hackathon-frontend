@@ -5,7 +5,8 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Modal } from "@/components/shared/Modal";
 import { Badge } from "@/components/shared/Badge";
-import { LoadingState, ErrorState } from "@/components/shared/EmptyState";
+import { ErrorState } from "@/components/shared/EmptyState";
+import { Skeleton, TableSkeleton } from "@/components/shared/Skeleton";
 
 interface TimesheetProofModalProps {
   employeeId: string;
@@ -44,7 +45,15 @@ export function TimesheetProofModal({ employeeId, projectId, onClose }: Timeshee
     <Modal title={`${employeeId} on ${projectId}`} onClose={onClose} widthClassName="max-w-lg">
       <div className="p-5 space-y-3">
         {ts.isLoading ? (
-          <LoadingState label="Loading timesheet…" />
+          <div className="space-y-3">
+            <Skeleton className="h-5 w-32 rounded-full" />
+            <Skeleton className="h-3 w-64" />
+            <div className="flex items-center justify-between">
+              <Skeleton className="h-3 w-40" />
+              <Skeleton className="h-6 w-32 rounded-lg" />
+            </div>
+            <TableSkeleton columns={4} rows={6} />
+          </div>
         ) : ts.error || !ts.data ? (
           <ErrorState message="Could not load this allocation's timesheet." />
         ) : (

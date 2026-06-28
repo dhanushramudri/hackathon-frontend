@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { api, type AllocationRow } from "@/lib/api";
 import { Badge } from "@/components/shared/Badge";
 import { LoadingState, ErrorState } from "@/components/shared/EmptyState";
+import { TableSkeleton } from "@/components/shared/Skeleton";
 import { EmployeeProfileModal } from "@/components/shared/EmployeeProfileModal";
 import { ProjectBasicModal } from "@/components/shared/ProjectBasicModal";
 import { ProjectHealthDetailModal } from "@/components/health/ProjectHealthDetailModal";
@@ -154,7 +155,13 @@ function AllocationsPageInner() {
     setEndingSoonOnly(false);
   };
 
-  if (isLoading) return <LoadingState label="Loading allocations…" />;
+  if (isLoading) {
+    return (
+      <div className="p-4 sm:p-6 max-w-6xl mx-auto space-y-4">
+        <TableSkeleton columns={11} rows={10} />
+      </div>
+    );
+  }
   if (error) return <ErrorState message="Could not load allocations." />;
 
   const byProject = groupBy(filtered, (r) => r.project_id);

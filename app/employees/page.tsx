@@ -5,7 +5,8 @@ import { useQuery } from "@tanstack/react-query";
 import { api, type EmployeeListRow } from "@/lib/api";
 import { Badge } from "@/components/shared/Badge";
 import { StatCard } from "@/components/shared/StatCard";
-import { LoadingState, ErrorState } from "@/components/shared/EmptyState";
+import { ErrorState } from "@/components/shared/EmptyState";
+import { StatCardGridSkeleton, TableSkeleton } from "@/components/shared/Skeleton";
 import { EmployeeProfileModal } from "@/components/shared/EmployeeProfileModal";
 import { cn } from "@/lib/utils";
 
@@ -89,7 +90,14 @@ export default function EmployeesPage() {
     setDeptFilter("all");
   };
 
-  if (isLoading) return <LoadingState label="Loading employees…" />;
+  if (isLoading) {
+    return (
+      <div className="p-4 sm:p-6 max-w-6xl mx-auto space-y-4">
+        <StatCardGridSkeleton count={4} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" />
+        <TableSkeleton columns={8} rows={10} />
+      </div>
+    );
+  }
   if (error || !data) return <ErrorState message="Could not load employees." />;
 
   return (

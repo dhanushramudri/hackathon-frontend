@@ -7,6 +7,7 @@ import { AlertTriangle, CheckCircle2, ChevronDown, Sparkles, SlidersHorizontal, 
 import { api, type PipelineDemandRow, type RecommendationCandidate, type SemanticMatchResult } from "@/lib/api";
 import { Badge } from "@/components/shared/Badge";
 import { LoadingState, ErrorState } from "@/components/shared/EmptyState";
+import { Skeleton, ListSkeleton, FieldGridSkeleton, CandidateCardSkeleton } from "@/components/shared/Skeleton";
 import { EmployeeProfileModal, type ProfileTab, type SkillMatchContext } from "@/components/shared/EmployeeProfileModal";
 import { cn } from "@/lib/utils";
 
@@ -135,7 +136,7 @@ function RecommendationsPageInner() {
     enabled: selectedRow !== null,
   });
 
-  if (pipeline.isLoading) return <LoadingState label="Loading pipeline demand…" />;
+  if (pipeline.isLoading) return <RecommendationsSkeleton />;
   if (pipeline.error) return <ErrorState message="Could not load pipeline demand." />;
 
   const demandRows = (pipeline.data ?? []).filter((r) => r.skillset || r.resources_requested);
@@ -455,7 +456,18 @@ function RecommendationsPageInner() {
           {selectedRow === null ? (
             <div className="h-64 flex items-center justify-center text-gray-300 text-sm">Select a pipeline demand row to see ranked candidates</div>
           ) : recommendation.isLoading ? (
-            <LoadingState label="Scoring candidates…" />
+            <div className="space-y-4">
+              <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
+                <Skeleton className="h-4 w-56" />
+                <Skeleton className="h-3 w-40" />
+                <FieldGridSkeleton count={6} className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 border-t border-gray-100 pt-3" />
+              </div>
+              <div className="space-y-2.5">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <CandidateCardSkeleton key={i} />
+                ))}
+              </div>
+            </div>
           ) : recommendation.error ? (
             <ErrorState message="Could not compute recommendations." />
           ) : recommendation.data ? (
@@ -1137,5 +1149,30 @@ function Metric({ label, value, suffix, onClick }: { label: string; value: numbe
       </div>
       <p className="text-gray-500 mt-0.5 group-hover:underline">{suffix ?? value.toFixed(2)}</p>
     </button>
+  );
+}
+
+function RecommendationsSkeleton() {
+  return (
+    <div className="p-4 sm:p-6 max-w-6xl mx-auto space-y-4">
+      <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 flex items-center gap-3 flex-wrap">
+        <Skeleton className="h-3 w-56" />
+        <Skeleton className="h-5 w-32 rounded-full" />
+        <Skeleton className="h-5 w-32 rounded-full" />
+        <Skeleton className="h-5 w-32 rounded-full" />
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-6">
+        <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+          <div className="px-3 py-2.5 border-b border-gray-100 space-y-2">
+            <Skeleton className="h-3 w-40" />
+            <Skeleton className="h-7 w-full rounded-lg" />
+          </div>
+          <ListSkeleton rows={7} lines={2} />
+        </div>
+        <div className="h-64 flex items-center justify-center">
+          <Skeleton className="h-3 w-72" />
+        </div>
+      </div>
+    </div>
   );
 }

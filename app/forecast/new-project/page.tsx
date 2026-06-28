@@ -4,7 +4,8 @@ import { Fragment, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Plus, Trash2, AlertTriangle, ChevronDown, ChevronUp, X } from "lucide-react";
 import { api, type ForecastSpec, type RedeployCandidate } from "@/lib/api";
-import { LoadingState, ErrorState } from "@/components/shared/EmptyState";
+import { ErrorState } from "@/components/shared/EmptyState";
+import { Skeleton, TableSkeleton } from "@/components/shared/Skeleton";
 import { Badge } from "@/components/shared/Badge";
 import { EmployeeProfileModal, type SkillMatchContext } from "@/components/shared/EmployeeProfileModal";
 import { Modal } from "@/components/shared/Modal";
@@ -235,7 +236,29 @@ export default function NewProjectForecastPage() {
   const [candidateModal, setCandidateModal] = useState<{ title: string; subtitle?: string; candidates: RedeployCandidate[]; showQualifies?: boolean } | null>(null);
   const forecast = useMutation({ mutationFn: () => api.newProjectForecast(specs.map(toForecastSpec)) });
 
-  if (coeOptions.isLoading || categories.isLoading) return <LoadingState label="Loading COE and role-mix reference data…" />;
+  if (coeOptions.isLoading || categories.isLoading) {
+    return (
+      <div className="p-4 sm:p-6 max-w-4xl mx-auto space-y-5">
+        <Skeleton className="h-3 w-64" />
+        <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <Skeleton className="h-4 w-28" />
+            <Skeleton className="h-7 w-16 rounded-lg" />
+          </div>
+          <div className="flex items-center gap-3">
+            <Skeleton className="h-9 w-32 rounded-lg" />
+            <Skeleton className="h-9 w-28 rounded-lg" />
+          </div>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <Skeleton key={i} className="h-6 w-24 rounded-lg" />
+            ))}
+          </div>
+          <TableSkeleton columns={3} rows={4} />
+        </div>
+      </div>
+    );
+  }
   if (coeOptions.error || categories.error) return <ErrorState message="Could not load role-mix reference data." />;
 
   const coeList = coeOptions.data ?? [];
@@ -663,6 +686,17 @@ export default function NewProjectForecastPage() {
           </button>
         </div>
       </div>
+
+      {forecast.isPending && !forecast.data && (
+        <div className="space-y-3">
+          <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-2">
+            <Skeleton className="h-3 w-32" />
+            <Skeleton className="h-3 w-72" />
+          </div>
+          <Skeleton className="h-12 w-full rounded-xl" />
+          <TableSkeleton columns={8} rows={6} />
+        </div>
+      )}
 
       {forecast.data && (
         <div className="space-y-3">

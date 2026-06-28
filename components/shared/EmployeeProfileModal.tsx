@@ -7,7 +7,8 @@ import { CheckCircle2, ChevronDown, ChevronUp, Sparkles, XCircle } from "lucide-
 import { api, type AllocationRow, type EmployeeAllocationRow, type EmployeeProfile } from "@/lib/api";
 import { Modal } from "@/components/shared/Modal";
 import { Badge } from "@/components/shared/Badge";
-import { LoadingState, ErrorState } from "@/components/shared/EmptyState";
+import { ErrorState } from "@/components/shared/EmptyState";
+import { ModalBodySkeleton, TableSkeleton } from "@/components/shared/Skeleton";
 import { TableControls } from "@/components/shared/TableControls";
 import { FiredBadge } from "@/components/shared/FiredBadge";
 import { TimesheetProofModal } from "@/components/shared/TimesheetProofModal";
@@ -70,7 +71,7 @@ export function EmployeeProfileModal({ employeeId, initialTab, onClose, skillMat
 
       <div className="p-5">
         {profile.isLoading ? (
-          <LoadingState label="Loading profile…" />
+          <ModalBodySkeleton />
         ) : profile.error ? (
           <ErrorState message="Could not load this employee's profile." />
         ) : profile.data ? (
@@ -95,7 +96,7 @@ function RedeployMatchesTab({ employeeId }: { employeeId: string }) {
     queryFn: () => api.freePoolMatches(employeeId),
   });
 
-  if (matches.isLoading) return <LoadingState label="Scoring this person against open pipeline demand…" />;
+  if (matches.isLoading) return <TableSkeleton columns={7} rows={5} />;
   if (matches.error) return <ErrorState message="Could not load redeploy matches." />;
   const rows = matches.data ?? [];
 

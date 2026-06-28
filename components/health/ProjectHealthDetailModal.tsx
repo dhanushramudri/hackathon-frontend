@@ -5,7 +5,8 @@ import { useQuery } from "@tanstack/react-query";
 import { api, type ProjectHealthDetail, type WsrReportRow } from "@/lib/api";
 import { Modal } from "@/components/shared/Modal";
 import { Badge } from "@/components/shared/Badge";
-import { LoadingState, ErrorState } from "@/components/shared/EmptyState";
+import { ErrorState } from "@/components/shared/EmptyState";
+import { ModalBodySkeleton } from "@/components/shared/Skeleton";
 import { TableControls } from "@/components/shared/TableControls";
 import { FiredBadge } from "@/components/shared/FiredBadge";
 import { cn, formatUsd } from "@/lib/utils";
@@ -55,7 +56,7 @@ export function ProjectHealthDetailModal({ projectCode, onClose }: ProjectHealth
 
       <div className="p-5">
         {detail.isLoading ? (
-          <LoadingState label="Loading project detail…" />
+          <ModalBodySkeleton />
         ) : detail.error ? (
           <ErrorState message="Could not load this project's detail." />
         ) : detail.data ? (

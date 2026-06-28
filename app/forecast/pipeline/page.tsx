@@ -6,6 +6,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, Cart
 import { AlertTriangle, ChevronDown, ChevronUp, TrendingUp } from "lucide-react";
 import { api, type OutlookDrilldownDeal, type OutlookDrilldownEmployee, type OutlookDrilldownResult } from "@/lib/api";
 import { LoadingState, ErrorState } from "@/components/shared/EmptyState";
+import { Skeleton, ChartSkeleton, TableSkeleton } from "@/components/shared/Skeleton";
 import { Badge } from "@/components/shared/Badge";
 import { Modal } from "@/components/shared/Modal";
 import { EmployeeProfileModal } from "@/components/shared/EmployeeProfileModal";
@@ -89,7 +90,23 @@ export default function PipelineOutlookPage() {
     enabled: !!drilldown,
   });
 
-  if (isLoading) return <LoadingState label="Building pipeline outlook…" />;
+  if (isLoading) {
+    return (
+      <div className="p-4 sm:p-6 max-w-6xl mx-auto space-y-5">
+        <div className="rounded-xl border border-gray-200 bg-white p-4 flex flex-wrap items-end gap-4">
+          <Skeleton className="h-9 w-32 rounded-lg" />
+          <Skeleton className="h-9 w-24 rounded-lg" />
+          <Skeleton className="h-9 w-28 rounded-lg" />
+          <Skeleton className="h-3 flex-1 min-w-[260px]" />
+        </div>
+        <div className="rounded-xl border border-gray-200 bg-white p-4">
+          <ChartSkeleton height={280} />
+        </div>
+        <TableSkeleton columns={9} rows={6} />
+        <TableSkeleton columns={8} rows={6} />
+      </div>
+    );
+  }
   if (error || !data) return <ErrorState message="Could not load the pipeline outlook." />;
 
   const clusterData = pivotClusterMix(data.project_mix_by_cluster_by_month);
@@ -545,7 +562,18 @@ function DrilldownContent({
   loading: boolean;
   onOpenEmployee: (id: string) => void;
 }) {
-  if (loading || !result) return <p className="p-4 text-xs text-gray-400">Loading real rows…</p>;
+  if (loading || !result) {
+    return (
+      <div className="p-4 space-y-3">
+        <Skeleton className="h-7 w-full rounded-lg" />
+        <div className="space-y-2">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <Skeleton key={i} className="h-8 w-full rounded-lg" />
+          ))}
+        </div>
+      </div>
+    );
+  }
   const totalValue = result.deals.reduce((s, d) => s + (d.value_usd ?? 0), 0);
   const totalProbable = result.deals.reduce((s, d) => s + (d.probable_value_usd ?? 0), 0);
   return (
