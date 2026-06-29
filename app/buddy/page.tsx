@@ -347,7 +347,6 @@ export default function BuddyPage() {
           </span>
           <div className="min-w-0">
             <h1 className="text-sm font-bold text-gray-900 leading-tight">Buddy</h1>
-            <p className="hidden sm:block text-[11px] text-gray-400 leading-tight truncate">Your resourcing buddy -- staffing, health, free pool, leave, profiles, forecasts, rate card, and more</p>
           </div>
         </div>
 
@@ -355,10 +354,6 @@ export default function BuddyPage() {
           {messages.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-center max-w-lg mx-auto gap-4 sm:gap-5">
               <Mascot className="w-11 h-11 sm:w-14 sm:h-14" glow />
-              <div>
-                <h2 className="text-sm sm:text-base font-bold text-gray-900 mb-1">Ask Buddy anything about resourcing</h2>
-                <p className="text-xs sm:text-sm text-gray-400">Every answer is backed by the same engines behind the dedicated pages -- not a guess.</p>
-              </div>
               <div className="flex flex-col gap-1.5 sm:gap-2 w-full">
                 {SUGGESTIONS.map((s, i) => (
                   <button
@@ -430,7 +425,7 @@ export default function BuddyPage() {
               <Send className="w-4 h-4" />
             </button>
           </div>
-          <p className="text-center text-[10px] text-gray-300 mt-2">Buddy can make mistakes -- verify important findings on the dedicated pages.</p>
+          <p className="text-center text-[10px] text-gray-300 mt-2">Buddy can make mistakes. Verify important findings on dedicated pages.</p>
         </div>
       </div>
 

@@ -4,7 +4,13 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid } from "recharts";
 import { AlertTriangle, ChevronDown, ChevronUp, TrendingUp } from "lucide-react";
-import { api, type OutlookDrilldownDeal, type OutlookDrilldownEmployee, type OutlookDrilldownResult } from "@/lib/api";
+import {
+  api,
+  type DesignationRosterEntry,
+  type OutlookDrilldownDeal,
+  type OutlookDrilldownEmployee,
+  type OutlookDrilldownResult,
+} from "@/lib/api";
 import { LoadingState, ErrorState } from "@/components/shared/EmptyState";
 import { Skeleton, ChartSkeleton, TableSkeleton } from "@/components/shared/Skeleton";
 import { Badge } from "@/components/shared/Badge";
@@ -20,8 +26,11 @@ function tomorrowStr(): string {
   return d.toISOString().slice(0, 10);
 }
 
-function pivotClusterMix(rows: { month: string; cluster: number; count: number }[]) {
+function pivotClusterMix(rows: { month: string; cluster: number; count: number }[], allMonths: string[]) {
   const byMonth = new Map<string, Record<string, number | string>>();
+  for (const month of allMonths) {
+    byMonth.set(month, { month });
+  }
   for (const r of rows) {
     const entry = byMonth.get(r.month) ?? { month: r.month };
     entry[`cluster_${r.cluster}`] = r.count;
@@ -109,7 +118,10 @@ export default function PipelineOutlookPage() {
   }
   if (error || !data) return <ErrorState message="Could not load the pipeline outlook." />;
 
-  const clusterData = pivotClusterMix(data.project_mix_by_cluster_by_month);
+  const clusterData = pivotClusterMix(
+    data.project_mix_by_cluster_by_month,
+    data.months.map((m) => m.month)
+  );
   const clusters = Array.from(new Set(data.project_mix_by_cluster_by_month.map((r) => r.cluster))).sort();
   const periodLabel = granularity === "week" ? "week" : "month";
   const roleModeRows = data.role_demand_by_month.filter((r) => r.is_confirmed === (roleMode === "confirmed"));
@@ -171,18 +183,30 @@ export default function PipelineOutlookPage() {
             ))}
           </div>
         </div>
-        <p className="text-[11px] text-gray-400 flex-1 min-w-[260px]">
-          Real pipeline demand visibility runs through <strong>{data.real_demand_data_through ?? "n/a"}</strong> -- months
-          beyond that show real zeros, not an estimate. Every number below is clickable through to the real rows behind it.
-        </p>
       </div>
 
-      {data.first_shortfall_month && (
-        <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm">
-          <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-          First real shortfall: <strong>{data.first_shortfall_month}</strong> -- you have until then to redeploy or hire
-          for the role(s) below before capacity pressure becomes acute.
-        </div>
+      {data.first_shortfall_month && data.first_shortfall_roles.length > 0 && (
+        <button
+          onClick={() => {
+            setRoleMode("confirmed");
+            setPeriodFilter([data.first_shortfall_month!]);
+            document.getElementById("role-demand-table")?.scrollIntoView({ behavior: "smooth", block: "start" });
+          }}
+          className="w-full flex items-start gap-2 px-4 py-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm text-left hover:bg-red-100 transition"
+        >
+          <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+          <span>
+            First real shortfall: <strong>{data.first_shortfall_month}</strong> --{" "}
+            {data.first_shortfall_roles.map((r, i) => (
+              <span key={r.role}>
+                {i > 0 && " and "}
+                <strong>{r.role}</strong> (need {r.needed_headcount}, {r.available_headcount} available
+                {r.shortfall_value_usd > 0 && `, ${formatUsd(r.shortfall_value_usd)}/mo unstaffable`})
+              </span>
+            ))}
+            {" "}-- redeploy or hire before then.
+          </span>
+        </button>
       )}
 
       <div className="rounded-xl border border-gray-200 bg-white p-4">
@@ -226,7 +250,7 @@ export default function PipelineOutlookPage() {
         <table className="w-full text-xs data-table">
           <thead className="bg-gray-50 text-gray-500">
             <tr>
-              {["Period", "Confirmed", "Unconfirmed", "Supply", "Net", "Confirmed $", "Unconfirmed $", "Probable $", "Flags"].map((h) => (
+              {["Period", "Confirmed", "Unconfirmed", "Supply", "Net", "Confirmed $", "Unconfirmed $", "Flags"].map((h) => (
                 <th key={h} className="text-left font-medium px-3 py-2 whitespace-nowrap">{h}</th>
               ))}
             </tr>
@@ -284,18 +308,6 @@ export default function PipelineOutlookPage() {
                     "-"
                   )}
                 </td>
-                <td className="px-3 py-2">
-                  {m.probable_unconfirmed_value_usd > 0 ? (
-                    <button
-                      onClick={() => open({ dimension: "unconfirmed_demand", month: m.month, label: `Probable $ (stage-weighted) -- ${m.month}` })}
-                      className="text-gray-400 hover:text-primary hover:underline"
-                    >
-                      {formatUsd(m.probable_unconfirmed_value_usd)}
-                    </button>
-                  ) : (
-                    "-"
-                  )}
-                </td>
                 <td className="px-3 py-2 space-y-1">
                   {m.early_warning && <Badge variant="red">shortfall</Badge>}
                   {!m.has_real_demand_data && <Badge variant="amber">no pipeline visibility yet</Badge>}
@@ -316,7 +328,7 @@ export default function PipelineOutlookPage() {
         </div>
       </div>
 
-      <div className="rounded-xl border border-gray-200 bg-white p-4">
+      <div id="role-demand-table" className="rounded-xl border border-gray-200 bg-white p-4">
         <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
           <h2 className="text-sm font-semibold text-gray-700">Headcount Demand by Role</h2>
           <div className="flex rounded-lg border border-gray-200 overflow-hidden text-[11px]">
@@ -370,7 +382,7 @@ export default function PipelineOutlookPage() {
           <table className="w-full text-xs data-table">
             <thead className="bg-gray-50 text-gray-500">
               <tr>
-                {["Period", "Role", "Needed", "Available", "Shortfall", "Shortfall $", "Value $", "Probable $"].map((h) => (
+                {["Period", "Role", "Needed", "Available", "Shortfall", "Shortfall $", "Value $"].map((h) => (
                   <th key={h} className="text-left font-medium px-3 py-2 whitespace-nowrap">{h}</th>
                 ))}
               </tr>
@@ -403,7 +415,6 @@ export default function PipelineOutlookPage() {
                   </td>
                   <td className="px-3 py-2 text-gray-500">{r.shortfall_value_usd > 0 ? formatUsd(r.shortfall_value_usd) : "-"}</td>
                   <td className="px-3 py-2 text-gray-400">{r.value_usd ? formatUsd(r.value_usd) : "-"}</td>
-                  <td className="px-3 py-2 text-gray-400">{r.probable_value_usd ? formatUsd(r.probable_value_usd) : "-"}</td>
                 </tr>
               ))}
             </tbody>
@@ -575,14 +586,12 @@ function DrilldownContent({
     );
   }
   const totalValue = result.deals.reduce((s, d) => s + (d.value_usd ?? 0), 0);
-  const totalProbable = result.deals.reduce((s, d) => s + (d.probable_value_usd ?? 0), 0);
   return (
     <div className="p-4 space-y-4 max-h-[75vh] overflow-y-auto">
       {result.deals.length > 0 && (
         <div className="rounded-lg bg-gray-50 border border-gray-200 px-3 py-2 flex flex-wrap gap-4 text-[11px]">
           <span className="text-gray-500">{result.deals.length} real deal(s)</span>
           {totalValue > 0 && <span className="text-gray-700 font-medium">sum value: {formatUsd(totalValue)}</span>}
-          {totalProbable > 0 && <span className="text-gray-400">sum probable: {formatUsd(totalProbable)}</span>}
         </div>
       )}
       {result.deals.length > 0 && (
@@ -595,8 +604,20 @@ function DrilldownContent({
           </div>
         </div>
       )}
-      {result.deals.length === 0 && result.supply_employees.length === 0 && (
+      {result.deals.length === 0 && result.supply_employees.length === 0 && result.designation_roster.length === 0 && (
         <p className="text-[11px] text-gray-400 italic">No matching real rows.</p>
+      )}
+      {result.designation_roster.length > 0 && (
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 mb-1.5">
+            Proof -- every real {result.value} ({result.designation_roster.length}), and why each does or doesn&apos;t count as available
+          </p>
+          <div className="divide-y divide-gray-50">
+            {result.designation_roster.map((r) => (
+              <RosterRow key={r.employee_id} r={r} onOpenEmployee={onOpenEmployee} />
+            ))}
+          </div>
+        </div>
       )}
       {result.supply_employees.length > 0 && (
         <div>
@@ -634,13 +655,6 @@ function DealRow({ deal: d }: { deal: OutlookDrilldownDeal }) {
           {d.value_usd != null && d.hourly_rate_usd != null && (
             <p className="text-gray-500 bg-gray-50 rounded-lg px-2 py-1.5">
               ${d.hourly_rate_usd}/hr × 160 standard monthly hours × {d.requested_pct ?? 100}% requested = <strong>{formatUsd(d.value_usd)}</strong>
-              {!d.is_confirmed && d.stage_weight != null && (
-                <>
-                  {" "}
-                  · × {d.stage_weight} stage weight ({d.deal_stage_hubspot?.trim() ?? "no stage"}) ={" "}
-                  <strong>{formatUsd(d.probable_value_usd ?? 0)} probable</strong>
-                </>
-              )}
             </p>
           )}
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-3 gap-y-1">
@@ -669,6 +683,47 @@ function DealRow({ deal: d }: { deal: OutlookDrilldownDeal }) {
           {d.comments && <p className="text-gray-400">Comments: {d.comments}</p>}
         </div>
       )}
+    </div>
+  );
+}
+
+function RosterRow({ r, onOpenEmployee }: { r: DesignationRosterEntry; onOpenEmployee: (id: string) => void }) {
+  return (
+    <div className="py-2 text-[11px]">
+      <div className="flex items-center gap-2 flex-wrap">
+        <button onClick={() => onOpenEmployee(r.employee_id)} className="font-medium text-primary hover:underline whitespace-nowrap">
+          {r.employee_id}
+        </button>
+        <span className="text-gray-500 whitespace-nowrap">{r.job_name}</span>
+        <span className="text-gray-400 whitespace-nowrap">{r.department_name}</span>
+        <span className="text-gray-400 whitespace-nowrap">{r.location}</span>
+        <span
+          className={cn(
+            "ml-auto text-[10px] px-1.5 py-0.5 rounded-full border whitespace-nowrap",
+            r.is_available ? "bg-emerald-50 border-emerald-200 text-emerald-700" : "bg-gray-50 border-gray-200 text-gray-500"
+          )}
+        >
+          {r.is_available ? `counts as available -- ${r.available_pct}% free` : `doesn't count -- only ${r.available_pct}% free`}
+        </span>
+      </div>
+      <div className="mt-1 flex flex-wrap gap-1.5">
+        {r.current_allocations.length === 0 ? (
+          <span className="text-gray-400">no current allocation -- fully free</span>
+        ) : (
+          r.current_allocations.map((a, i) => (
+            <span
+              key={i}
+              className={cn(
+                "text-[10px] px-1.5 py-0.5 rounded-full border whitespace-nowrap",
+                a.is_internal ? "bg-violet-50 border-violet-200 text-violet-600" : "bg-blue-50 border-blue-200 text-blue-700"
+              )}
+            >
+              {a.project_id} · {a.allocation_by_percentage}%{a.is_internal ? " (internal, doesn't block client work)" : ""} · until{" "}
+              {a.allocated_end_date}
+            </span>
+          ))
+        )}
+      </div>
     </div>
   );
 }

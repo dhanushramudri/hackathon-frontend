@@ -546,7 +546,6 @@ export interface OutlookMonth {
   supply_anomaly_note: string | null;
   confirmed_value_usd: number;
   unconfirmed_value_usd: number;
-  probable_unconfirmed_value_usd: number;
 }
 
 export interface OutlookRoleDemandRow {
@@ -559,7 +558,6 @@ export interface OutlookRoleDemandRow {
   shortfall: number | null;
   shortfall_value_usd: number;
   value_usd: number | null;
-  probable_value_usd: number | null;
   is_confirmed: boolean;
 }
 
@@ -587,6 +585,7 @@ export interface SixMonthOutlookResult {
   granularity: "month" | "week";
   months: OutlookMonth[];
   first_shortfall_month: string | null;
+  first_shortfall_roles: OutlookRoleDemandRow[];
   real_demand_data_through: string | null;
   real_supply_data_through: string | null;
   role_demand_by_month: OutlookRoleDemandRow[];
@@ -627,8 +626,6 @@ export interface OutlookDrilldownDeal {
   is_late_notice: boolean | null;
   hourly_rate_usd: number | null;
   value_usd: number | null;
-  stage_weight: number | null;
-  probable_value_usd: number | null;
 }
 
 export interface OutlookDrilldownEmployee {
@@ -644,6 +641,25 @@ export interface OutlookDrilldownEmployee {
   is_anomaly_cluster: boolean;
 }
 
+export interface RosterAllocation {
+  project_id: string;
+  type_of_project: string | null;
+  allocation_by_percentage: number;
+  allocated_start_date: string | null;
+  allocated_end_date: string | null;
+  is_internal: boolean;
+}
+
+export interface DesignationRosterEntry {
+  employee_id: string;
+  job_name: string | null;
+  location: string | null;
+  department_name: string | null;
+  available_pct: number;
+  is_available: boolean;
+  current_allocations: RosterAllocation[];
+}
+
 export interface OutlookDrilldownResult {
   month: string | null;
   dimension: string;
@@ -651,6 +667,7 @@ export interface OutlookDrilldownResult {
   deals: OutlookDrilldownDeal[];
   supply_employees: OutlookDrilldownEmployee[];
   supply_anomaly_note: string | null;
+  designation_roster: DesignationRosterEntry[];
 }
 
 export interface SemanticMatchCandidate {

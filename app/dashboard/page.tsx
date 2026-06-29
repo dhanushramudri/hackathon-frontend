@@ -115,11 +115,12 @@ export default function DashboardPage() {
         />
         <StatCard
           label="At-Risk Projects"
-          value={highRisk.length + mediumRisk.length}
-          sub={`${highRisk.length} high, ${mediumRisk.length} medium`}
+          value={highRisk.length}
+          sub="high risk, needs attention now"
           color={highRisk.length > 0 ? "red" : "default"}
           icon={<ShieldAlert className="w-4 h-4" />}
           href="/health"
+          breakdown={[{ label: "medium also flagged", value: mediumRisk.length, colorClass: "bg-amber-100 text-amber-800" }]}
         />
         <StatCard
           label="Allocations Ending Soon"
@@ -134,14 +135,13 @@ export default function DashboardPage() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           label="Free Pool Available"
-          value={freePool.data?.length ?? "-"}
-          sub="right now vs. freeing up within 30 days"
+          value={freePool.data ? freePoolCounts.fully_free : "-"}
+          sub="fully free, available right now"
           color="green"
           icon={<UserCheck className="w-4 h-4" />}
           href="/free-pool"
           breakdown={
             freePool.data && [
-              { label: "fully free", value: freePoolCounts.fully_free, colorClass: "bg-emerald-100 text-emerald-800" },
               { label: "under-utilized", value: freePoolCounts.under_utilized, colorClass: "bg-blue-100 text-blue-800" },
               { label: "ending soon", value: freePoolCounts.ending_soon, colorClass: "bg-amber-100 text-amber-800" },
             ]

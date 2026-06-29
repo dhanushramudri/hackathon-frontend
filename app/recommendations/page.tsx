@@ -313,7 +313,7 @@ function RecommendationsPageInner() {
             </p>
           </div>
         ) : (
-        <div className="rounded-xl border border-gray-200 bg-white overflow-hidden flex flex-col max-h-[60dvh] lg:max-h-[calc(100dvh-180px)]">
+        <div className="rounded-xl border border-gray-200 bg-white overflow-hidden flex flex-col lg:max-h-[calc(100dvh-180px)]">
           <div className="px-3 py-2.5 border-b border-gray-100 space-y-2">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-1.5">
