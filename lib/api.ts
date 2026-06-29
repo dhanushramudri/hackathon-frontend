@@ -73,6 +73,8 @@ export interface DocxCategoryRoleMix {
 export type StaffingSignal = "redeploy" | "redeploy_with_training" | "hire" | "not_assessed";
 export type CandidateBucket = "eligible" | "trainable" | "gap" | "not_assessed";
 
+export type MatchTier = "skill_match" | "same_grade_fallback" | "adjacent_level_fallback" | null;
+
 export interface RecommendationCandidate {
   employee_id: string;
   job_name: string;
@@ -88,6 +90,15 @@ export interface RecommendationCandidate {
   competency_score: number;
   available_pct: number;
   meets_requested_capacity: boolean;
+  match_tier?: MatchTier;
+  earliest_available_date?: string | null;
+  earliest_available_proof?: string | null;
+}
+
+export interface FallbackCandidates {
+  requested_designations: string[];
+  same_grade: RecommendationCandidate[];
+  adjacent_level: RecommendationCandidate[];
 }
 
 export interface DealCompositionRow {
@@ -110,6 +121,9 @@ export interface RecommendationResult {
   total_employees_considered: number;
   candidate_pool_size: number;
   candidates_with_real_skill_match: number;
+  genuine_skill_match_count?: number;
+  fallback_candidates?: FallbackCandidates | null;
+  best_fit_if_delayed?: RecommendationCandidate[];
   deal_composition: DealCompositionRow[];
   pipeline_row?: {
     row_index: number;
@@ -133,6 +147,7 @@ export interface RecommendationResult {
     deal_stage_hubspot: string | null;
     comments: string | null;
     skillset_coe_categories: string[];
+    requested_designations?: string[];
   };
 }
 
@@ -429,6 +444,8 @@ export interface ForecastBreakdownRow {
   adjacent_fill_count: number;
   shortfall: number;
   shortfall_value_usd: number;
+  full_role_monthly_value_usd: number;
+  achievable_monthly_value_usd: number;
   hire_signal: boolean;
   recommended_start_date: string | null;
   recommended_start_date_proof: string | null;
@@ -453,6 +470,9 @@ export interface NewProjectForecastResult {
   breakdown: ForecastBreakdownRow[];
   total_shortfall_headcount: number;
   total_shortfall_value_usd: number;
+  total_full_role_value_usd: number;
+  total_achievable_value_usd: number;
+  pct_achievable_with_current_headcount: number | null;
 }
 
 export interface CoeOption {
@@ -465,6 +485,8 @@ export interface RoleMixPreview {
   roles: RoleMixDetailRow[];
   sample_size: number | null;
   source: string;
+  on_time_sample_size?: number;
+  all_completed_sample_size?: number;
   matched_project_codes: string[];
 }
 

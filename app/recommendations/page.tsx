@@ -4,7 +4,7 @@ import { Suspense, useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 import { AlertTriangle, CheckCircle2, ChevronDown, Sparkles, SlidersHorizontal, XCircle } from "lucide-react";
-import { api, type PipelineDemandRow, type RecommendationCandidate, type SemanticMatchResult } from "@/lib/api";
+import { api, type FallbackCandidates, type PipelineDemandRow, type RecommendationCandidate, type SemanticMatchResult } from "@/lib/api";
 import { Badge } from "@/components/shared/Badge";
 import { LoadingState, ErrorState } from "@/components/shared/EmptyState";
 import { Skeleton, ListSkeleton, FieldGridSkeleton, CandidateCardSkeleton } from "@/components/shared/Skeleton";
@@ -596,6 +596,20 @@ function RecommendationsPageInner() {
                 </div>
               )}
 
+              {recommendation.data.fallback_candidates && (
+                <FallbackCascadePanel
+                  fallback={recommendation.data.fallback_candidates}
+                  onOpenProfile={(employeeId, tab) => setOpenProfile({ employeeId, tab })}
+                />
+              )}
+
+              {recommendation.data.best_fit_if_delayed && recommendation.data.best_fit_if_delayed.length > 0 && (
+                <BestFitIfDelayedPanel
+                  candidates={recommendation.data.best_fit_if_delayed}
+                  onOpenProfile={(employeeId, tab) => setOpenProfile({ employeeId, tab })}
+                />
+              )}
+
               {recommendation.data.candidates.length > 0 && (
                 <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-2">
                   {!recommendation.data.has_skillset && (
@@ -1075,6 +1089,116 @@ function SemanticMatchPanel({
   );
 }
 
+function FallbackCascadePanel({
+  fallback,
+  onOpenProfile,
+}: {
+  fallback: FallbackCandidates;
+  onOpenProfile: (employeeId: string, tab: ProfileTab) => void;
+}) {
+  return (
+    <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-3.5 space-y-3">
+      <p className="text-xs text-amber-800">
+        No one requesting <strong>{fallback.requested_designations.join(" / ")}</strong> has a verified skill match
+        right now. Falling back: tier 2 is the same grade/CoE with no skill overlap, tier 3 is one level up/down the
+        seniority ladder.
+      </p>
+      {fallback.same_grade.length > 0 && (
+        <FallbackTierList
+          title="Tier 2 -- same grade, no verified skill match"
+          candidates={fallback.same_grade}
+          onOpenProfile={onOpenProfile}
+        />
+      )}
+      {fallback.adjacent_level.length > 0 && (
+        <FallbackTierList
+          title="Tier 3 -- adjacent level (one up/down the ladder)"
+          candidates={fallback.adjacent_level}
+          onOpenProfile={onOpenProfile}
+        />
+      )}
+      {fallback.same_grade.length === 0 && fallback.adjacent_level.length === 0 && (
+        <p className="text-[11px] text-amber-700 italic">
+          No one at this grade or an adjacent level is available either -- this is a genuine hire signal, not just a
+          skill gap.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function FallbackTierList({
+  title,
+  candidates,
+  onOpenProfile,
+}: {
+  title: string;
+  candidates: RecommendationCandidate[];
+  onOpenProfile: (employeeId: string, tab: ProfileTab) => void;
+}) {
+  return (
+    <div>
+      <p className="text-[11px] font-semibold text-amber-800 mb-1.5">{title}</p>
+      <div className="space-y-1.5">
+        {candidates.map((c) => (
+          <button
+            key={c.employee_id}
+            onClick={() => onOpenProfile(c.employee_id, "allocations")}
+            className="flex items-center gap-2 w-full text-left text-xs bg-white rounded-lg border border-amber-100 px-2.5 py-1.5 hover:border-amber-300 transition"
+          >
+            <span className="font-medium text-gray-800">{c.employee_id}</span>
+            <span className="text-gray-400">{c.job_name}</span>
+            {c.coe ? (
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-violet-50 border border-violet-200 text-violet-600">
+                {c.coe}
+              </span>
+            ) : (
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-50 border border-gray-200 text-gray-400">
+                CoE not determined
+              </span>
+            )}
+            <span className="ml-auto text-gray-500 whitespace-nowrap">{c.available_pct}% available</span>
+            <span className="text-gray-400 whitespace-nowrap">competency {Math.round(c.competency_score * 100)}%</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function BestFitIfDelayedPanel({
+  candidates,
+  onOpenProfile,
+}: {
+  candidates: RecommendationCandidate[];
+  onOpenProfile: (employeeId: string, tab: ProfileTab) => void;
+}) {
+  return (
+    <div className="rounded-xl border border-blue-200 bg-blue-50/40 p-3.5 space-y-2">
+      <p className="text-xs text-blue-800">
+        Strong fit, but busy right now -- here&apos;s when they&apos;d actually free up, within the next 180 days.
+      </p>
+      <div className="space-y-1.5">
+        {candidates.map((c) => (
+          <button
+            key={c.employee_id}
+            onClick={() => onOpenProfile(c.employee_id, "allocations")}
+            className="flex flex-wrap items-center gap-2 w-full text-left text-xs bg-white rounded-lg border border-blue-100 px-2.5 py-2 hover:border-blue-300 transition"
+          >
+            <span className="font-medium text-gray-800">{c.employee_id}</span>
+            <span className="text-gray-400">{c.job_name}</span>
+            <span className="text-gray-500 whitespace-nowrap">score {Math.round(c.composite_score * 100)}%</span>
+            <span className="ml-auto text-blue-700 whitespace-nowrap">
+              free from <strong>{c.earliest_available_date}</strong>
+            </span>
+            <span className="w-full text-[11px] text-gray-400">{c.earliest_available_proof}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function CandidateCard({
   candidate,
   onOpenProfile,
@@ -1094,6 +1218,22 @@ function CandidateCard({
         )}
         <Badge variant={candidate.bucket}>{SIGNAL_LABEL[candidate.bucket]}</Badge>
         {!candidate.meets_requested_capacity && <Badge variant="amber">below requested %</Badge>}
+        {candidate.match_tier === "same_grade_fallback" && (
+          <span
+            title="Same grade/CoE as requested -- no verified skill overlap"
+            className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-amber-700 whitespace-nowrap"
+          >
+            grade match only
+          </span>
+        )}
+        {candidate.match_tier === "adjacent_level_fallback" && (
+          <span
+            title="One level up/down the seniority ladder from what was requested -- no verified skill overlap"
+            className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-amber-700 whitespace-nowrap"
+          >
+            adjacent level
+          </span>
+        )}
         <span className="ml-auto text-xs font-semibold text-gray-500">score {Math.round(candidate.composite_score * 100)}%</span>
       </div>
 
@@ -1135,6 +1275,11 @@ function CandidateCard({
         </div>
       )}
       <p className="text-xs text-gray-600 mt-2 leading-relaxed border-t border-gray-100 pt-2">{candidate.explanation}</p>
+      {candidate.earliest_available_date && (
+        <p className="text-[11px] text-blue-600 mt-1.5">
+          Busy now, but free from <strong>{candidate.earliest_available_date}</strong> -- {candidate.earliest_available_proof}
+        </p>
+      )}
       <p className="text-[10px] text-gray-300 mt-1.5">skill data: {candidate.skill_confidence}</p>
     </div>
   );

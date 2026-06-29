@@ -201,6 +201,8 @@ function formatRoleMixSource(source: string | null | undefined, sampleSize?: num
       return "standard template · D&D Tactical Build";
     case "derived_empirical":
       return `based on ${sampleSize ?? 0} past project(s)${scope ? ` · ${scope}` : ""}`;
+    case "derived_empirical_on_time_preferred":
+      return `based on ${sampleSize ?? 0} past project(s) that finished on schedule, no extension${scope ? ` · ${scope}` : ""}`;
     case "derived_empirical_type_fallback":
       return `based on ${sampleSize ?? 0} past project(s) of this type (broader CoE match)`;
     case "derived_empirical_org_fallback":
@@ -723,10 +725,20 @@ export default function NewProjectForecastPage() {
               {forecast.data.total_shortfall_value_usd > 0 && (
                 <span className="ml-1">That&apos;s <strong>{formatUsd(forecast.data.total_shortfall_value_usd)}/mo</strong> of demand we can&apos;t staff without hiring.</span>
               )}
+              {forecast.data.pct_achievable_with_current_headcount != null && (
+                <span className="ml-1">
+                  With the headcount we already have, we can hit{" "}
+                  <strong>{forecast.data.pct_achievable_with_current_headcount}%</strong> of this engagement&apos;s
+                  monthly billable value without hiring.
+                </span>
+              )}
             </div>
           ) : (
             <div className="px-4 py-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm">
-              Fully coverable by redeployment -- no hiring needed for this scenario.
+              Fully coverable by redeployment -- no hiring needed for this scenario
+              {forecast.data.pct_achievable_with_current_headcount != null &&
+                ` (100% of monthly billable value achievable with current headcount)`}
+              .
             </div>
           )}
 
