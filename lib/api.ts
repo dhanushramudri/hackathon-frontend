@@ -464,11 +464,18 @@ export interface ForecastSpec {
   duration_weeks?: number | null;
 }
 
+export interface ExcludedRareRole {
+  designation: string;
+  prevalence_pct: number | null;
+  fte: number;
+}
+
 export interface NewProjectForecastResult {
   specs: ForecastSpec[];
   role_mix_sources: { spec: ForecastSpec; source: string; sample_size: number | null; matched_project_codes: string[] }[];
   required_skills: string[];
   breakdown: ForecastBreakdownRow[];
+  excluded_rare_roles: ExcludedRareRole[];
   total_shortfall_headcount: number;
   total_shortfall_value_usd: number;
   total_full_role_value_usd: number;

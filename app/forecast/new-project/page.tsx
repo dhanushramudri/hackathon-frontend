@@ -186,8 +186,15 @@ function toForecastSpec(spec: SpecState): ForecastSpec {
     type_of_project: spec.category ? undefined : spec.typeOfProject || undefined,
     category: spec.category ?? undefined,
     count: spec.count,
+    // spec.roleMix always holds every historical role (common + rare), so the editor
+    // can reveal rare ones via "Show all roles" -- but only rows actually visible to
+    // the user (common, manually added, or explicitly revealed) should be submitted.
+    // Without this filter, editing just one visible row silently drags ~12 hidden
+    // rare roles the user never saw into the override as full headcount needs.
     role_mix_overrides: spec.roleMixEdited
-      ? Object.fromEntries(spec.roleMix.map((r) => [r.designation, rowToFte(r)]))
+      ? Object.fromEntries(
+          spec.roleMix.filter((r) => r.common || spec.showAllRoles).map((r) => [r.designation, rowToFte(r)])
+        )
       : undefined,
     required_skills: requiredSkills.length ? requiredSkills : undefined,
     start_date: spec.startDate || undefined,
@@ -197,6 +204,8 @@ function toForecastSpec(spec: SpecState): ForecastSpec {
 
 function formatRoleMixSource(source: string | null | undefined, sampleSize?: number | null, scope?: string | null): string {
   switch (source) {
+    case "manual_override":
+      return "edited by you";
     case "docx_given":
       return "standard template · D&D Tactical Build";
     case "derived_empirical":
@@ -232,6 +241,7 @@ export default function NewProjectForecastPage() {
 
   const [specs, setSpecs] = useState<SpecState[]>([blankSpec()]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [rareRolesOpen, setRareRolesOpen] = useState(false);
   const [skillDrafts, setSkillDrafts] = useState<Record<number, string>>({});
   const [roleDrafts, setRoleDrafts] = useState<Record<number, { designation: string; headcount: string; pct: string }>>({});
   const [selectedEmployee, setSelectedEmployee] = useState<{ employeeId: string; skillMatchContext?: SkillMatchContext } | null>(null);
@@ -850,6 +860,34 @@ export default function NewProjectForecastPage() {
             </table>
             </div>
           </div>
+
+          {forecast.data.excluded_rare_roles.length > 0 && (
+            <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+              <button
+                onClick={() => setRareRolesOpen((v) => !v)}
+                className="w-full flex items-center justify-between px-4 py-2.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition"
+              >
+                <span>
+                  {forecast.data.excluded_rare_roles.length} rare role{forecast.data.excluded_rare_roles.length > 1 ? "s" : ""} not counted
+                  toward headcount need (historically needed on under 40% of past projects)
+                </span>
+                {rareRolesOpen ? <ChevronUp className="w-3.5 h-3.5 text-gray-400" /> : <ChevronDown className="w-3.5 h-3.5 text-gray-400" />}
+              </button>
+              {rareRolesOpen && (
+                <div className="border-t border-gray-100 px-4 py-3 flex flex-wrap gap-1.5">
+                  {forecast.data.excluded_rare_roles.map((r) => (
+                    <span
+                      key={r.designation}
+                      title={`Needed ${r.fte} FTE in this run, but only ~${r.prevalence_pct ?? "?"}% of historical projects in this role-mix needed one at all`}
+                      className="text-[11px] px-2 py-1 rounded-lg border border-gray-200 bg-gray-50 text-gray-500"
+                    >
+                      {r.designation} ({r.prevalence_pct ?? "?"}% of past projects)
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
