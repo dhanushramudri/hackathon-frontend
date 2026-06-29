@@ -3,8 +3,16 @@
 import { Suspense, useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
-import { AlertTriangle, CheckCircle2, ChevronDown, Sparkles, SlidersHorizontal, XCircle } from "lucide-react";
-import { api, type FallbackCandidates, type PipelineDemandRow, type RecommendationCandidate, type SemanticMatchResult } from "@/lib/api";
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Sparkles, SlidersHorizontal, XCircle } from "lucide-react";
+import {
+  api,
+  type DealCompositionRow,
+  type FallbackCandidates,
+  type PipelineDemandRow,
+  type RecommendationCandidate,
+  type RecommendationResult,
+  type SemanticMatchResult,
+} from "@/lib/api";
 import { Badge } from "@/components/shared/Badge";
 import { LoadingState, ErrorState } from "@/components/shared/EmptyState";
 import { Skeleton, ListSkeleton, FieldGridSkeleton, CandidateCardSkeleton } from "@/components/shared/Skeleton";
@@ -113,6 +121,11 @@ function RecommendationsPageInner() {
   const [topN, setTopN] = useState(15);
   const [topNInput, setTopNInput] = useState("15");
 
+  const [dealDetailsOpen, setDealDetailsOpen] = useState(false);
+  const [otherOptionsOpen, setOtherOptionsOpen] = useState(false);
+  const [expandedCandidateId, setExpandedCandidateId] = useState<string | null>(null);
+  const [pipelineCollapsed, setPipelineCollapsed] = useState(false);
+
   useEffect(() => {
     setCandidateSearch("");
     setCandidateSignal("all");
@@ -126,6 +139,9 @@ function RecommendationsPageInner() {
     setTopN(15);
     setTopNInput("15");
     semanticMatchMutation.reset();
+    setDealDetailsOpen(false);
+    setOtherOptionsOpen(false);
+    setExpandedCandidateId(null);
   }, [selectedRow]);
 
   const pipeline = useQuery({ queryKey: ["pipeline-forecast"], queryFn: api.pipelineForecast });
@@ -141,6 +157,10 @@ function RecommendationsPageInner() {
 
   const demandRows = (pipeline.data ?? []).filter((r) => r.skillset || r.resources_requested);
   const selected = recommendation.data?.pipeline_row;
+  const topCandidate =
+    recommendation.data && !recommendation.data.hire_vs_redeploy_flag && recommendation.data.has_skillset && recommendation.data.candidates.length > 0
+      ? recommendation.data.candidates[0]
+      : null;
 
   const clusters = Array.from(new Set(demandRows.map((r) => r.cluster).filter((c): c is number => c != null))).sort(
     (a, b) => a - b
@@ -255,7 +275,7 @@ function RecommendationsPageInner() {
   };
 
   return (
-    <div className="p-4 sm:p-6 max-w-6xl mx-auto space-y-4">
+    <div className="p-4 sm:p-6 space-y-4">
       {coverage.data && (
         <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 flex items-center gap-5 text-xs flex-wrap">
           <span className="font-semibold text-gray-700">
@@ -278,13 +298,36 @@ function RecommendationsPageInner() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-6">
+      <div className={cn("grid grid-cols-1 gap-4", pipelineCollapsed ? "lg:grid-cols-[44px_1fr]" : "lg:grid-cols-[320px_1fr]")}>
+        {pipelineCollapsed ? (
+          <div className="rounded-xl border border-gray-200 bg-white flex flex-col items-center gap-3 py-3 max-h-[60dvh] lg:max-h-[calc(100dvh-180px)]">
+            <button
+              onClick={() => setPipelineCollapsed(false)}
+              title="Expand pipeline list"
+              className="text-gray-400 hover:text-primary transition"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+            <p className="text-[10px] text-gray-400 whitespace-nowrap [writing-mode:vertical-rl]">
+              Pipeline ({demandRows.length})
+            </p>
+          </div>
+        ) : (
         <div className="rounded-xl border border-gray-200 bg-white overflow-hidden flex flex-col max-h-[60dvh] lg:max-h-[calc(100dvh-180px)]">
           <div className="px-3 py-2.5 border-b border-gray-100 space-y-2">
             <div className="flex items-center justify-between gap-2">
-              <p className="text-xs font-semibold text-gray-700">
-                Pipeline Demand ({filteredDemandRows.length}/{demandRows.length})
-              </p>
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => setPipelineCollapsed(true)}
+                  title="Collapse pipeline list"
+                  className="text-gray-400 hover:text-primary transition flex-shrink-0"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                </button>
+                <p className="text-xs font-semibold text-gray-700">
+                  Pipeline Demand ({filteredDemandRows.length}/{demandRows.length})
+                </p>
+              </div>
               <div className="flex items-center gap-2">
                 {hasActiveDemandFilters && (
                   <button onClick={clearDemandFilters} className="text-[11px] text-primary hover:underline whitespace-nowrap">
@@ -451,6 +494,7 @@ function RecommendationsPageInner() {
             )}
           </div>
         </div>
+        )}
 
         <div>
           {selectedRow === null ? (
@@ -473,152 +517,40 @@ function RecommendationsPageInner() {
           ) : recommendation.data ? (
             <div className="space-y-4">
               {selected && (
-                <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
-                  <div>
-                    <p className="text-sm font-semibold text-gray-800">
-                      {selected.client ?? "Unnamed client"}
-                      {selected.solution && ` · ${selected.solution}`}
-                      {selected.cluster != null && ` · Cluster ${selected.cluster}`}
-                    </p>
-                    <p className="text-[11px] text-gray-400 mt-0.5">
-                      Requesting {selected.resources_requested ?? "an unspecified role"}
-                      {selected.requested_pct && ` at ${selected.requested_pct}%`}
-                    </p>
-                  </div>
-
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 text-[11px] border-t border-gray-100 pt-3">
-                    <DealField label="Status" value={selected.status} />
-                    <DealField label="Priority" value={selected.priority} />
-                    <DealField label="Client Priority" value={selected.client_priority} />
-                    <DealField label="SOW Signed" value={selected.sow_signed} />
-                    <DealField label="EM" value={selected.em} />
-                    <DealField label="Request Type" value={selected.request_type} />
-                    <DealField label="Request Received" value={selected.request_received} />
-                    <DealField label="Original Requested Start" value={selected.original_requested_start_date} />
-                    <DealField label="Likely Start" value={selected.likely_start_date} />
-                    <DealField label="Start Date Confirmed" value={selected.start_date_confirmed} />
-                    <DealField label="Number of Weeks" value={selected.number_of_weeks} />
-                    <DealField label="Deal Stage" value={selected.deal_stage_hubspot} />
-                  </div>
-
-                  {selected.comments && (
-                    <p className="text-[11px] text-gray-500 border-t border-gray-100 pt-2.5 leading-relaxed">
-                      <span className="text-gray-400">Comments: </span>
-                      {selected.comments}
-                    </p>
-                  )}
-
-                  {recommendation.data.deal_composition.length > 1 && (
-                    <div className="border-t border-gray-100 pt-3">
-                      <p className="text-[11px] text-gray-400 mb-1.5">
-                        Team composition for this deal ({recommendation.data.deal_composition.length} roles)
-                      </p>
-                      <div className="flex flex-wrap gap-1.5">
-                        {recommendation.data.deal_composition.map((sib) => (
-                          <button
-                            key={sib.row_index}
-                            onClick={() => setSelectedRow(sib.row_index)}
-                            disabled={sib.is_current}
-                            className={cn(
-                              "text-[11px] px-2.5 py-1 rounded-lg border transition",
-                              sib.is_current
-                                ? "bg-primary text-white border-primary cursor-default"
-                                : "border-gray-200 text-gray-600 hover:border-primary hover:text-primary"
-                            )}
-                          >
-                            {sib.resources_requested ?? "Role TBD"}
-                            {sib.requested_pct && ` · ${sib.requested_pct}%`}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              <div className="rounded-xl border border-gray-200 bg-white p-4">
-                <div className="flex items-center justify-between mb-1">
-                  <p className="text-xs text-gray-400">Required skillset</p>
-                  {selected && selected.skillset_coe_categories.length > 0 && (
-                    <div className="flex items-center gap-1">
-                      {selected.skillset_coe_categories.map((cat) => (
-                        <span
-                          key={cat}
-                          title="Real skill category, exact-matched from the Pipeline Skillset reference sheet"
-                          className="text-[10px] px-1.5 py-0.5 rounded-full border border-gray-200 bg-gray-50 text-gray-500"
-                        >
-                          {cat}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                <p className="text-sm text-gray-700">{recommendation.data.request.skillset_text || "(none specified)"}</p>
-                <div className="flex flex-wrap gap-1.5 mt-2">
-                  {recommendation.data.request.required_phrases.map((p) => (
-                    <Badge key={p} variant="default">{p}</Badge>
-                  ))}
-                </div>
-              </div>
-
-              {recommendation.data.hire_vs_redeploy_flag && (
-                <div className="rounded-xl bg-red-50 border border-red-200 p-3.5 space-y-2.5">
-                  <div className="flex items-center gap-2 text-red-700 text-sm">
-                    <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-                    No strong internal fit found -- this is a <strong>hire signal</strong>, not a redeploy opportunity.
-                  </div>
-
-                  {selectedRow !== null && semanticMatchByRow[selectedRow] ? (
-                    <SemanticMatchPanel
-                      result={semanticMatchByRow[selectedRow]}
-                      onOpenProfile={(employeeId, skillMatchContext) => setOpenProfile({ employeeId, tab: "skills", skillMatchContext })}
-                    />
-                  ) : (
-                    <div className="space-y-1.5">
-                      <button
-                        onClick={() => {
-                          if (selectedRow === null) return;
-                          semanticMatchMutation.mutate(selectedRow, {
-                            onSuccess: (data) => setSemanticMatchByRow((prev) => ({ ...prev, [selectedRow]: data })),
-                          });
-                        }}
-                        disabled={semanticMatchMutation.isPending}
-                        className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-red-300 bg-white text-red-700 hover:bg-red-100 transition disabled:opacity-50"
-                      >
-                        <Sparkles className="w-3.5 h-3.5" />
-                        {semanticMatchMutation.isPending ? "Asking AI…" : "Ask AI to search for a semantic match"}
-                      </button>
-                      {semanticMatchMutation.isError && (
-                        <p className="text-[11px] text-red-500">Could not reach the AI matcher -- try again.</p>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {recommendation.data.fallback_candidates && (
-                <FallbackCascadePanel
-                  fallback={recommendation.data.fallback_candidates}
-                  onOpenProfile={(employeeId, tab) => setOpenProfile({ employeeId, tab })}
+                <DecisionHeader
+                  selected={selected}
+                  dealComposition={recommendation.data.deal_composition}
+                  skillsetText={recommendation.data.request.skillset_text}
+                  requiredPhrases={recommendation.data.request.required_phrases}
+                  hireFlag={recommendation.data.hire_vs_redeploy_flag}
+                  hasSkillset={recommendation.data.has_skillset}
+                  topCandidate={topCandidate}
+                  dealDetailsOpen={dealDetailsOpen}
+                  onToggleDealDetails={() => setDealDetailsOpen((v) => !v)}
+                  onSelectSibling={setSelectedRow}
+                  semanticMatchResult={selectedRow !== null ? semanticMatchByRow[selectedRow] : undefined}
+                  semanticMatchPending={semanticMatchMutation.isPending}
+                  semanticMatchError={semanticMatchMutation.isError}
+                  onAskSemanticMatch={() => {
+                    if (selectedRow === null) return;
+                    semanticMatchMutation.mutate(selectedRow, {
+                      onSuccess: (data) => setSemanticMatchByRow((prev) => ({ ...prev, [selectedRow]: data })),
+                    });
+                  }}
+                  onOpenProfile={(employeeId, tab, skillMatchContext) => setOpenProfile({ employeeId, tab, skillMatchContext })}
                 />
               )}
 
-              {recommendation.data.best_fit_if_delayed && recommendation.data.best_fit_if_delayed.length > 0 && (
-                <BestFitIfDelayedPanel
-                  candidates={recommendation.data.best_fit_if_delayed}
-                  onOpenProfile={(employeeId, tab) => setOpenProfile({ employeeId, tab })}
-                />
-              )}
+              <OtherOptionsAccordion
+                fallback={recommendation.data.fallback_candidates ?? undefined}
+                bestFitIfDelayed={recommendation.data.best_fit_if_delayed}
+                open={otherOptionsOpen}
+                onToggle={() => setOtherOptionsOpen((v) => !v)}
+                onOpenProfile={(employeeId, tab) => setOpenProfile({ employeeId, tab })}
+              />
 
               {recommendation.data.candidates.length > 0 && (
                 <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-2">
-                  {!recommendation.data.has_skillset && (
-                    <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
-                      No skillset was specified for this request -- the candidates below could not be skill-matched at
-                      all. They&apos;re ranked by competency and availability only (all show &quot;Not assessed&quot;);
-                      treat this as a hire-vs-redeploy unknown, not a real shortlist.
-                    </p>
-                  )}
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-xs font-semibold text-gray-700">
                       Candidates ({filteredCandidates.length}/{recommendation.data.candidates.length} shown)
@@ -782,11 +714,15 @@ function RecommendationsPageInner() {
                 </div>
               )}
 
-              <div className="space-y-2">
-                {filteredCandidates.map((c) => (
-                  <CandidateCard
+              <div className="space-y-1.5">
+                {filteredCandidates.map((c, i) => (
+                  <CandidateRow
                     key={c.employee_id}
                     candidate={c}
+                    rank={i + 1}
+                    isTopPick={topCandidate?.employee_id === c.employee_id}
+                    isExpanded={expandedCandidateId === c.employee_id}
+                    onToggleExpand={() => setExpandedCandidateId((prev) => (prev === c.employee_id ? null : c.employee_id))}
                     onOpenProfile={(tab, skillMatchContext) => setOpenProfile({ employeeId: c.employee_id, tab, skillMatchContext })}
                   />
                 ))}
@@ -1089,6 +1025,242 @@ function SemanticMatchPanel({
   );
 }
 
+function DecisionHeader({
+  selected,
+  dealComposition,
+  skillsetText,
+  requiredPhrases,
+  hireFlag,
+  hasSkillset,
+  topCandidate,
+  dealDetailsOpen,
+  onToggleDealDetails,
+  onSelectSibling,
+  semanticMatchResult,
+  semanticMatchPending,
+  semanticMatchError,
+  onAskSemanticMatch,
+  onOpenProfile,
+}: {
+  selected: NonNullable<RecommendationResult["pipeline_row"]>;
+  dealComposition: DealCompositionRow[];
+  skillsetText: string;
+  requiredPhrases: string[];
+  hireFlag: boolean;
+  hasSkillset: boolean;
+  topCandidate: RecommendationCandidate | null;
+  dealDetailsOpen: boolean;
+  onToggleDealDetails: () => void;
+  onSelectSibling: (rowIndex: number) => void;
+  semanticMatchResult?: SemanticMatchResult;
+  semanticMatchPending: boolean;
+  semanticMatchError: boolean;
+  onAskSemanticMatch: () => void;
+  onOpenProfile: (employeeId: string, tab: ProfileTab, skillMatchContext?: SkillMatchContext) => void;
+}) {
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <p className="text-sm font-semibold text-gray-800">
+            {selected.resources_requested ?? "Role TBD"} · {selected.client ?? "Unnamed client"}
+            {selected.cluster != null && ` · Cluster ${selected.cluster}`}
+          </p>
+          <p className="text-[11px] text-gray-400 mt-0.5">
+            {selected.requested_pct && `Requesting at ${selected.requested_pct}%`}
+            {selected.requested_pct && selected.likely_start_date && " · "}
+            {selected.likely_start_date && `Likely start ${selected.likely_start_date}`}
+          </p>
+        </div>
+        <div className="flex items-center gap-1.5">
+          {selected.status && <Badge variant="default">{selected.status}</Badge>}
+          {selected.priority && <Badge variant="default">{selected.priority}</Badge>}
+        </div>
+      </div>
+
+      {(skillsetText || requiredPhrases.length > 0) && (
+        <div className="border-t border-gray-100 pt-2.5">
+          <div className="flex items-center justify-between mb-1">
+            <p className="text-[11px] text-gray-400">Required skillset</p>
+            {selected.skillset_coe_categories.length > 0 && (
+              <div className="flex items-center gap-1">
+                {selected.skillset_coe_categories.map((cat) => (
+                  <span
+                    key={cat}
+                    title="Real skill category, exact-matched from the Pipeline Skillset reference sheet"
+                    className="text-[10px] px-1.5 py-0.5 rounded-full border border-gray-200 bg-gray-50 text-gray-500"
+                  >
+                    {cat}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+          {skillsetText && <p className="text-xs text-gray-600 mb-1.5">{skillsetText}</p>}
+          <div className="flex flex-wrap gap-1.5">
+            {requiredPhrases.map((p) => (
+              <Badge key={p} variant="default">{p}</Badge>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="border-t border-gray-100 pt-2">
+        <button
+          onClick={onToggleDealDetails}
+          className="flex items-center gap-1 text-[11px] text-gray-500 hover:text-primary transition"
+        >
+          Deal details
+          <ChevronDown className={cn("w-3 h-3 transition-transform", dealDetailsOpen && "rotate-180")} />
+        </button>
+        {dealDetailsOpen && (
+          <div className="mt-2.5 space-y-2.5">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 text-[11px]">
+              <DealField label="Status" value={selected.status} />
+              <DealField label="Priority" value={selected.priority} />
+              <DealField label="Client Priority" value={selected.client_priority} />
+              <DealField label="SOW Signed" value={selected.sow_signed} />
+              <DealField label="EM" value={selected.em} />
+              <DealField label="Request Type" value={selected.request_type} />
+              <DealField label="Request Received" value={selected.request_received} />
+              <DealField label="Original Requested Start" value={selected.original_requested_start_date} />
+              <DealField label="Likely Start" value={selected.likely_start_date} />
+              <DealField label="Start Date Confirmed" value={selected.start_date_confirmed} />
+              <DealField label="Number of Weeks" value={selected.number_of_weeks} />
+              <DealField label="Deal Stage" value={selected.deal_stage_hubspot} />
+            </div>
+            {selected.comments && (
+              <p className="text-[11px] text-gray-500 leading-relaxed">
+                <span className="text-gray-400">Comments: </span>
+                {selected.comments}
+              </p>
+            )}
+            {dealComposition.length > 1 && (
+              <div>
+                <p className="text-[11px] text-gray-400 mb-1.5">
+                  Team composition for this deal ({dealComposition.length} roles)
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {dealComposition.map((sib) => (
+                    <button
+                      key={sib.row_index}
+                      onClick={() => onSelectSibling(sib.row_index)}
+                      disabled={sib.is_current}
+                      className={cn(
+                        "text-[11px] px-2.5 py-1 rounded-lg border transition",
+                        sib.is_current
+                          ? "bg-primary text-white border-primary cursor-default"
+                          : "border-gray-200 text-gray-600 hover:border-primary hover:text-primary"
+                      )}
+                    >
+                      {sib.resources_requested ?? "Role TBD"}
+                      {sib.requested_pct && ` · ${sib.requested_pct}%`}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="border-t border-gray-100 pt-3">
+        {hireFlag ? (
+          <div className="rounded-xl bg-red-50 border border-red-200 p-3.5 space-y-2.5">
+            <div className="flex items-center gap-2 text-red-700 text-sm">
+              <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+              No strong internal fit found -- this is a <strong>hire signal</strong>, not a redeploy opportunity.
+            </div>
+            {semanticMatchResult ? (
+              <SemanticMatchPanel
+                result={semanticMatchResult}
+                onOpenProfile={(employeeId, skillMatchContext) => onOpenProfile(employeeId, "skills", skillMatchContext)}
+              />
+            ) : (
+              <div className="space-y-1.5">
+                <button
+                  onClick={onAskSemanticMatch}
+                  disabled={semanticMatchPending}
+                  className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-red-300 bg-white text-red-700 hover:bg-red-100 transition disabled:opacity-50"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  {semanticMatchPending ? "Asking AI…" : "Ask AI to search for a semantic match"}
+                </button>
+                {semanticMatchError && <p className="text-[11px] text-red-500">Could not reach the AI matcher -- try again.</p>}
+              </div>
+            )}
+          </div>
+        ) : !hasSkillset ? (
+          <div className="rounded-xl bg-gray-50 border border-gray-200 p-3.5 text-xs text-gray-600">
+            No skillset was specified for this request -- candidates are ranked by competency and availability only
+            (all show &quot;Not assessed&quot;). Treat this as a hire-vs-redeploy unknown, not a real shortlist.
+          </div>
+        ) : topCandidate ? (
+          <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-3.5 flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-2 text-emerald-800 text-sm">
+              <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+              <span>
+                Recommended: <strong>{topCandidate.employee_id}</strong> · {topCandidate.job_name ?? "Role unspecified"} ·{" "}
+                {Math.round(topCandidate.composite_score * 100)}% match
+              </span>
+            </div>
+            <button
+              onClick={() =>
+                onOpenProfile(topCandidate.employee_id, "skills", {
+                  matchedSkills: topCandidate.matched_skills,
+                  missingSkills: topCandidate.missing_skills,
+                })
+              }
+              className="text-xs font-medium px-3 py-1.5 rounded-lg border border-emerald-300 bg-white text-emerald-700 hover:bg-emerald-100 transition whitespace-nowrap"
+            >
+              View profile
+            </button>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function OtherOptionsAccordion({
+  fallback,
+  bestFitIfDelayed,
+  open,
+  onToggle,
+  onOpenProfile,
+}: {
+  fallback?: FallbackCandidates;
+  bestFitIfDelayed?: RecommendationCandidate[];
+  open: boolean;
+  onToggle: () => void;
+  onOpenProfile: (employeeId: string, tab: ProfileTab) => void;
+}) {
+  if (!fallback && (!bestFitIfDelayed || bestFitIfDelayed.length === 0)) return null;
+  const fallbackCount = (fallback?.same_grade.length ?? 0) + (fallback?.adjacent_level.length ?? 0);
+  const delayedCount = bestFitIfDelayed?.length ?? 0;
+  const total = fallbackCount + delayedCount;
+
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+      <button
+        onClick={onToggle}
+        className="w-full flex items-center justify-between px-4 py-2.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition"
+      >
+        <span>Other options to consider{total > 0 && ` (${total})`}</span>
+        <ChevronDown className={cn("w-3.5 h-3.5 text-gray-400 transition-transform", open && "rotate-180")} />
+      </button>
+      {open && (
+        <div className="border-t border-gray-100 p-3.5 space-y-3">
+          {fallback && <FallbackCascadePanel fallback={fallback} onOpenProfile={onOpenProfile} />}
+          {bestFitIfDelayed && bestFitIfDelayed.length > 0 && (
+            <BestFitIfDelayedPanel candidates={bestFitIfDelayed} onOpenProfile={onOpenProfile} />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function FallbackCascadePanel({
   fallback,
   onOpenProfile,
@@ -1199,29 +1371,47 @@ function BestFitIfDelayedPanel({
   );
 }
 
-function CandidateCard({
+function CandidateRow({
   candidate,
+  rank,
+  isTopPick,
+  isExpanded,
+  onToggleExpand,
   onOpenProfile,
 }: {
   candidate: RecommendationCandidate;
+  rank: number;
+  isTopPick: boolean;
+  isExpanded: boolean;
+  onToggleExpand: () => void;
   onOpenProfile: (tab: ProfileTab, skillMatchContext?: SkillMatchContext) => void;
 }) {
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-4">
-      <div className="flex items-center gap-2 mb-2">
-        <span className="text-sm font-semibold text-gray-800">{candidate.employee_id}</span>
-        <span className="text-xs text-gray-400">{candidate.job_name}</span>
+    <div
+      className={cn(
+        "rounded-xl border bg-white overflow-hidden transition",
+        isTopPick ? "border-emerald-300 ring-1 ring-emerald-100" : "border-gray-200"
+      )}
+    >
+      <button
+        onClick={onToggleExpand}
+        className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-left hover:bg-gray-50/70 transition flex-wrap"
+      >
+        <span className="text-[11px] text-gray-400 w-4 flex-shrink-0">{rank}</span>
+        <span className="text-sm font-semibold text-gray-800 whitespace-nowrap">{candidate.employee_id}</span>
+        <span className="text-xs text-gray-400 truncate">{candidate.job_name}</span>
         {candidate.coe ? (
-          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-violet-50 border border-violet-200 text-violet-600">{candidate.coe}</span>
-        ) : (
-          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-50 border border-gray-200 text-gray-400">CoE not determined</span>
-        )}
+          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-violet-50 border border-violet-200 text-violet-600 whitespace-nowrap flex-shrink-0">
+            {candidate.coe}
+          </span>
+        ) : null}
         <Badge variant={candidate.bucket}>{SIGNAL_LABEL[candidate.bucket]}</Badge>
+        {isTopPick && <Badge variant="eligible">Top pick</Badge>}
         {!candidate.meets_requested_capacity && <Badge variant="amber">below requested %</Badge>}
         {candidate.match_tier === "same_grade_fallback" && (
           <span
             title="Same grade/CoE as requested -- no verified skill overlap"
-            className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-amber-700 whitespace-nowrap"
+            className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-amber-700 whitespace-nowrap flex-shrink-0"
           >
             grade match only
           </span>
@@ -1229,58 +1419,70 @@ function CandidateCard({
         {candidate.match_tier === "adjacent_level_fallback" && (
           <span
             title="One level up/down the seniority ladder from what was requested -- no verified skill overlap"
-            className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-amber-700 whitespace-nowrap"
+            className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-amber-700 whitespace-nowrap flex-shrink-0"
           >
             adjacent level
           </span>
         )}
-        <span className="ml-auto text-xs font-semibold text-gray-500">score {Math.round(candidate.composite_score * 100)}%</span>
-      </div>
-
-      <div className="grid grid-cols-3 gap-3 text-xs mb-2">
-        <Metric
-          label="Skill"
-          value={candidate.skill_score}
-          suffix={`${Math.round(candidate.skill_score * 100)}%`}
-          onClick={() =>
-            onOpenProfile("skills", {
-              matchedSkills: candidate.matched_skills,
-              missingSkills: candidate.missing_skills,
-            })
-          }
-        />
-        <Metric
-          label="Competency"
-          value={candidate.competency_score}
-          suffix={`${Math.round(candidate.competency_score * 100)}%`}
-          onClick={() => onOpenProfile("competency")}
-        />
-        <Metric
-          label="Available"
-          value={candidate.available_pct / 100}
-          suffix={`${candidate.available_pct}%`}
-          onClick={() => onOpenProfile("allocations")}
-        />
-      </div>
-      {candidate.matched_skills.length > 0 && (
-        <div className="flex items-start gap-1.5 text-xs mt-2">
-          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0 mt-0.5" />
-          <span className="text-gray-500">{candidate.matched_skills.join(", ")}</span>
+        <span className="ml-auto flex items-center gap-3 text-[11px] text-gray-400 whitespace-nowrap flex-shrink-0">
+          <span>{Math.round(candidate.skill_score * 100)}% skill</span>
+          <span>{Math.round(candidate.competency_score * 100)}% comp</span>
+          <span>{candidate.available_pct}% avail</span>
+          <span className="text-gray-600 font-semibold">{Math.round(candidate.composite_score * 100)}%</span>
+          <ChevronDown className={cn("w-3.5 h-3.5 transition-transform", isExpanded && "rotate-180")} />
+        </span>
+      </button>
+      {isExpanded && (
+        <div className="border-t border-gray-100 px-3.5 py-3 space-y-2.5">
+          <div className="grid grid-cols-3 gap-3 text-xs">
+            <Metric
+              label="Skill"
+              value={candidate.skill_score}
+              suffix={`${Math.round(candidate.skill_score * 100)}%`}
+              onClick={() =>
+                onOpenProfile("skills", {
+                  matchedSkills: candidate.matched_skills,
+                  missingSkills: candidate.missing_skills,
+                })
+              }
+            />
+            <Metric
+              label="Competency"
+              value={candidate.competency_score}
+              suffix={`${Math.round(candidate.competency_score * 100)}%`}
+              onClick={() => onOpenProfile("competency")}
+            />
+            <Metric
+              label="Available"
+              value={candidate.available_pct / 100}
+              suffix={`${candidate.available_pct}%`}
+              onClick={() => onOpenProfile("allocations")}
+            />
+          </div>
+          {candidate.matched_skills.length > 0 && (
+            <div className="flex items-start gap-1.5 text-xs">
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0 mt-0.5" />
+              <span className="text-gray-500">{candidate.matched_skills.join(", ")}</span>
+            </div>
+          )}
+          {candidate.missing_skills.length > 0 && (
+            <div className="flex items-start gap-1.5 text-xs">
+              <XCircle className="w-3.5 h-3.5 text-gray-300 flex-shrink-0 mt-0.5" />
+              <span className="text-gray-400">{candidate.missing_skills.join(", ")}</span>
+            </div>
+          )}
+          <p className="text-xs text-gray-600 leading-relaxed border-t border-gray-100 pt-2">{candidate.explanation}</p>
+          {candidate.earliest_available_date && (
+            <p className="text-[11px] text-blue-600">
+              Busy now, but free from <strong>{candidate.earliest_available_date}</strong> -- {candidate.earliest_available_proof}
+            </p>
+          )}
+          <p className="text-[10px] text-gray-300">
+            skill data: {candidate.skill_confidence} · competency data: {candidate.competency_confidence}
+            {candidate.competency_confidence === "imputed" && " (tenure-based estimate, no direct assessment)"}
+          </p>
         </div>
       )}
-      {candidate.missing_skills.length > 0 && (
-        <div className="flex items-start gap-1.5 text-xs mt-1">
-          <XCircle className="w-3.5 h-3.5 text-gray-300 flex-shrink-0 mt-0.5" />
-          <span className="text-gray-400">{candidate.missing_skills.join(", ")}</span>
-        </div>
-      )}
-      <p className="text-xs text-gray-600 mt-2 leading-relaxed border-t border-gray-100 pt-2">{candidate.explanation}</p>
-      {candidate.earliest_available_date && (
-        <p className="text-[11px] text-blue-600 mt-1.5">
-          Busy now, but free from <strong>{candidate.earliest_available_date}</strong> -- {candidate.earliest_available_proof}
-        </p>
-      )}
-      <p className="text-[10px] text-gray-300 mt-1.5">skill data: {candidate.skill_confidence}</p>
     </div>
   );
 }
@@ -1299,7 +1501,7 @@ function Metric({ label, value, suffix, onClick }: { label: string; value: numbe
 
 function RecommendationsSkeleton() {
   return (
-    <div className="p-4 sm:p-6 max-w-6xl mx-auto space-y-4">
+    <div className="p-4 sm:p-6 space-y-4">
       <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 flex items-center gap-3 flex-wrap">
         <Skeleton className="h-3 w-56" />
         <Skeleton className="h-5 w-32 rounded-full" />

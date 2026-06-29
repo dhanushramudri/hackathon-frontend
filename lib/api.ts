@@ -88,6 +88,7 @@ export interface RecommendationCandidate {
   missing_skills: string[];
   skill_confidence: string;
   competency_score: number;
+  competency_confidence: string;
   available_pct: number;
   meets_requested_capacity: boolean;
   match_tier?: MatchTier;
