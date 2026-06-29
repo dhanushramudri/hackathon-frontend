@@ -220,7 +220,11 @@ export default function FreePoolPage() {
                     </>
                   )}
                   {c.reason === "under_utilized" && c.current_allocation_pct != null && `${c.current_allocation_pct}% allocated`}
-                  {c.reason === "fully_free" && (c.days_free != null ? `free for ${c.days_free}d` : "no allocation history")}
+                  {c.reason === "fully_free" && (
+                    <button onClick={() => setProofFor(c)} className="hover:underline">
+                      {c.days_free != null ? `free for ${c.days_free}d` : "no allocation history"}
+                    </button>
+                  )}
                 </td>
                 <td className="px-3 py-2 text-gray-700 font-medium whitespace-nowrap">
                   <button onClick={() => setProofFor(c)} className="hover:underline">
@@ -258,7 +262,7 @@ function IdleValueProofModal({ c, onClose }: { c: FreePoolCandidate; onClose: ()
         : `${c.idle_capacity_pct}% -- the sum of every allocation ending within the window (capped at 100%). Their current total allocation right now is ${c.current_allocation_pct}% -- any other concurrent, non-ending work is unaffected.`;
 
   return (
-    <Modal title={`${c.employee_id} -- Idle Value Proof`} onClose={onClose} widthClassName="max-w-md">
+    <Modal title={`${c.employee_id} -- Availability Proof`} onClose={onClose} widthClassName="max-w-md">
       <div className="p-5 space-y-3 text-xs">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           <div>
@@ -275,6 +279,22 @@ function IdleValueProofModal({ c, onClose }: { c: FreePoolCandidate; onClose: ()
             <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 mb-1">Basis</p>
             <p className="text-gray-600">{basisIntro}</p>
           </div>
+          {c.reason === "fully_free" && (
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 mb-1">Free since</p>
+              <p className="text-gray-600">
+                {c.days_free != null ? (
+                  <>
+                    Last allocation (<strong>{c.last_ended_project_id}</strong>) ended{" "}
+                    <strong>{c.last_ended_date}</strong>, {c.days_free} day{c.days_free === 1 ? "" : "s"} ago -- nothing
+                    new has been allocated since.
+                  </>
+                ) : (
+                  "No allocation record exists for this employee at all -- never assigned to a project in this dataset."
+                )}
+              </p>
+            </div>
+          )}
           {endingAllocations.length > 0 && (
             <table className="w-full text-[11px]">
               <thead>

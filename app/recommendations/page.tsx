@@ -300,7 +300,7 @@ function RecommendationsPageInner() {
 
       <div className={cn("grid grid-cols-1 gap-4", pipelineCollapsed ? "lg:grid-cols-[44px_1fr]" : "lg:grid-cols-[320px_1fr]")}>
         {pipelineCollapsed ? (
-          <div className="rounded-xl border border-gray-200 bg-white flex flex-col items-center gap-3 py-3 max-h-[60dvh] lg:max-h-[calc(100dvh-180px)]">
+          <div className="rounded-xl border border-gray-200 bg-white flex flex-col items-center gap-3 py-3 lg:max-h-[calc(100dvh-180px)]">
             <button
               onClick={() => setPipelineCollapsed(false)}
               title="Expand pipeline list"

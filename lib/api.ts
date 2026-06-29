@@ -389,6 +389,8 @@ export interface FreePoolCandidate {
   hourly_rate_usd: number | null;
   idle_value_usd_per_month: number | null;
   days_free: number | null;
+  last_ended_project_id: string | null;
+  last_ended_date: string | null;
 }
 
 export interface RedeployMatch {
