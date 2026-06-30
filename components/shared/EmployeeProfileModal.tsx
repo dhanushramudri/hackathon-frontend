@@ -90,63 +90,111 @@ export function EmployeeProfileModal({ employeeId, initialTab, onClose, skillMat
   );
 }
 
+type RedeployMatchSort = "composite_desc" | "skill_desc" | "competency_desc" | "available_desc";
+
 function RedeployMatchesTab({ employeeId }: { employeeId: string }) {
   const matches = useQuery({
     queryKey: ["free-pool-matches", employeeId],
     queryFn: () => api.freePoolMatches(employeeId),
   });
+  const [coeFilter, setCoeFilter] = useState("all");
+  const [roleFilter, setRoleFilter] = useState("all");
+  const [sort, setSort] = useState<RedeployMatchSort>("composite_desc");
 
-  if (matches.isLoading) return <TableSkeleton columns={7} rows={5} />;
+  if (matches.isLoading) return <TableSkeleton columns={8} rows={5} />;
   if (matches.error) return <ErrorState message="Could not load redeploy matches." />;
-  const rows = matches.data ?? [];
+  const allRows = matches.data ?? [];
+
+  const coeOptions = Array.from(new Set(allRows.flatMap((m) => m.skill_areas))).sort();
+  const roleOptions = Array.from(new Set(allRows.map((m) => m.resources_requested).filter((v): v is string => Boolean(v)))).sort();
+
+  let rows = allRows;
+  if (coeFilter !== "all") rows = rows.filter((m) => m.skill_areas.includes(coeFilter));
+  if (roleFilter !== "all") rows = rows.filter((m) => m.resources_requested === roleFilter);
+  rows = [...rows];
+  switch (sort) {
+    case "composite_desc": rows.sort((a, b) => b.composite_score - a.composite_score); break;
+    case "skill_desc": rows.sort((a, b) => b.skill_score - a.skill_score); break;
+    case "competency_desc": rows.sort((a, b) => b.competency_score - a.competency_score); break;
+    case "available_desc": rows.sort((a, b) => b.available_pct - a.available_pct); break;
+  }
 
   return (
     <div className="space-y-3">
       <p className="text-[11px] text-gray-400">
-        Open pipeline demand that matches this person&apos;s skills, reverse-scored from the Recommendation Engine.
+        Open pipeline demand this person could redeploy into, ranked by the same skill + competency + availability
+        composite score used everywhere else in the app -- not skill alone.
       </p>
-      {rows.length === 0 ? (
+      {allRows.length === 0 ? (
         <p className="text-xs text-gray-400 italic">
           No real skill overlap with any currently-open pipeline demand -- either no skill record exists for this
           employee, or nothing open right now asks for what they have.
         </p>
       ) : (
-        <div className="rounded-xl border border-[hsl(var(--primary)/0.3)] overflow-hidden">
-          <div className="overflow-x-auto">
-          <table className="w-full text-[11px]">
-            <thead>
-              <tr className="bg-gray-50 border-b border-gray-200">
-                {["Match", "Client", "Role requested", "Likely start", "Priority", "Matched skills", ""].map((h) => (
-                  <th key={h} className="text-left font-semibold text-gray-500 px-2.5 py-1.5 whitespace-nowrap">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((m) => (
-                <tr key={m.row_index} className="border-b border-gray-50 last:border-0">
-                  <td className="px-2.5 py-1.5">
-                    <Badge variant={m.skill_score >= 0.6 ? "billable" : m.skill_score >= 0.3 ? "amber" : "default"}>
-                      {Math.round(m.skill_score * 100)}%
-                    </Badge>
-                  </td>
-                  <td className="px-2.5 py-1.5 text-gray-700 font-medium whitespace-nowrap">{m.client ?? "-"}</td>
-                  <td className="px-2.5 py-1.5 text-gray-600 whitespace-nowrap">{m.resources_requested ?? "-"}</td>
-                  <td className="px-2.5 py-1.5 text-gray-500 whitespace-nowrap">{m.likely_start_date ?? "-"}</td>
-                  <td className="px-2.5 py-1.5 text-gray-500 whitespace-nowrap">{m.priority ?? "-"}</td>
-                  <td className="px-2.5 py-1.5 text-gray-500 max-w-[220px] truncate" title={m.matched_skills.join(", ")}>
-                    {m.matched_skills.join(", ") || "-"}
-                  </td>
-                  <td className="px-2.5 py-1.5">
-                    <Link href={`/recommendations?row=${m.row_index}`} className="text-primary hover:underline whitespace-nowrap">
-                      Open →
-                    </Link>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          </div>
-        </div>
+        <>
+          <TableControls
+            filters={[
+              { value: coeFilter, onChange: setCoeFilter, options: [["all", "All skill areas / CoE"], ...coeOptions.map((c) => [c, c] as [string, string])] },
+              { value: roleFilter, onChange: setRoleFilter, options: [["all", "All roles"], ...roleOptions.map((r) => [r, r] as [string, string])] },
+            ]}
+            sort={{
+              value: sort,
+              onChange: (v) => setSort(v as RedeployMatchSort),
+              options: [
+                ["composite_desc", "Best overall fit ↓"],
+                ["skill_desc", "Skill match ↓"],
+                ["competency_desc", "Competency ↓"],
+                ["available_desc", "Availability ↓"],
+              ],
+            }}
+          />
+          {rows.length === 0 ? (
+            <p className="text-xs text-gray-400 italic">No matches with the current filters.</p>
+          ) : (
+            <div className="rounded-xl border border-[hsl(var(--primary)/0.3)] overflow-hidden">
+              <div className="overflow-x-auto">
+              <table className="w-full text-[11px]">
+                <thead>
+                  <tr className="bg-gray-50 border-b border-gray-200">
+                    {["Fit", "Skill", "Competency", "Available", "Client", "Role requested", "Skill area / CoE", ""].map((h) => (
+                      <th key={h} className="text-left font-semibold text-gray-500 px-2.5 py-1.5 whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((m) => (
+                    <tr key={m.row_index} className="border-b border-gray-50 last:border-0">
+                      <td className="px-2.5 py-1.5">
+                        <Badge variant={m.bucket}>{Math.round(m.composite_score * 100)}%</Badge>
+                      </td>
+                      <td
+                        className="px-2.5 py-1.5 text-gray-600 whitespace-nowrap"
+                        title={`Matched: ${m.matched_skills.join(", ") || "none"}. Missing: ${m.missing_skills.join(", ") || "none"}. ${m.skill_confidence === "observed" ? "Based on directly observed skill records." : "Based on inferred/peer-imputed records."}`}
+                      >
+                        {Math.round(m.skill_score * 100)}%
+                      </td>
+                      <td className="px-2.5 py-1.5 text-gray-600 whitespace-nowrap" title={m.competency_confidence === "imputed" ? "Estimated from tenure, no direct assessment on file" : "Based on a direct competency assessment"}>
+                        {Math.round(m.competency_score * 100)}%
+                      </td>
+                      <td className="px-2.5 py-1.5 text-gray-600 whitespace-nowrap">{m.available_pct}%</td>
+                      <td className="px-2.5 py-1.5 text-gray-700 font-medium whitespace-nowrap">{m.client ?? "-"}</td>
+                      <td className="px-2.5 py-1.5 text-gray-600 whitespace-nowrap">{m.resources_requested ?? "-"}</td>
+                      <td className="px-2.5 py-1.5 text-gray-500 max-w-[160px] truncate" title={m.skill_areas.join(", ")}>
+                        {m.skill_areas.join(", ") || "-"}
+                      </td>
+                      <td className="px-2.5 py-1.5">
+                        <Link href={`/recommendations?row=${m.row_index}`} className="text-primary hover:underline whitespace-nowrap">
+                          Open →
+                        </Link>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

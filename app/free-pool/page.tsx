@@ -88,7 +88,7 @@ export default function FreePoolPage() {
           <Skeleton className="h-3 w-56" />
           <ChipRowSkeleton count={14} />
         </div>
-        <TableSkeleton columns={7} rows={10} />
+        <TableSkeleton columns={8} rows={10} />
       </div>
     );
   }
@@ -216,7 +216,7 @@ export default function FreePoolPage() {
         <table className="w-full text-xs data-table">
           <thead className="bg-gray-50 text-gray-500">
             <tr>
-              {["Employee", "Designation", "CoE", "Location", "Status", "Detail", "Idle value /mo"].map((h) => (
+              {["Employee", "Designation", "CoE", "Location", "Status", "Detail", "Idle value /mo", "Projects Recommended"].map((h) => (
                 <th key={h} className="text-left font-medium px-3 py-2 whitespace-nowrap">{h}</th>
               ))}
             </tr>
@@ -265,6 +265,30 @@ export default function FreePoolPage() {
                   <button onClick={() => setProofFor(c)} className="hover:underline">
                     {c.idle_value_usd_per_month != null ? formatUsd(c.idle_value_usd_per_month) : <span className="text-gray-300 font-normal">non-billable</span>}
                   </button>
+                </td>
+                <td className="px-3 py-2 whitespace-nowrap">
+                  {c.recommended_project_count ? (
+                    <button
+                      onClick={() => setSelectedEmployee(c.employee_id)}
+                      className="inline-flex items-center gap-1.5 hover:underline"
+                      title={
+                        c.top_recommended_project
+                          ? `Best fit: ${c.top_recommended_project.client ?? "Unnamed"} -- ${c.top_recommended_project.resources_requested ?? "?"} (${Math.round(c.top_recommended_project.skill_score * 100)}% skill match). Click for all ${c.recommended_project_count} matches, skill+competency+availability ranked.`
+                          : undefined
+                      }
+                    >
+                      <Badge variant="eligible">{c.recommended_project_count}</Badge>
+                      {c.top_recommended_project && (
+                        <span className="text-gray-600 truncate max-w-[160px]">
+                          {c.top_recommended_project.client ?? "Unnamed"} · {c.top_recommended_project.resources_requested ?? "?"}
+                        </span>
+                      )}
+                    </button>
+                  ) : c.recommended_project_count === 0 ? (
+                    <span className="text-gray-300">no open match</span>
+                  ) : (
+                    <span className="text-gray-200">-</span>
+                  )}
                 </td>
               </tr>
             ))}

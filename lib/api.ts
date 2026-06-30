@@ -391,6 +391,17 @@ export interface FreePoolCandidate {
   days_free: number | null;
   last_ended_project_id: string | null;
   last_ended_date: string | null;
+  recommended_project_count?: number;
+  top_recommended_project?: TopRecommendedProject | null;
+}
+
+export interface TopRecommendedProject {
+  row_index: number;
+  client: string | null;
+  resources_requested: string | null;
+  skill_areas: string[];
+  skill_score: number;
+  composite_score: number;
 }
 
 export interface RedeployMatch {
@@ -401,9 +412,16 @@ export interface RedeployMatch {
   likely_start_date: string | null;
   status: string | null;
   priority: string | null;
+  skill_areas: string[];
   skill_score: number;
   matched_skills: string[];
   missing_skills: string[];
+  skill_confidence: "observed" | "imputed" | "no_match" | "no_requirement";
+  competency_score: number;
+  competency_confidence: "observed" | "imputed";
+  available_pct: number;
+  composite_score: number;
+  bucket: "eligible" | "trainable" | "gap" | "not_assessed";
 }
 
 export interface RevenueMonth {
@@ -970,7 +988,7 @@ export const api = {
     return getJSON<OutlookDrilldownResult>(`/forecast/six-month-outlook/drilldown?${params.toString()}`);
   },
   freePool: () => getJSON<FreePoolCandidate[]>("/free-pool"),
-  freePoolMatches: (employeeId: string, topN = 5) =>
+  freePoolMatches: (employeeId: string, topN = 20) =>
     getJSON<RedeployMatch[]>(`/free-pool/${encodeURIComponent(employeeId)}/matches?top_n=${topN}`),
   revenueTrend: () => getJSON<RevenueMonth[]>("/revenue/trend"),
   leaveImpact: () => getJSON<LeaveImpact[]>("/leave/impact"),
