@@ -148,8 +148,15 @@ export interface RecommendationResult {
     deal_stage_hubspot: string | null;
     comments: string | null;
     skillset_coe_categories: string[];
+    skillset_classification_proof: SkillsetClassificationProofRow[];
     requested_designations?: string[];
   };
+}
+
+export interface SkillsetClassificationProofRow {
+  coe_skill: string | null;
+  coe_skills_list: string | null;
+  skills_combined: string | null;
 }
 
 export interface CoverageSummaryRow {

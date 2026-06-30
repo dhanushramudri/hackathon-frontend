@@ -313,7 +313,7 @@ function AllocationsPageInner() {
         <div className="rounded-xl border border-[hsl(var(--primary)/0.3)] bg-white overflow-hidden">
           <div className="overflow-x-auto">
           <table className="w-full text-xs data-table">
-            <thead className="bg-gray-50 text-gray-500">
+            <thead className="bg-secondary text-secondary-foreground">
               <tr>
                 {["Employee", "Designation", "Location", "Project", "Billing", "Alloc %", "Total %", "Utilization", "Hours Util.", "Ends", "Soon?"].map((h) => (
                   <th key={h} className="text-left font-medium px-3 py-2 whitespace-nowrap">{h}</th>

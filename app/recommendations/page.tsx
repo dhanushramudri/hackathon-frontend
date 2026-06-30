@@ -17,6 +17,7 @@ import { Badge } from "@/components/shared/Badge";
 import { LoadingState, ErrorState } from "@/components/shared/EmptyState";
 import { Skeleton, ListSkeleton, FieldGridSkeleton, CandidateCardSkeleton } from "@/components/shared/Skeleton";
 import { EmployeeProfileModal, type ProfileTab, type SkillMatchContext } from "@/components/shared/EmployeeProfileModal";
+import { Modal } from "@/components/shared/Modal";
 import { cn } from "@/lib/utils";
 
 type DemandSort = "date_asc" | "date_desc" | "client_asc" | "cluster_asc" | "priority_desc" | "status_asc";
@@ -126,6 +127,18 @@ function RecommendationsPageInner() {
   const [expandedCandidateId, setExpandedCandidateId] = useState<string | null>(null);
   const [pipelineCollapsed, setPipelineCollapsed] = useState(false);
 
+  // On narrow screens the two panels stack instead of sitting side by side, so picking
+  // a deal from a 293-row list otherwise leaves the recommendation buried below it --
+  // collapse the list out of the way so the result is the first thing visible. Desktop
+  // already shows both panels at once side by side, so this only fires under the lg
+  // breakpoint (matches the grid's own lg:grid-cols switch below).
+  const handleSelectRow = (rowIndex: number) => {
+    setSelectedRow(rowIndex);
+    if (typeof window !== "undefined" && window.innerWidth < 1024) {
+      setPipelineCollapsed(true);
+    }
+  };
+
   useEffect(() => {
     setCandidateSearch("");
     setCandidateSignal("all");
@@ -146,6 +159,7 @@ function RecommendationsPageInner() {
 
   const pipeline = useQuery({ queryKey: ["pipeline-forecast"], queryFn: api.pipelineForecast });
   const coverage = useQuery({ queryKey: ["recommendations-coverage-summary"], queryFn: api.recommendationsCoverageSummary });
+  const roleMixCoes = useQuery({ queryKey: ["role-mix-coes"], queryFn: api.roleMixCoes });
   const recommendation = useQuery({
     queryKey: ["recommendation", selectedRow, topN],
     queryFn: () => api.recommendationsForPipelineRow(selectedRow!, topN),
@@ -228,7 +242,11 @@ function RecommendationsPageInner() {
   };
 
   const designationOptions = buildNormalizedOptions((recommendation.data?.candidates ?? []).map((c) => c.job_name));
-  const coeOptions = buildNormalizedOptions((recommendation.data?.candidates ?? []).map((c) => c.coe));
+  // The full canonical CoE list, not just whichever ones happen to appear in the
+  // currently-shown top-N candidates -- otherwise a real CoE (e.g. Full Stack
+  // Engineering) silently disappears from the filter whenever none of its people
+  // happen to rank in the visible slice, even though they exist org-wide.
+  const coeOptions = (roleMixCoes.data ?? []).map((c) => c.coe).sort();
   const candidatesWithUnknownCoe = (recommendation.data?.candidates ?? []).some((c) => !c.coe);
   const filteredCandidates = filterAndSortCandidates(recommendation.data?.candidates ?? [], {
     search: candidateSearch,
@@ -300,18 +318,31 @@ function RecommendationsPageInner() {
 
       <div className={cn("grid grid-cols-1 gap-4", pipelineCollapsed ? "lg:grid-cols-[44px_1fr]" : "lg:grid-cols-[320px_1fr]")}>
         {pipelineCollapsed ? (
-          <div className="rounded-xl border border-gray-200 bg-white flex flex-col items-center gap-3 py-3 lg:max-h-[calc(100dvh-180px)]">
+          <>
+            {/* Mobile: a sticky horizontal bar, always reachable without scrolling back up. */}
             <button
               onClick={() => setPipelineCollapsed(false)}
-              title="Expand pipeline list"
-              className="text-gray-400 hover:text-primary transition"
+              className="lg:hidden sticky top-0 z-10 flex items-center justify-between gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2.5 shadow-sm text-left"
             >
-              <ChevronRight className="w-4 h-4" />
+              <span className="text-xs font-medium text-gray-600">Pipeline Demand ({demandRows.length})</span>
+              <span className="flex items-center gap-1 text-[11px] text-primary flex-shrink-0">
+                Tap to view <ChevronDown className="w-3.5 h-3.5" />
+              </span>
             </button>
-            <p className="text-[10px] text-gray-400 whitespace-nowrap [writing-mode:vertical-rl]">
-              Pipeline ({demandRows.length})
-            </p>
-          </div>
+            {/* Desktop: thin vertical strip alongside the detail panel. */}
+            <div className="hidden lg:flex rounded-xl border border-gray-200 bg-white flex-col items-center gap-3 py-3 lg:max-h-[calc(100dvh-180px)]">
+              <button
+                onClick={() => setPipelineCollapsed(false)}
+                title="Expand pipeline list"
+                className="text-gray-400 hover:text-primary transition"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+              <p className="text-[10px] text-gray-400 whitespace-nowrap [writing-mode:vertical-rl]">
+                Pipeline ({demandRows.length})
+              </p>
+            </div>
+          </>
         ) : (
         <div className="rounded-xl border border-gray-200 bg-white overflow-hidden flex flex-col lg:max-h-[calc(100dvh-180px)]">
           <div className="px-3 py-2.5 border-b border-gray-100 space-y-2">
@@ -465,7 +496,7 @@ function RecommendationsPageInner() {
             {filteredDemandRows.map((r) => (
               <button
                 key={r.row_index}
-                onClick={() => setSelectedRow(r.row_index)}
+                onClick={() => handleSelectRow(r.row_index)}
                 className={`w-full text-left px-3 py-2.5 border-b border-gray-50 hover:bg-gray-50 transition ${selectedRow === r.row_index ? "bg-primary/5" : ""}`}
               >
                 <p className="text-xs font-medium text-gray-700 truncate">{r.resources_requested ?? "Role TBD"} · {r.client ?? "Unnamed client"}</p>
@@ -527,7 +558,7 @@ function RecommendationsPageInner() {
                   topCandidate={topCandidate}
                   dealDetailsOpen={dealDetailsOpen}
                   onToggleDealDetails={() => setDealDetailsOpen((v) => !v)}
-                  onSelectSibling={setSelectedRow}
+                  onSelectSibling={handleSelectRow}
                   semanticMatchResult={selectedRow !== null ? semanticMatchByRow[selectedRow] : undefined}
                   semanticMatchPending={semanticMatchMutation.isPending}
                   semanticMatchError={semanticMatchMutation.isError}
@@ -1058,6 +1089,7 @@ function DecisionHeader({
   onAskSemanticMatch: () => void;
   onOpenProfile: (employeeId: string, tab: ProfileTab, skillMatchContext?: SkillMatchContext) => void;
 }) {
+  const [classificationProofOpen, setClassificationProofOpen] = useState(false);
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
       <div className="flex items-start justify-between gap-3 flex-wrap">
@@ -1083,17 +1115,20 @@ function DecisionHeader({
           <div className="flex items-center justify-between mb-1">
             <p className="text-[11px] text-gray-400">Required skillset</p>
             {selected.skillset_coe_categories.length > 0 && (
-              <div className="flex items-center gap-1">
+              <button
+                onClick={() => setClassificationProofOpen(true)}
+                className="flex items-center gap-1 hover:opacity-75 transition"
+                title="Click to see the proof behind this classification"
+              >
                 {selected.skillset_coe_categories.map((cat) => (
                   <span
                     key={cat}
-                    title="Real skill category, exact-matched from the Pipeline Skillset reference sheet"
                     className="text-[10px] px-1.5 py-0.5 rounded-full border border-gray-200 bg-gray-50 text-gray-500"
                   >
                     {cat}
                   </span>
                 ))}
-              </div>
+              </button>
             )}
           </div>
           {skillsetText && <p className="text-xs text-gray-600 mb-1.5">{skillsetText}</p>}
@@ -1218,6 +1253,44 @@ function DecisionHeader({
           </div>
         ) : null}
       </div>
+      {classificationProofOpen && (
+        <Modal
+          title={`Why ${selected.skillset_coe_categories.join(", ")}?`}
+          subtitle="Proof from JMAN's real Pipeline Skillset reference sheet -- not inferred"
+          onClose={() => setClassificationProofOpen(false)}
+          widthClassName="max-w-xl"
+        >
+          <div className="p-5 space-y-3">
+            <p className="text-xs text-gray-500">
+              This deal&apos;s required skillset text is matched <strong>exactly</strong> (word-for-word) against
+              JMAN&apos;s Skillset reference sheet. The category badge above comes straight from whichever reference
+              row matched -- nothing here is guessed or re-derived.
+            </p>
+            <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+              <p className="text-[10px] uppercase tracking-wide text-gray-400 mb-0.5">This deal&apos;s skillset text</p>
+              <p className="text-xs text-gray-700">{skillsetText}</p>
+            </div>
+            {selected.skillset_classification_proof.map((row, i) => (
+              <div key={i} className="rounded-lg border border-gray-200 p-3 space-y-1.5">
+                <p className="text-[10px] uppercase tracking-wide text-gray-400">Matched reference row</p>
+                <p className="text-xs text-gray-600">{row.skills_combined}</p>
+                <div className="flex items-center gap-2 pt-1">
+                  <span className="text-[10px] text-gray-400">coe_skill:</span>
+                  <Badge variant="default">{row.coe_skill ?? "-"}</Badge>
+                  <span className="text-[10px] text-gray-400">coe_skills_list:</span>
+                  <Badge variant="default">{row.coe_skills_list ?? "-"}</Badge>
+                </div>
+                {row.coe_skill !== row.coe_skills_list && (
+                  <p className="text-[11px] text-amber-600 pt-1">
+                    Heads up: the reference sheet&apos;s two category columns disagree on this row -- the badge above
+                    uses coe_skill.
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

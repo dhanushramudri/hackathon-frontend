@@ -127,6 +127,10 @@ interface RoleMixRow {
   typicalPct: number;
   prevalencePct: number | null;
   common: boolean;
+  // True only for rows added via "+ Add role" -- these have no historical backing at
+  // all (prevalencePct is always null for them), distinct from a data-derived row whose
+  // source just doesn't carry a prevalence stat (e.g. a verbatim role-mix category).
+  isManual?: boolean;
 }
 
 function rowToFte(row: RoleMixRow): number {
@@ -404,7 +408,7 @@ export default function NewProjectForecastPage() {
     const headcount = parseInt(draft?.headcount ?? "", 10);
     const typicalPct = parseFloat(draft?.pct ?? "");
     if (!designation || Number.isNaN(headcount) || Number.isNaN(typicalPct)) return;
-    const newRow: RoleMixRow = { designation, headcount, typicalPct, prevalencePct: null, common: true };
+    const newRow: RoleMixRow = { designation, headcount, typicalPct, prevalencePct: null, common: true, isManual: true };
     setSpecs((prev) =>
       prev.map((s, i) => (i !== specIndex ? s : { ...s, roleMixEdited: true, roleMix: [...s.roleMix, newRow] }))
     );
@@ -555,12 +559,19 @@ export default function NewProjectForecastPage() {
                       <div key={ri} className="flex items-center gap-2 text-xs">
                         <span
                           className="flex-1 text-gray-700"
-                          title={row.prevalencePct != null ? `used in ${row.prevalencePct}% of matched historical projects` : undefined}
+                          title={
+                            row.prevalencePct != null
+                              ? `used in ${row.prevalencePct}% of matched historical projects`
+                              : row.isManual
+                              ? "Manually added -- no historical project data to back this role, headcount, or %"
+                              : "No historical prevalence stat for this role-mix source"
+                          }
                         >
                           {row.designation}
                           {row.prevalencePct != null && !row.common && (
                             <span className="text-gray-300 ml-1">({row.prevalencePct}% of projects)</span>
                           )}
+                          {row.isManual && <span className="text-gray-300 ml-1">(manual)</span>}
                         </span>
                         <input
                           type="number"
@@ -755,7 +766,7 @@ export default function NewProjectForecastPage() {
           <div className="rounded-xl border border-[hsl(var(--primary)/0.3)] bg-white overflow-hidden">
             <div className="overflow-x-auto">
             <table className="w-full text-xs data-table">
-              <thead className="bg-gray-50 text-gray-500">
+              <thead className="bg-secondary text-secondary-foreground">
                 <tr>
                   {["", "Designation", "Needed By", "Needed Headcount", "Covers This Role", "Shortfall", "Shortfall $/mo", "Signal"].map((h) => (
                     <th key={h} className="text-left font-medium px-3 py-2 whitespace-nowrap">{h}</th>
