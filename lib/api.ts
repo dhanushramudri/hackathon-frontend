@@ -411,6 +411,35 @@ export interface TopRecommendedProject {
   composite_score: number;
 }
 
+export interface ReliefCandidate extends FreePoolCandidate {
+  composite_score: number;
+  skill_score: number;
+  matched_skills: string[];
+  missing_skills: string[];
+  skill_confidence: "observed" | "imputed" | "no_match" | "no_requirement";
+  competency_score: number;
+  competency_confidence: "observed" | "imputed";
+  skill_bucket: "eligible" | "trainable" | "gap" | "not_assessed";
+  coe_matches_project: boolean;
+  // Only present on available_soon_candidates -- still busy today, but with a real,
+  // dated end to that.
+  days_to_available?: number | null;
+  available_from_date?: string | null;
+}
+
+export interface ReliefStaffingResult {
+  project_code: string;
+  overtime_fired: boolean;
+  understaffed_fired: boolean;
+  overtime_employee_count: number;
+  project_coe: string | null;
+  required_skills: string[];
+  required_skill_source: "project_roster" | "coe_typical" | "none";
+  candidate_pool_size: number;
+  candidates: ReliefCandidate[];
+  available_soon_candidates: ReliefCandidate[];
+}
+
 export interface RedeployMatch {
   row_index: number;
   client: string | null;
@@ -960,6 +989,8 @@ export const api = {
   healthProjects: () => getJSON<HealthProject[]>("/health-monitor/projects"),
   projectRoster: (projectCode: string) => getJSON<ProjectRoster>(`/health-monitor/projects/${encodeURIComponent(projectCode)}/roster`),
   healthProjectDetail: (projectCode: string) => getJSON<ProjectHealthDetail>(`/health-monitor/projects/${encodeURIComponent(projectCode)}/detail`),
+  reliefStaffingCandidates: (projectCode: string) =>
+    getJSON<ReliefStaffingResult>(`/health-monitor/projects/${encodeURIComponent(projectCode)}/relief-candidates`),
   projectInfo: (projectCode: string) => getJSON<ProjectInfo>(`/health-monitor/projects/${encodeURIComponent(projectCode)}/info`),
   newProjectForecast: (specs: ForecastSpec[]) =>
     postJSON<NewProjectForecastResult>("/forecast/new-projects", specs),

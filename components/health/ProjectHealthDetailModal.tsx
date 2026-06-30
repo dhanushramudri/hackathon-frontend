@@ -1,24 +1,26 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { api, type ProjectHealthDetail, type WsrReportRow } from "@/lib/api";
+import { HeartPulse, ChevronDown, SlidersHorizontal, UserCheck } from "lucide-react";
+import { api, type ProjectHealthDetail, type ReliefCandidate, type WsrReportRow } from "@/lib/api";
 import { Modal } from "@/components/shared/Modal";
 import { Badge } from "@/components/shared/Badge";
 import { ErrorState } from "@/components/shared/EmptyState";
-import { ModalBodySkeleton } from "@/components/shared/Skeleton";
+import { ModalBodySkeleton, TableSkeleton } from "@/components/shared/Skeleton";
 import { TableControls } from "@/components/shared/TableControls";
 import { FiredBadge } from "@/components/shared/FiredBadge";
+import { EmployeeProfileModal } from "@/components/shared/EmployeeProfileModal";
 import { cn, formatUsd } from "@/lib/utils";
 
-type DetailTab = "overview" | "allocations" | "staffing" | "overtime" | "wsr";
+type DetailTab = "overview" | "allocations" | "staffing" | "overtime" | "relief" | "wsr";
 
 interface ProjectHealthDetailModalProps {
   projectCode: string;
   onClose: () => void;
 }
 
-const TABS: { key: DetailTab; label: string }[] = [
+const BASE_TABS: { key: DetailTab; label: string }[] = [
   { key: "overview", label: "Overview" },
   { key: "allocations", label: "Allocations" },
   { key: "staffing", label: "Staffing & Cost" },
@@ -33,6 +35,13 @@ export function ProjectHealthDetailModal({ projectCode, onClose }: ProjectHealth
     queryFn: () => api.healthProjectDetail(projectCode),
   });
 
+  // Only a real, handy shortcut when there's actually something to relieve --
+  // a project with neither flag fired has no relief recommendation to show.
+  const needsRelief = detail.data ? detail.data.overtime_risk.fired || detail.data.understaffed.fired : false;
+  const tabs = needsRelief
+    ? [...BASE_TABS.slice(0, 4), { key: "relief" as const, label: "Relief Staffing" }, ...BASE_TABS.slice(4)]
+    : BASE_TABS;
+
   return (
     <Modal
       title={detail.data ? `${projectCode} — ${detail.data.client_id ?? "Unknown client"}` : projectCode}
@@ -40,15 +49,16 @@ export function ProjectHealthDetailModal({ projectCode, onClose }: ProjectHealth
       widthClassName="max-w-6xl"
     >
       <div className="flex border-b border-gray-100 px-5 sticky top-0 bg-white z-10 overflow-x-auto">
-        {TABS.map((t) => (
+        {tabs.map((t) => (
           <button
             key={t.key}
             onClick={() => setTab(t.key)}
             className={cn(
-              "px-3 py-2.5 text-xs font-medium border-b-2 -mb-px transition whitespace-nowrap",
+              "flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium border-b-2 -mb-px transition whitespace-nowrap",
               tab === t.key ? "border-primary text-primary" : "border-transparent text-gray-400 hover:text-gray-600"
             )}
           >
+            {t.key === "relief" && <HeartPulse className="w-3 h-3 text-amber-500" />}
             {t.label}
           </button>
         ))}
@@ -65,6 +75,7 @@ export function ProjectHealthDetailModal({ projectCode, onClose }: ProjectHealth
             {tab === "allocations" && <AllocationsTab d={detail.data} />}
             {tab === "staffing" && <StaffingTab d={detail.data} />}
             {tab === "overtime" && <OvertimeTab d={detail.data} />}
+            {tab === "relief" && <ReliefStaffingSection projectCode={detail.data.project_code} />}
             {tab === "wsr" && <WsrTab d={detail.data} />}
           </>
         ) : null}
@@ -741,6 +752,317 @@ function WsrTab({ d }: { d: ProjectHealthDetail }) {
         </div>
         {rows.length === 0 && <p className="text-xs text-gray-400 italic text-center py-4">No WSR reports match this filter.</p>}
       </div>
+    </div>
+  );
+}
+
+type ReliefSignal = "all" | "eligible" | "trainable" | "gap";
+type ReliefReason = "all" | "fully_free" | "under_utilized";
+type ReliefSort = "composite" | "skill" | "competency" | "available";
+
+interface ReliefFilterOptions {
+  search: string;
+  signal: ReliefSignal;
+  designation: string;
+  coe: string;
+  reason: ReliefReason;
+  minSkill: number;
+  minCompetency: number;
+  minAvailable: number;
+  sort: ReliefSort;
+}
+
+function filterAndSortRelief(candidates: ReliefCandidate[], opts: ReliefFilterOptions): ReliefCandidate[] {
+  let result = candidates;
+  const q = opts.search.trim().toLowerCase();
+  if (q) {
+    result = result.filter(
+      (c) =>
+        c.employee_id.toLowerCase().includes(q) ||
+        (c.job_name ?? "").toLowerCase().includes(q) ||
+        c.matched_skills.some((s) => s.toLowerCase().includes(q))
+    );
+  }
+  if (opts.signal !== "all") result = result.filter((c) => c.skill_bucket === opts.signal);
+  if (opts.designation !== "all") result = result.filter((c) => c.job_name === opts.designation);
+  if (opts.coe !== "all") result = result.filter((c) => c.primary_coe === opts.coe);
+  if (opts.reason !== "all") result = result.filter((c) => c.reason === opts.reason);
+  if (opts.minSkill > 0) result = result.filter((c) => c.skill_score >= opts.minSkill / 100);
+  if (opts.minCompetency > 0) result = result.filter((c) => c.competency_score >= opts.minCompetency / 100);
+  if (opts.minAvailable > 0) result = result.filter((c) => c.idle_capacity_pct >= opts.minAvailable);
+
+  const sorted = [...result];
+  switch (opts.sort) {
+    case "composite": sorted.sort((a, b) => b.composite_score - a.composite_score); break;
+    case "skill": sorted.sort((a, b) => b.skill_score - a.skill_score); break;
+    case "competency": sorted.sort((a, b) => b.competency_score - a.competency_score); break;
+    case "available": sorted.sort((a, b) => b.idle_capacity_pct - a.idle_capacity_pct); break;
+  }
+  return sorted;
+}
+
+function RangeFilter({
+  label, value, onChange, max, step, suffix,
+}: {
+  label: string; value: number; onChange: (v: number) => void; max: number; step: number; suffix?: string;
+}) {
+  return (
+    <div>
+      <label className="text-[10px] text-gray-400 block mb-0.5">
+        {label}
+        {value > 0 ? `: ${value}${suffix ?? ""}` : ": any"}
+      </label>
+      <input type="range" min={0} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} className="w-full h-1 accent-primary" />
+    </div>
+  );
+}
+
+function FilterSelect({ label, value, onChange, children }: { label: string; value: string; onChange: (v: string) => void; children: ReactNode }) {
+  return (
+    <div>
+      <label className="text-[10px] text-gray-400 block mb-0.5">{label}</label>
+      <select value={value} onChange={(e) => onChange(e.target.value)} className="w-full text-[11px] px-1.5 py-1 rounded-lg border border-gray-200 bg-white text-gray-600">
+        {children}
+      </select>
+    </div>
+  );
+}
+
+const REASON_LABEL: Record<string, string> = { fully_free: "fully free", under_utilized: "under-utilized" };
+
+function RequiredSkillSourceNote({ source, coe }: { source: string; coe: string | null }) {
+  if (source === "project_roster") return <>matched against this project&apos;s own team&apos;s real skills</>;
+  if (source === "coe_typical") return <>project team too small to derive a signature -- matched against typical {coe ?? "this project's CoE"} skills instead</>;
+  return <>no skill data available to assess fit -- ranked by competency and availability only</>;
+}
+
+function ReliefStaffingSection({ projectCode }: { projectCode: string }) {
+  const relief = useQuery({
+    queryKey: ["relief-staffing", projectCode],
+    queryFn: () => api.reliefStaffingCandidates(projectCode),
+  });
+  const roleMixCoes = useQuery({ queryKey: ["role-mix-coes"], queryFn: api.roleMixCoes });
+
+  const [search, setSearch] = useState("");
+  const [signal, setSignal] = useState<ReliefSignal>("all");
+  const [designation, setDesignation] = useState("all");
+  const [coe, setCoe] = useState("all");
+  const [reason, setReason] = useState<ReliefReason>("all");
+  const [minSkill, setMinSkill] = useState(0);
+  const [minCompetency, setMinCompetency] = useState(0);
+  const [minAvailable, setMinAvailable] = useState(0);
+  const [sort, setSort] = useState<ReliefSort>("composite");
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [selectedEmployee, setSelectedEmployee] = useState<string | null>(null);
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl border border-gray-200 bg-white p-4">
+        <div className="flex items-center gap-2 mb-1">
+          <HeartPulse className="w-4 h-4 text-amber-500 flex-shrink-0" />
+          <p className="text-sm font-semibold text-gray-800">Relief staffing — who from the Free Pool could help</p>
+        </div>
+        <p className="text-[11px] text-gray-500">
+          This team is flagged for {relief.data?.overtime_fired && "sustained overtime"}
+          {relief.data?.overtime_fired && relief.data?.understaffed_fired && " and "}
+          {relief.data?.understaffed_fired && "understaffing"} -- real Free Pool people available right now (not
+          &quot;ending soon&quot;), ranked by the same skill + competency + availability composite used everywhere
+          else in this app.
+        </p>
+      </div>
+
+      {relief.isLoading ? (
+        <TableSkeleton columns={6} rows={4} />
+      ) : relief.error || !relief.data ? (
+        <ErrorState message="Could not load relief staffing candidates." />
+      ) : relief.data.candidates.length === 0 ? (
+        <p className="text-xs text-gray-400 italic">
+          No one in the Free Pool (fully free or under-utilized) right now -- of {relief.data.candidate_pool_size} considered.
+        </p>
+      ) : (
+        <>
+          <div className="mb-3">
+            <p className="text-[11px] text-gray-400">
+              <RequiredSkillSourceNote source={relief.data.required_skill_source} coe={relief.data.project_coe} />
+            </p>
+            {relief.data.required_skills.length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-1.5">
+                {relief.data.required_skills.map((s) => (
+                  <span key={s} className="text-[11px] px-1.5 py-0.5 rounded-full bg-gray-50 border border-gray-200 text-gray-500">{s}</span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2 mb-2">
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search employee ID, role, or skill…"
+              className="flex-1 text-xs px-2.5 py-1.5 rounded-lg border border-gray-200 outline-none focus:border-gray-300 bg-white"
+            />
+            <button
+              onClick={() => setFiltersOpen((v) => !v)}
+              className={cn(
+                "flex items-center gap-1 text-[11px] px-2 py-1.5 rounded-lg border whitespace-nowrap transition flex-shrink-0",
+                filtersOpen ? "border-primary/40 text-primary bg-primary/5" : "border-gray-200 text-gray-500 bg-white"
+              )}
+            >
+              <SlidersHorizontal className="w-3 h-3" />
+              Filters
+              <ChevronDown className={cn("w-3 h-3 transition-transform", filtersOpen && "rotate-180")} />
+            </button>
+          </div>
+
+          {filtersOpen && (
+            <div className="rounded-lg border border-gray-200 bg-white p-2.5 space-y-2.5 mb-2.5">
+              <div>
+                <label className="text-[10px] text-gray-400 block mb-1">Fit</label>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {([["all", "All"], ["eligible", "Eligible"], ["trainable", "Trainable"], ["gap", "Gap"]] as [ReliefSignal, string][]).map(
+                    ([value, label]) => (
+                      <button
+                        key={value}
+                        onClick={() => setSignal(value)}
+                        className={cn(
+                          "text-[11px] px-2 py-1 rounded-lg border transition",
+                          signal === value ? "bg-primary/10 border-primary text-primary" : "border-gray-200 text-gray-500"
+                        )}
+                      >
+                        {label}
+                      </button>
+                    )
+                  )}
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <FilterSelect label="Designation" value={designation} onChange={setDesignation}>
+                  <option value="all">All</option>
+                  {Array.from(new Set(relief.data.candidates.map((c) => c.job_name).filter((v): v is string => Boolean(v)))).sort().map((d) => (
+                    <option key={d} value={d}>{d}</option>
+                  ))}
+                </FilterSelect>
+                <FilterSelect label="CoE" value={coe} onChange={setCoe}>
+                  <option value="all">All</option>
+                  {(roleMixCoes.data ?? []).map((c) => (
+                    <option key={c.coe} value={c.coe}>{c.coe}</option>
+                  ))}
+                </FilterSelect>
+                <FilterSelect label="Availability reason" value={reason} onChange={(v) => setReason(v as ReliefReason)}>
+                  <option value="all">All</option>
+                  <option value="fully_free">Fully free</option>
+                  <option value="under_utilized">Under-utilized</option>
+                </FilterSelect>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <RangeFilter label="Min skill" value={minSkill} onChange={setMinSkill} max={100} step={10} suffix="%" />
+                <RangeFilter label="Min competency" value={minCompetency} onChange={setMinCompetency} max={100} step={10} suffix="%" />
+                <RangeFilter label="Min available" value={minAvailable} onChange={setMinAvailable} max={100} step={10} suffix="%" />
+              </div>
+              <select
+                value={sort}
+                onChange={(e) => setSort(e.target.value as ReliefSort)}
+                className="w-full text-[11px] px-1.5 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-600"
+              >
+                <option value="composite">Sort: best overall fit</option>
+                <option value="skill">Sort: skill match</option>
+                <option value="competency">Sort: competency</option>
+                <option value="available">Sort: availability</option>
+              </select>
+            </div>
+          )}
+
+          <div className="space-y-2">
+            {filterAndSortRelief(relief.data.candidates, { search, signal, designation, coe, reason, minSkill, minCompetency, minAvailable, sort }).map((c) => (
+              <ReliefCandidateCard key={c.employee_id} c={c} onSelect={setSelectedEmployee} />
+            ))}
+            {filterAndSortRelief(relief.data.candidates, { search, signal, designation, coe, reason, minSkill, minCompetency, minAvailable, sort }).length === 0 && (
+              <p className="text-xs text-gray-400 italic text-center py-3">No candidates match the current filters.</p>
+            )}
+          </div>
+
+          {relief.data.available_soon_candidates.length > 0 && (
+            <AvailableSoonAccordion candidates={relief.data.available_soon_candidates} onSelect={setSelectedEmployee} />
+          )}
+        </>
+      )}
+
+      {selectedEmployee && <EmployeeProfileModal employeeId={selectedEmployee} initialTab="skills" onClose={() => setSelectedEmployee(null)} />}
+    </div>
+  );
+}
+
+function ReliefCandidateCard({ c, onSelect, availableSoon }: { c: ReliefCandidate; onSelect: (id: string) => void; availableSoon?: boolean }) {
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white p-2.5">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <button onClick={() => onSelect(c.employee_id)} className="text-xs font-medium text-primary hover:underline flex-shrink-0">
+            {c.employee_id}
+          </button>
+          <span className="text-[11px] text-gray-500 truncate">{c.job_name ?? "Employee"}</span>
+          {c.primary_coe ? (
+            <span
+              title={c.coe_matches_project ? "Same CoE as this project" : undefined}
+              className={cn(
+                "flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full border whitespace-nowrap flex-shrink-0",
+                c.coe_matches_project ? "bg-emerald-50 border-emerald-200 text-emerald-700" : "bg-violet-50 border-violet-200 text-violet-600"
+              )}
+            >
+              {c.coe_matches_project && <UserCheck className="w-3 h-3" />}
+              {c.primary_coe}
+            </span>
+          ) : (
+            <span className="text-[10px] text-gray-300 flex-shrink-0">CoE not determined</span>
+          )}
+        </div>
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          {availableSoon ? (
+            <Badge variant="amber">free from {c.available_from_date ?? "?"} ({c.days_to_available}d)</Badge>
+          ) : (
+            <Badge variant={REASON_LABEL[c.reason] ? (c.reason === "fully_free" ? "green" : "under_utilized") : "default"}>
+              {REASON_LABEL[c.reason] ?? c.reason} · {c.idle_capacity_pct.toFixed(0)}% idle
+            </Badge>
+          )}
+          <Badge variant={c.skill_bucket}>{Math.round(c.composite_score * 100)}% {availableSoon ? "potential fit" : "fit"}</Badge>
+        </div>
+      </div>
+      {(c.matched_skills.length > 0 || c.missing_skills.length > 0) && (
+        <div className="flex flex-wrap gap-1 mt-1.5 text-[10px]">
+          {c.matched_skills.map((s) => (
+            <span key={s} className="px-1.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-100 text-emerald-700">{s}</span>
+          ))}
+          {c.missing_skills.map((s) => (
+            <span key={s} className="px-1.5 py-0.5 rounded-full bg-gray-50 border border-gray-200 text-gray-400">{s}</span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AvailableSoonAccordion({ candidates, onSelect }: { candidates: ReliefCandidate[]; onSelect: (id: string) => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-3.5">
+      <button onClick={() => setOpen((v) => !v)} className="flex items-center gap-1.5 w-full text-left">
+        <ChevronDown className={cn("w-3.5 h-3.5 text-gray-400 transition-transform flex-shrink-0", open && "rotate-180")} />
+        <p className="text-xs font-semibold text-gray-700">
+          No one free right now? {candidates.length} more becoming available soon
+        </p>
+      </button>
+      {!open && (
+        <p className="text-[11px] text-gray-400 mt-1 ml-5">
+          Still busy today, but with a real end date -- not immediately available, worth knowing about.
+        </p>
+      )}
+      {open && (
+        <div className="space-y-2 mt-2.5">
+          {candidates.map((c) => (
+            <ReliefCandidateCard key={c.employee_id} c={c} onSelect={onSelect} availableSoon />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -26,6 +26,7 @@ const TOOL_LABELS: Record<string, string> = {
   get_leave_impact: "Checking leave impact",
   get_employee_headcount_summary: "Pulling headcount summary",
   get_project_health_detail: "Pulling project risk proof",
+  get_relief_staffing_candidates: "Finding relief staffing for this project",
   get_pipeline_outlook: "Running pipeline outlook",
   get_pipeline_outlook_drilldown: "Pulling outlook drilldown",
   get_semantic_match_suggestions: "Running AI semantic match",
