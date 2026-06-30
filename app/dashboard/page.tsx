@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
-import { Users, Briefcase, ShieldAlert, Clock, ArrowRight, UserCheck, AlertOctagon, DollarSign, CalendarOff } from "lucide-react";
+import { Users, Briefcase, ShieldAlert, Clock, ArrowRight, UserCheck, AlertOctagon, DollarSign, CalendarOff, Mail, Loader2, Check } from "lucide-react";
 import { api, type RevenueMonth } from "@/lib/api";
 import { StatCard } from "@/components/shared/StatCard";
 import { Badge } from "@/components/shared/Badge";
@@ -33,6 +33,19 @@ export default function DashboardPage() {
 
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [selectedEmployee, setSelectedEmployee] = useState<string | null>(null);
+  const [digestStatus, setDigestStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
+
+  const handleSendDigest = async () => {
+    setDigestStatus("sending");
+    try {
+      await api.sendDigestNow();
+      setDigestStatus("sent");
+      setTimeout(() => setDigestStatus("idle"), 4000);
+    } catch {
+      setDigestStatus("error");
+      setTimeout(() => setDigestStatus("idle"), 4000);
+    }
+  };
 
   if (tables.isLoading || health.isLoading || allocations.isLoading) return <DashboardSkeleton />;
   if (tables.error || health.error || allocations.error) return <ErrorState message="Could not reach the ResourceIQ backend. Is it running on :8000?" />;
@@ -78,6 +91,23 @@ export default function DashboardPage() {
 
   return (
     <div className="p-4 sm:p-6 space-y-6 max-w-6xl mx-auto">
+      <div className="flex items-center justify-end -mb-2">
+        <button
+          onClick={handleSendDigest}
+          disabled={digestStatus === "sending"}
+          title="Emails the Resource Manager digest right now -- leave coverage gaps with no backfill, and high-risk projects. Also sends automatically every Friday 5pm and Monday 9am."
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-gray-50 transition disabled:opacity-50"
+        >
+          {digestStatus === "sending" ? (
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          ) : digestStatus === "sent" ? (
+            <Check className="w-3.5 h-3.5 text-emerald-600" />
+          ) : (
+            <Mail className="w-3.5 h-3.5" />
+          )}
+          {digestStatus === "sending" ? "Sending…" : digestStatus === "sent" ? "Digest sent" : digestStatus === "error" ? "Failed — try again" : "Email digest now"}
+        </button>
+      </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           label="Total Employees"

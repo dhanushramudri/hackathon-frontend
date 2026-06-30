@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, Users } from "lucide-react";
 import { api, type LeaveImpact } from "@/lib/api";
 import { Badge } from "@/components/shared/Badge";
 import { StatCard } from "@/components/shared/StatCard";
@@ -13,16 +13,20 @@ import { TableControls } from "@/components/shared/TableControls";
 import { EmployeeProfileModal } from "@/components/shared/EmployeeProfileModal";
 import { ProjectBasicModal } from "@/components/shared/ProjectBasicModal";
 import { ProjectHealthDetailModal } from "@/components/health/ProjectHealthDetailModal";
+import { LeaveBackfillModal } from "@/components/shared/LeaveBackfillModal";
 
 type LeaveTypeFilter = "all" | "Planned" | "Sick" | "Emergency";
-type Sort = "start_asc" | "start_desc" | "employee_asc" | "project_asc" | "alloc_desc";
+type Sort = "start_asc" | "start_desc" | "employee_asc" | "project_asc" | "alloc_desc" | "skill_desc";
 
-const REASON_VARIANT: Record<string, string> = { ending_soon: "amber", fully_free: "green", under_utilized: "under_utilized" };
+// Matches scoring.py's ELIGIBLE_THRESHOLD -- "strong match" means the same 0.6 cutoff
+// the rest of the app already uses to call a candidate "eligible" for redeployment.
+const STRONG_SKILL_MATCH_THRESHOLD = 0.6;
 
 interface FilterOptions {
   search: string;
   onLeaveOnly: boolean;
   noBackfillOnly: boolean;
+  strongSkillOnly: boolean;
   leaveType: LeaveTypeFilter;
   project: string;
   coe: string;
@@ -45,6 +49,7 @@ function filterAndSortLeave(rows: LeaveImpact[], opts: FilterOptions): LeaveImpa
   }
   if (opts.onLeaveOnly) result = result.filter((i) => i.is_currently_on_leave);
   if (opts.noBackfillOnly) result = result.filter((i) => !i.backfill_available);
+  if (opts.strongSkillOnly) result = result.filter((i) => (i.top_backfill_skill_score ?? 0) >= STRONG_SKILL_MATCH_THRESHOLD);
   if (opts.leaveType !== "all") result = result.filter((i) => i.leave_type === opts.leaveType);
   if (opts.project !== "all") result = result.filter((i) => i.project_id === opts.project);
   if (opts.coe !== "all") result = result.filter((i) => (opts.coe === "" ? i.coe === null : i.coe === opts.coe));
@@ -68,6 +73,9 @@ function filterAndSortLeave(rows: LeaveImpact[], opts: FilterOptions): LeaveImpa
     case "alloc_desc":
       sorted.sort((a, b) => b.allocation_by_percentage - a.allocation_by_percentage);
       break;
+    case "skill_desc":
+      sorted.sort((a, b) => (b.top_backfill_skill_score ?? -1) - (a.top_backfill_skill_score ?? -1));
+      break;
   }
   return sorted;
 }
@@ -88,6 +96,7 @@ function LeavePageInner() {
   const [search, setSearch] = useState("");
   const [onLeaveOnly, setOnLeaveOnly] = useState(false);
   const [noBackfillOnly, setNoBackfillOnly] = useState(false);
+  const [strongSkillOnly, setStrongSkillOnly] = useState(false);
   const [leaveType, setLeaveType] = useState<LeaveTypeFilter>("all");
   const [project, setProject] = useState("all");
   const [coe, setCoe] = useState("all");
@@ -97,6 +106,7 @@ function LeavePageInner() {
 
   const [selectedEmployee, setSelectedEmployee] = useState<string | null>(null);
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
+  const [backfillImpact, setBackfillImpact] = useState<LeaveImpact | null>(null);
 
   useEffect(() => {
     if (searchParams.get("onLeaveNow") === "true") setOnLeaveOnly(true);
@@ -122,14 +132,15 @@ function LeavePageInner() {
   const projects = Array.from(new Set(data.map((i) => i.project_id))).sort();
   const coes = Array.from(new Set(data.map((i) => i.coe).filter((v): v is string => Boolean(v)))).sort();
 
-  const filtered = filterAndSortLeave(data, { search, onLeaveOnly, noBackfillOnly, leaveType, project, coe, dateFrom, dateTo, sort });
+  const filtered = filterAndSortLeave(data, { search, onLeaveOnly, noBackfillOnly, strongSkillOnly, leaveType, project, coe, dateFrom, dateTo, sort });
 
   const hasActiveFilters =
-    search !== "" || onLeaveOnly || noBackfillOnly || leaveType !== "all" || project !== "all" || coe !== "all" || dateFrom !== "" || dateTo !== "";
+    search !== "" || onLeaveOnly || noBackfillOnly || strongSkillOnly || leaveType !== "all" || project !== "all" || coe !== "all" || dateFrom !== "" || dateTo !== "";
   const clearFilters = () => {
     setSearch("");
     setOnLeaveOnly(false);
     setNoBackfillOnly(false);
+    setStrongSkillOnly(false);
     setLeaveType("all");
     setProject("all");
     setCoe("all");
@@ -187,7 +198,10 @@ function LeavePageInner() {
               options: [["all", "All CoEs"], ...coes.map((c) => [c, c] as [string, string]), ["", "Not determined"]],
             },
           ]}
-          toggles={[{ active: noBackfillOnly, onToggle: () => setNoBackfillOnly((v) => !v), label: "No backfill only" }]}
+          toggles={[
+            { active: noBackfillOnly, onToggle: () => setNoBackfillOnly((v) => !v), label: "No backfill only" },
+            { active: strongSkillOnly, onToggle: () => setStrongSkillOnly((v) => !v), label: "Strong skill match only" },
+          ]}
           sort={{
             value: sort,
             onChange: (v) => setSort(v as Sort),
@@ -197,6 +211,7 @@ function LeavePageInner() {
               ["employee_asc", "Employee A–Z"],
               ["project_asc", "Project A–Z"],
               ["alloc_desc", "Alloc % ↓"],
+              ["skill_desc", "Best skill match ↓"],
             ],
           }}
         />
@@ -246,25 +261,20 @@ function LeavePageInner() {
                   </button>
                 </td>
                 <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{i.allocation_by_percentage}%</td>
-                <td className="px-3 py-2">
+                <td className="px-3 py-2 whitespace-nowrap">
                   {i.backfill_available ? (
-                    <div className="flex items-center gap-1 flex-wrap">
-                      {i.backfill_candidates.map((c) => (
-                        <button
-                          key={c.employee_id}
-                          onClick={() => setSelectedEmployee(c.employee_id)}
-                          className="inline-flex items-center gap-1 hover:opacity-75 transition"
-                          title={`Same designation (${i.job_name ?? "?"}), real Free Pool match -- click for the full profile`}
-                        >
-                          <span className="text-gray-700 font-medium">{c.employee_id}</span>
-                          <Badge variant={REASON_VARIANT[c.reason] ?? "default"}>
-                            {c.reason === "fully_free" && "free"}
-                            {c.reason === "ending_soon" && `${c.days_to_end}d left`}
-                            {c.reason === "under_utilized" && `${c.current_allocation_pct}% alloc`}
-                          </Badge>
-                        </button>
-                      ))}
-                    </div>
+                    <button
+                      onClick={() => setBackfillImpact(i)}
+                      className="inline-flex items-center gap-1.5 text-primary hover:underline font-medium"
+                    >
+                      <Users className="w-3.5 h-3.5" />
+                      View backfill ({i.backfill_candidates.length})
+                      {i.top_backfill_skill_score !== null && (
+                        <Badge variant={i.top_backfill_skill_score >= STRONG_SKILL_MATCH_THRESHOLD ? "eligible" : "trainable"}>
+                          {Math.round(i.top_backfill_skill_score * 100)}% best match
+                        </Badge>
+                      )}
+                    </button>
                   ) : (
                     <span className="flex items-center gap-1 text-red-500"><AlertTriangle className="w-3 h-3" /> none free</span>
                   )}
@@ -288,6 +298,9 @@ function LeavePageInner() {
         ) : (
           <ProjectBasicModal projectCode={selectedProject} onClose={() => setSelectedProject(null)} />
         ))}
+      {backfillImpact && (
+        <LeaveBackfillModal impact={backfillImpact} onClose={() => setBackfillImpact(null)} onSelectEmployee={setSelectedEmployee} />
+      )}
     </div>
   );
 }

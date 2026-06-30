@@ -428,6 +428,7 @@ export interface RedeployCandidate {
   matched_skills?: string[];
   missing_skills?: string[];
   skill_confidence?: "observed" | "imputed" | "no_match" | "no_requirement";
+  skill_bucket?: "eligible" | "trainable" | "gap" | "not_assessed";
   source_designation?: string;
   level_offset?: number;
 }
@@ -532,6 +533,12 @@ export interface LeaveImpact {
   allocation_by_percentage: number;
   backfill_candidates: RedeployCandidate[];
   backfill_available: boolean;
+  top_backfill_skill_score: number | null;
+  required_skills: string[];
+  // "project_roster": matched against the skills of this project's own team;
+  // "own_skills": project roster too thin, fell back to the leave-taker's own skills;
+  // "none": neither was available -- skill fit isn't assessed for this row.
+  required_skill_source: "project_roster" | "own_skills" | "none";
 }
 
 export interface OutlookMonth {
@@ -708,6 +715,54 @@ export interface BuddyAnswer {
   data?: unknown;
 }
 
+export interface BuddyToolCall {
+  tool: string;
+  arguments: Record<string, unknown>;
+}
+
+export interface BuddyStreamEvent {
+  type: "tool_call" | "tool_result" | "done";
+  tool?: string;
+  arguments?: Record<string, unknown>;
+  answer?: string;
+  format?: "table" | "stats" | "text";
+  table?: BuddyTable;
+  stats?: BuddyStat[];
+  data?: unknown;
+}
+
+/** SSE variant of api.buddyAsk -- yields {type: "tool_call"|"tool_result"|"done", ...}
+ * as Buddy works, instead of waiting for the full answer. Uses fetch() directly since
+ * the structured-final-answer JSON only arrives once on the "done" event, not streamed
+ * token-by-token (the backend's final answer is parsed JSON, not free prose). */
+export async function* buddyAskStream(
+  message: string,
+  history: { role: "user" | "assistant"; content: string }[] = []
+): AsyncGenerator<BuddyStreamEvent> {
+  const res = await fetch(`${BASE}/buddy/ask/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message, history }),
+  });
+  if (!res.ok || !res.body) {
+    throw new Error(`/buddy/ask/stream failed: ${res.status}`);
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const chunks = buffer.split("\n\n");
+    buffer = chunks.pop() ?? "";
+    for (const chunk of chunks) {
+      const line = chunk.split("\n").find((l) => l.startsWith("data: "));
+      if (line) yield JSON.parse(line.slice(6));
+    }
+  }
+}
+
 export interface EmployeeSkillRow {
   coe: string | null;
   coe_skill: string | null;
@@ -846,8 +901,15 @@ export interface EmployeeListRow {
   current_allocation_pct: number | null;
 }
 
+export interface DigestSendResult {
+  sent_to: string;
+  no_backfill_count: number;
+  high_risk_total_count: number;
+}
+
 export const api = {
   tables: () => getJSON<Record<string, number>>("/meta/tables"),
+  sendDigestNow: () => postJSON<DigestSendResult>(`/digest/send?period_label=${encodeURIComponent("right now")}`, {}),
   buddyAsk: (message: string, history: { role: "user" | "assistant"; content: string }[] = []) =>
     postJSON<BuddyAnswer>("/buddy/ask", { message, history }),
   employeeProfile: (employeeId: string) => getJSON<EmployeeProfile>(`/employees/${encodeURIComponent(employeeId)}/profile`),

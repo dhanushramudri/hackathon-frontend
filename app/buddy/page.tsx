@@ -1,15 +1,50 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Send, Sparkles, Loader2, Plus, Trash2, MessageSquare, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
+import { Send, Sparkles, Loader2, Plus, Trash2, MessageSquare, PanelLeftClose, PanelLeftOpen, X, ChevronDown, ChevronUp, Wrench } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Mascot } from "@/components/shared/Mascot";
-import { api, type BuddyStat, type BuddyTable } from "@/lib/api";
+import { buddyAskStream, type BuddyStat, type BuddyTable, type BuddyToolCall } from "@/lib/api";
 import { EmployeeProfileModal } from "@/components/shared/EmployeeProfileModal";
 import { ProjectHealthDetailModal } from "@/components/health/ProjectHealthDetailModal";
 
 const EMPLOYEE_COLUMNS = new Set(["Employee"]);
 const PROJECT_COLUMNS = new Set(["Project"]);
+
+const TOOL_LABELS: Record<string, string> = {
+  get_recommendations: "Searching candidates",
+  list_pipeline_demand: "Looking up pipeline demand",
+  get_recommendations_for_pipeline_row: "Ranking candidates for this deal",
+  get_recommendations_coverage_summary: "Rolling up pipeline coverage",
+  get_health_report: "Checking project risk",
+  get_allocation_report: "Pulling current allocations",
+  get_new_project_forecast: "Running staffing what-if",
+  find_employees: "Looking up employees",
+  get_employee_profile: "Pulling employee profile",
+  get_free_pool: "Checking who's free",
+  get_redeploy_matches_for_employee: "Finding open work for this person",
+  get_leave_impact: "Checking leave impact",
+  get_employee_headcount_summary: "Pulling headcount summary",
+  get_project_health_detail: "Pulling project risk proof",
+  get_pipeline_outlook: "Running pipeline outlook",
+  get_pipeline_outlook_drilldown: "Pulling outlook drilldown",
+  get_semantic_match_suggestions: "Running AI semantic match",
+  get_role_mix: "Looking up role mix",
+  list_role_mix_reference: "Looking up CoE/category reference",
+  get_rate_card: "Looking up rate card",
+  get_adjacent_designations: "Checking adjacent designations",
+  get_employee_overtime_risk: "Checking overtime risk",
+  get_project_effort_spikes: "Checking effort spikes",
+  get_coe_skills: "Looking up CoE skills",
+  get_allocation_timesheet: "Pulling timesheet proof",
+  get_project_roster: "Pulling project roster",
+  get_project_info: "Looking up project info",
+  get_revenue_trend: "Pulling revenue trend",
+};
+
+function toolLabel(tool: string): string {
+  return TOOL_LABELS[tool] ?? tool;
+}
 
 interface Message {
   role: "user" | "assistant";
@@ -18,6 +53,7 @@ interface Message {
   table?: BuddyTable;
   stats?: BuddyStat[];
   data?: unknown;
+  toolTrace?: BuddyToolCall[];
 }
 
 interface BuddyConversation {
@@ -129,6 +165,47 @@ function ChatStats({ items }: { items: BuddyStat[] }) {
         <div key={s.label} className="rounded-xl border border-gray-200 px-3 py-2">
           <p className="text-[10px] text-gray-400 mb-0.5">{s.label}</p>
           <p className="text-sm font-bold text-gray-800">{s.value}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ToolTrace({ trace }: { trace: BuddyToolCall[] }) {
+  const [open, setOpen] = useState(false);
+  if (!trace.length) return null;
+  return (
+    <div className="w-full">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1 text-[11px] font-medium text-gray-400 hover:text-gray-600 transition"
+      >
+        {open ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+        <Wrench className="w-3 h-3" />
+        {trace.length} tool {trace.length === 1 ? "call" : "calls"} used
+      </button>
+      {open && (
+        <div className="mt-1.5 space-y-1.5">
+          {trace.map((t, i) => (
+            <div key={i} className="text-[11px] font-mono text-gray-400 bg-gray-50 rounded-lg px-2.5 py-1.5 border border-gray-100">
+              <span className="text-primary">{t.tool}</span>
+              <span className="text-gray-400">({JSON.stringify(t.arguments)})</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LiveToolProgress({ tools }: { tools: { tool: string; done: boolean }[] }) {
+  if (!tools.length) return null;
+  return (
+    <div className="flex flex-col gap-1.5">
+      {tools.map((t, i) => (
+        <div key={i} className="flex items-center gap-2 text-xs text-gray-400 px-1">
+          {t.done ? <Wrench className="w-3 h-3 text-primary" /> : <Loader2 className="w-3 h-3 animate-spin" />}
+          {toolLabel(t.tool)}…
         </div>
       ))}
     </div>
@@ -259,6 +336,7 @@ export default function BuddyPage() {
   const [activeId, setActiveId] = useState<string | null>(() => mostRecentId(loadConversations()));
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const [liveTools, setLiveTools] = useState<{ tool: string; done: boolean }[]>([]);
   const [selectedEmployee, setSelectedEmployee] = useState<string | null>(null);
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [railMobileOpen, setRailMobileOpen] = useState(false);
@@ -273,7 +351,7 @@ export default function BuddyPage() {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages.length, sending]);
+  }, [messages.length, sending, liveTools.length]);
 
   const appendMessage = (conversationId: string, message: Message) => {
     setConversations((prev) =>
@@ -301,13 +379,38 @@ export default function BuddyPage() {
     appendMessage(conversationId, { role: "user", content: message });
     setDraft("");
     setSending(true);
+    setLiveTools([]);
     try {
-      const json = await api.buddyAsk(message, history);
-      appendMessage(conversationId, { role: "assistant", content: json.answer, format: json.format, table: json.table, stats: json.stats, data: json.data });
+      const trace: { tool: string; arguments: Record<string, unknown> }[] = [];
+      for await (const event of buddyAskStream(message, history)) {
+        if (event.type === "tool_call" && event.tool) {
+          trace.push({ tool: event.tool, arguments: event.arguments ?? {} });
+          setLiveTools((prev) => [...prev, { tool: event.tool!, done: false }]);
+        } else if (event.type === "tool_result" && event.tool) {
+          setLiveTools((prev) => {
+            const idx = prev.map((t) => t.tool === event.tool && !t.done).lastIndexOf(true);
+            if (idx === -1) return prev;
+            const next = [...prev];
+            next[idx] = { ...next[idx], done: true };
+            return next;
+          });
+        } else if (event.type === "done") {
+          appendMessage(conversationId, {
+            role: "assistant",
+            content: event.answer ?? "",
+            format: event.format,
+            table: event.table,
+            stats: event.stats,
+            data: event.data,
+            toolTrace: trace,
+          });
+        }
+      }
     } catch {
       appendMessage(conversationId, { role: "assistant", content: "Could not reach Buddy's backend." });
     } finally {
       setSending(false);
+      setLiveTools([]);
     }
   };
 
@@ -388,14 +491,21 @@ export default function BuddyPage() {
                       <ChatTable {...m.table} onEmployeeClick={setSelectedEmployee} onProjectClick={setSelectedProject} />
                     )}
                     {m.role === "assistant" && m.format === "stats" && m.stats && <ChatStats items={m.stats} />}
+                    {m.role === "assistant" && m.toolTrace && m.toolTrace.length > 0 && <ToolTrace trace={m.toolTrace} />}
                   </div>
                 </div>
               ))}
               {sending && (
                 <div className="flex gap-3 justify-start">
                   <Avatar />
-                  <div className="px-4 py-2.5 rounded-2xl rounded-bl-md bg-gray-50 border border-gray-100 flex items-center gap-2 text-xs text-gray-400">
-                    <Loader2 className="w-3 h-3 animate-spin" /> thinking…
+                  <div className="flex flex-col gap-2 flex-1 min-w-0">
+                    {liveTools.length === 0 ? (
+                      <div className="px-4 py-2.5 rounded-2xl rounded-bl-md bg-gray-50 border border-gray-100 flex items-center gap-2 text-xs text-gray-400 w-fit">
+                        <Loader2 className="w-3 h-3 animate-spin" /> thinking…
+                      </div>
+                    ) : (
+                      <LiveToolProgress tools={liveTools} />
+                    )}
                   </div>
                 </div>
               )}
