@@ -757,7 +757,7 @@ export default function NewProjectForecastPage() {
             <table className="w-full text-xs data-table">
               <thead className="bg-gray-50 text-gray-500">
                 <tr>
-                  {["", "Designation", "Needed By", "Needed Headcount", "Available to Redeploy", "Shortfall", "Shortfall $/mo", "Signal"].map((h) => (
+                  {["", "Designation", "Needed By", "Needed Headcount", "Covers This Role", "Shortfall", "Shortfall $/mo", "Signal"].map((h) => (
                     <th key={h} className="text-left font-medium px-3 py-2 whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -782,14 +782,24 @@ export default function NewProjectForecastPage() {
                           {b.duration_weeks != null && <span className="text-gray-300"> +{b.duration_weeks}w</span>}
                         </td>
                         <td className="px-3 py-2 text-gray-500">{b.needed_headcount}</td>
-                        <td className="px-3 py-2 text-gray-500">
-                          {b.available_for_redeploy}
+                        <td className="px-3 py-2">
+                          <span
+                            className="text-gray-800 font-semibold"
+                            title="The number that actually covers this role -- skill-matched, plus anyone one level away who flexes in. This is what Shortfall is calculated against."
+                          >
+                            {b.qualifying_for_redeploy + b.adjacent_fill_count} qualify
+                          </span>
+                          {b.adjacent_fill_count > 0 && (
+                            <span className="text-gray-400"> ({b.qualifying_for_redeploy} on-skill <span className="text-emerald-600">+{b.adjacent_fill_count} flexible fit</span>)</span>
+                          )}
                           {b.qualifying_for_redeploy < b.available_for_redeploy && (
-                            <span className="text-amber-600" title="Holds the title but doesn't meet the requested skillset">
-                              {" "}({b.qualifying_for_redeploy} skill-matched)
+                            <span
+                              className="block text-[10px] text-amber-600 mt-0.5"
+                              title="Holds the title but doesn't meet the requested skillset, so doesn't count toward covering this role"
+                            >
+                              {b.available_for_redeploy} hold this title in total
                             </span>
                           )}
-                          {b.adjacent_fill_count > 0 && <span className="text-emerald-600 font-medium"> +{b.adjacent_fill_count} flexible fit</span>}
                         </td>
                         <td className="px-3 py-2 text-gray-500">{b.shortfall}</td>
                         <td className="px-3 py-2 text-gray-500">{b.shortfall_value_usd > 0 ? formatUsd(b.shortfall_value_usd) : "-"}</td>

@@ -311,15 +311,6 @@ export default function PipelineOutlookPage() {
                 <td className="px-3 py-2 space-y-1">
                   {m.early_warning && <Badge variant="red">shortfall</Badge>}
                   {!m.has_real_demand_data && <Badge variant="amber">no pipeline visibility yet</Badge>}
-                  {m.supply_anomaly_note && (
-                    <button
-                      onClick={() => open({ dimension: "supply", month: m.month, label: `Projected supply -- ${m.month}` })}
-                      className="block text-[10px] text-amber-600 hover:underline"
-                      title={m.supply_anomaly_note}
-                    >
-                      ⚠ supply data caution
-                    </button>
-                  )}
                 </td>
               </tr>
             ))}
@@ -352,7 +343,9 @@ export default function PipelineOutlookPage() {
           </p>
         ) : (
           <p className="text-[11px] text-gray-400 mb-2">
-            Speculative demand, not yet signed -- {totalUnconfirmedInFilter} request(s). No Available/Shortfall shown.
+            Speculative demand, not yet signed -- {totalUnconfirmedInFilter} request(s). Available/Shortfall are shown for
+            reference using the same real roster math as confirmed demand, but these requests may never materialize --
+            treat as a heads-up, not a committed gap.
           </p>
         )}
         <div className="flex flex-wrap items-center gap-1.5 mb-3">
@@ -409,9 +402,23 @@ export default function PipelineOutlookPage() {
                     )}
                   </td>
                   <td className="px-3 py-2 text-gray-500">{r.needed_headcount}</td>
-                  <td className="px-3 py-2 text-gray-500">{r.available_headcount ?? "not assessed"}</td>
+                  <td className="px-3 py-2 text-gray-500">
+                    {r.available_headcount ?? (
+                      <span title="This resource code doesn't resolve to any real internal designation, so there's no roster to check availability against.">
+                        not assessed
+                      </span>
+                    )}
+                  </td>
                   <td className="px-3 py-2">
-                    {r.shortfall ? <Badge variant="red">{r.shortfall}</Badge> : r.shortfall === 0 ? "0" : "-"}
+                    {r.shortfall ? (
+                      <Badge variant={r.is_confirmed ? "red" : "amber"}>{r.shortfall}</Badge>
+                    ) : r.shortfall === 0 ? (
+                      <span title="Available headcount meets or exceeds what's needed">
+                        <Badge variant="green">covered</Badge>
+                      </span>
+                    ) : (
+                      <span className="text-gray-400" title="Can't be assessed -- this resource code has no internal designation to check a roster against">-</span>
+                    )}
                   </td>
                   <td className="px-3 py-2 text-gray-500">{r.shortfall_value_usd > 0 ? formatUsd(r.shortfall_value_usd) : "-"}</td>
                   <td className="px-3 py-2 text-gray-400">{r.value_usd ? formatUsd(r.value_usd) : "-"}</td>
