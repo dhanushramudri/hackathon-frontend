@@ -15,6 +15,12 @@ type Filter = "all" | "fully_free" | "under_utilized" | "ending_soon";
 type Sort = "default" | "idle_value_desc" | "days_free_desc" | "employee_asc" | "designation_asc";
 
 const REASON_LABEL: Record<string, string> = { fully_free: "fully free", under_utilized: "under-utilized", ending_soon: "ending soon" };
+
+function dateDaysFromNow(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+}
 const SORT_OPTIONS: { value: Sort; label: string }[] = [
   { value: "default", label: "Default (status, then allocation %)" },
   { value: "idle_value_desc", label: "Idle value $/mo ↓" },
@@ -33,6 +39,8 @@ export default function FreePoolPage() {
   const [designationFilter, setDesignationFilter] = useState<string | null>(null);
   const [proofFor, setProofFor] = useState<FreePoolCandidate | null>(null);
   const [showAllDesignations, setShowAllDesignations] = useState(false);
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
 
   const coes = useMemo(() => Array.from(new Set((data ?? []).map((c) => c.primary_coe).filter((v): v is string => Boolean(v)))).sort(), [data]);
 
@@ -52,6 +60,15 @@ export default function FreePoolPage() {
     if (designationFilter) rows = rows.filter((c) => c.job_name === designationFilter);
     const q = search.trim().toLowerCase();
     if (q) rows = rows.filter((c) => [c.employee_id, c.job_name, c.location, c.primary_coe].some((v) => v?.toLowerCase().includes(q)));
+    if (dateFrom || dateTo) {
+      rows = rows.filter((c) => {
+        // under_utilized has no single relevant date -- a date filter doesn't apply to
+        // it, so it passes through rather than being silently hidden.
+        const relevantDate = c.reason === "fully_free" ? c.last_ended_date : c.reason === "ending_soon" && c.days_to_end != null ? dateDaysFromNow(c.days_to_end) : null;
+        if (relevantDate == null) return c.reason === "under_utilized";
+        return (!dateFrom || relevantDate >= dateFrom) && (!dateTo || relevantDate <= dateTo);
+      });
+    }
     rows = [...rows];
     switch (sort) {
       case "idle_value_desc": rows.sort((a, b) => (b.idle_value_usd_per_month ?? -1) - (a.idle_value_usd_per_month ?? -1)); break;
@@ -60,7 +77,7 @@ export default function FreePoolPage() {
       case "designation_asc": rows.sort((a, b) => (a.job_name ?? "").localeCompare(b.job_name ?? "")); break;
     }
     return rows;
-  }, [data, filter, coeFilter, designationFilter, search, sort]);
+  }, [data, filter, coeFilter, designationFilter, search, dateFrom, dateTo, sort]);
 
   if (isLoading) {
     return (
@@ -173,6 +190,24 @@ export default function FreePoolPage() {
             placeholder="Search employee, role, location, CoE…"
             className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs w-full sm:w-64 outline-none focus:border-gray-300"
           />
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] text-gray-400 whitespace-nowrap" title="Filters 'fully free' by when they became free, and 'ending soon' by their projected free-up date. Under-utilized has no single date and is unaffected.">
+              Free between
+            </span>
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              className="text-xs px-1.5 py-1 rounded-lg border border-gray-200 bg-white text-gray-600"
+            />
+            <span className="text-[10px] text-gray-400">→</span>
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              className="text-xs px-1.5 py-1 rounded-lg border border-gray-200 bg-white text-gray-600"
+            />
+          </div>
         </div>
       </div>
 

@@ -53,6 +53,8 @@ interface FilterOptions {
   typeFilter: string;
   absenceOnly: boolean;
   endingSoonOnly: boolean;
+  dateFrom: string;
+  dateTo: string;
   sort: Sort;
 }
 
@@ -77,6 +79,9 @@ function filterAndSortAllocations(rows: AllocationRow[], opts: FilterOptions): A
   if (opts.typeFilter !== "all") result = result.filter((r) => r.type_of_project === opts.typeFilter);
   if (opts.absenceOnly) result = result.filter((r) => r.possible_unplanned_absence);
   if (opts.endingSoonOnly) result = result.filter((r) => r.ending_soon);
+  // Overlap test (active-during), not an exact-date match.
+  if (opts.dateFrom) result = result.filter((r) => r.allocated_end_date >= opts.dateFrom);
+  if (opts.dateTo) result = result.filter((r) => r.allocated_start_date <= opts.dateTo);
 
   const sorted = [...result];
   switch (opts.sort) {
@@ -114,6 +119,8 @@ function AllocationsPageInner() {
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [absenceOnly, setAbsenceOnly] = useState(false);
   const [endingSoonOnly, setEndingSoonOnly] = useState(false);
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [sort, setSort] = useState<Sort>("alloc_desc");
 
   useEffect(() => {
@@ -137,12 +144,14 @@ function AllocationsPageInner() {
 
   const filtered = useMemo(() => {
     if (!data) return [];
-    return filterAndSortAllocations(data, { search, statusFilter, bandFilter, hoursBandFilter, coeFilter, typeFilter, absenceOnly, endingSoonOnly, sort });
-  }, [data, search, statusFilter, bandFilter, hoursBandFilter, coeFilter, typeFilter, absenceOnly, endingSoonOnly, sort]);
+    return filterAndSortAllocations(data, {
+      search, statusFilter, bandFilter, hoursBandFilter, coeFilter, typeFilter, absenceOnly, endingSoonOnly, dateFrom, dateTo, sort,
+    });
+  }, [data, search, statusFilter, bandFilter, hoursBandFilter, coeFilter, typeFilter, absenceOnly, endingSoonOnly, dateFrom, dateTo, sort]);
 
   const hasActiveFilters =
     search !== "" || statusFilter !== "all" || bandFilter !== "all" || hoursBandFilter !== "all" ||
-    coeFilter !== "all" || typeFilter !== "all" || absenceOnly || endingSoonOnly;
+    coeFilter !== "all" || typeFilter !== "all" || absenceOnly || endingSoonOnly || dateFrom !== "" || dateTo !== "";
 
   const clearFilters = () => {
     setSearch("");
@@ -151,6 +160,8 @@ function AllocationsPageInner() {
     setHoursBandFilter("all");
     setCoeFilter("all");
     setTypeFilter("all");
+    setDateFrom("");
+    setDateTo("");
     setAbsenceOnly(false);
     setEndingSoonOnly(false);
   };
@@ -270,6 +281,22 @@ function AllocationsPageInner() {
           >
             Ending soon only
           </button>
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] text-gray-400 whitespace-nowrap">Active during</span>
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              className="text-[11px] px-1.5 py-1 rounded-lg border border-gray-200 bg-white text-gray-600"
+            />
+            <span className="text-[10px] text-gray-400">→</span>
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              className="text-[11px] px-1.5 py-1 rounded-lg border border-gray-200 bg-white text-gray-600"
+            />
+          </div>
           <select
             value={sort}
             onChange={(e) => setSort(e.target.value as Sort)}

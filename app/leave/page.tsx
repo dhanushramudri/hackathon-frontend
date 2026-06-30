@@ -26,6 +26,8 @@ interface FilterOptions {
   leaveType: LeaveTypeFilter;
   project: string;
   coe: string;
+  dateFrom: string;
+  dateTo: string;
   sort: Sort;
 }
 
@@ -46,6 +48,8 @@ function filterAndSortLeave(rows: LeaveImpact[], opts: FilterOptions): LeaveImpa
   if (opts.leaveType !== "all") result = result.filter((i) => i.leave_type === opts.leaveType);
   if (opts.project !== "all") result = result.filter((i) => i.project_id === opts.project);
   if (opts.coe !== "all") result = result.filter((i) => (opts.coe === "" ? i.coe === null : i.coe === opts.coe));
+  if (opts.dateFrom) result = result.filter((i) => i.leave_end_date >= opts.dateFrom);
+  if (opts.dateTo) result = result.filter((i) => i.leave_start_date <= opts.dateTo);
 
   const sorted = [...result];
   switch (opts.sort) {
@@ -87,6 +91,8 @@ function LeavePageInner() {
   const [leaveType, setLeaveType] = useState<LeaveTypeFilter>("all");
   const [project, setProject] = useState("all");
   const [coe, setCoe] = useState("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [sort, setSort] = useState<Sort>("start_asc");
 
   const [selectedEmployee, setSelectedEmployee] = useState<string | null>(null);
@@ -116,9 +122,10 @@ function LeavePageInner() {
   const projects = Array.from(new Set(data.map((i) => i.project_id))).sort();
   const coes = Array.from(new Set(data.map((i) => i.coe).filter((v): v is string => Boolean(v)))).sort();
 
-  const filtered = filterAndSortLeave(data, { search, onLeaveOnly, noBackfillOnly, leaveType, project, coe, sort });
+  const filtered = filterAndSortLeave(data, { search, onLeaveOnly, noBackfillOnly, leaveType, project, coe, dateFrom, dateTo, sort });
 
-  const hasActiveFilters = search !== "" || onLeaveOnly || noBackfillOnly || leaveType !== "all" || project !== "all" || coe !== "all";
+  const hasActiveFilters =
+    search !== "" || onLeaveOnly || noBackfillOnly || leaveType !== "all" || project !== "all" || coe !== "all" || dateFrom !== "" || dateTo !== "";
   const clearFilters = () => {
     setSearch("");
     setOnLeaveOnly(false);
@@ -126,6 +133,8 @@ function LeavePageInner() {
     setLeaveType("all");
     setProject("all");
     setCoe("all");
+    setDateFrom("");
+    setDateTo("");
   };
 
   return (
@@ -191,6 +200,22 @@ function LeavePageInner() {
             ],
           }}
         />
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] text-gray-400 whitespace-nowrap">Leave overlaps</span>
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={(e) => setDateFrom(e.target.value)}
+            className="text-[11px] px-1.5 py-1 rounded-lg border border-gray-200 bg-white text-gray-600"
+          />
+          <span className="text-[10px] text-gray-400">→</span>
+          <input
+            type="date"
+            value={dateTo}
+            onChange={(e) => setDateTo(e.target.value)}
+            className="text-[11px] px-1.5 py-1 rounded-lg border border-gray-200 bg-white text-gray-600"
+          />
+        </div>
       </div>
 
       <div className="rounded-xl border border-[hsl(var(--primary)/0.3)] bg-white overflow-hidden">
