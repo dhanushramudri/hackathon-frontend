@@ -440,6 +440,28 @@ export interface ReliefStaffingResult {
   available_soon_candidates: ReliefCandidate[];
 }
 
+export interface ProjectBurnoutOverview {
+  total_flagged: number;
+  overtime_count: number;
+  understaffed_count: number;
+  projects: HealthProject[];
+}
+
+export interface BurnoutOvertimeEmployee {
+  employee_id: string;
+  job_name: string | null;
+  department_name: string | null;
+  overtime_days_recent: number;
+  max_daily_hours_recent: number;
+  daily_hours: { date: string; hours: number; is_overtime: boolean }[];
+  recent_projects: { project_id: string; hours_recent: number; needs_support: boolean }[];
+}
+
+export interface EmployeeBurnoutOverview {
+  overtime_employee_count: number;
+  overtime_employees: BurnoutOvertimeEmployee[];
+}
+
 export interface RedeployMatch {
   row_index: number;
   client: string | null;
@@ -991,6 +1013,8 @@ export const api = {
   healthProjectDetail: (projectCode: string) => getJSON<ProjectHealthDetail>(`/health-monitor/projects/${encodeURIComponent(projectCode)}/detail`),
   reliefStaffingCandidates: (projectCode: string) =>
     getJSON<ReliefStaffingResult>(`/health-monitor/projects/${encodeURIComponent(projectCode)}/relief-candidates`),
+  projectBurnoutOverview: () => getJSON<ProjectBurnoutOverview>("/wellbeing/projects"),
+  employeeBurnoutOverview: () => getJSON<EmployeeBurnoutOverview>("/wellbeing/employees"),
   projectInfo: (projectCode: string) => getJSON<ProjectInfo>(`/health-monitor/projects/${encodeURIComponent(projectCode)}/info`),
   newProjectForecast: (specs: ForecastSpec[]) =>
     postJSON<NewProjectForecastResult>("/forecast/new-projects", specs),

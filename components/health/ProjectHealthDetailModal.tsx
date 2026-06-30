@@ -10,7 +10,7 @@ import { ErrorState } from "@/components/shared/EmptyState";
 import { ModalBodySkeleton, TableSkeleton } from "@/components/shared/Skeleton";
 import { TableControls } from "@/components/shared/TableControls";
 import { FiredBadge } from "@/components/shared/FiredBadge";
-import { EmployeeProfileModal } from "@/components/shared/EmployeeProfileModal";
+import { EmployeeProfileModal, type ProfileTab, type SkillMatchContext } from "@/components/shared/EmployeeProfileModal";
 import { cn, formatUsd } from "@/lib/utils";
 
 type DetailTab = "overview" | "allocations" | "staffing" | "overtime" | "relief" | "wsr";
@@ -18,6 +18,7 @@ type DetailTab = "overview" | "allocations" | "staffing" | "overtime" | "relief"
 interface ProjectHealthDetailModalProps {
   projectCode: string;
   onClose: () => void;
+  initialTab?: DetailTab;
 }
 
 const BASE_TABS: { key: DetailTab; label: string }[] = [
@@ -28,8 +29,8 @@ const BASE_TABS: { key: DetailTab; label: string }[] = [
   { key: "wsr", label: "WSR Reports" },
 ];
 
-export function ProjectHealthDetailModal({ projectCode, onClose }: ProjectHealthDetailModalProps) {
-  const [tab, setTab] = useState<DetailTab>("overview");
+export function ProjectHealthDetailModal({ projectCode, onClose, initialTab }: ProjectHealthDetailModalProps) {
+  const [tab, setTab] = useState<DetailTab>(initialTab ?? "overview");
   const detail = useQuery({
     queryKey: ["health-detail", projectCode],
     queryFn: () => api.healthProjectDetail(projectCode),
@@ -853,7 +854,9 @@ function ReliefStaffingSection({ projectCode }: { projectCode: string }) {
   const [minAvailable, setMinAvailable] = useState(0);
   const [sort, setSort] = useState<ReliefSort>("composite");
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [selectedEmployee, setSelectedEmployee] = useState<string | null>(null);
+  const [openProfile, setOpenProfile] = useState<{ employeeId: string; tab: ProfileTab; skillMatchContext?: SkillMatchContext } | null>(null);
+  const handleOpenProfile = (employeeId: string, tab: ProfileTab, skillMatchContext?: SkillMatchContext) =>
+    setOpenProfile({ employeeId, tab, skillMatchContext });
 
   return (
     <div className="space-y-4">
@@ -862,13 +865,6 @@ function ReliefStaffingSection({ projectCode }: { projectCode: string }) {
           <HeartPulse className="w-4 h-4 text-amber-500 flex-shrink-0" />
           <p className="text-sm font-semibold text-gray-800">Relief staffing — who from the Free Pool could help</p>
         </div>
-        <p className="text-[11px] text-gray-500">
-          This team is flagged for {relief.data?.overtime_fired && "sustained overtime"}
-          {relief.data?.overtime_fired && relief.data?.understaffed_fired && " and "}
-          {relief.data?.understaffed_fired && "understaffing"} -- real Free Pool people available right now (not
-          &quot;ending soon&quot;), ranked by the same skill + competency + availability composite used everywhere
-          else in this app.
-        </p>
       </div>
 
       {relief.isLoading ? (
@@ -974,7 +970,7 @@ function ReliefStaffingSection({ projectCode }: { projectCode: string }) {
 
           <div className="space-y-2">
             {filterAndSortRelief(relief.data.candidates, { search, signal, designation, coe, reason, minSkill, minCompetency, minAvailable, sort }).map((c) => (
-              <ReliefCandidateCard key={c.employee_id} c={c} onSelect={setSelectedEmployee} />
+              <ReliefCandidateCard key={c.employee_id} c={c} onOpenProfile={handleOpenProfile} />
             ))}
             {filterAndSortRelief(relief.data.candidates, { search, signal, designation, coe, reason, minSkill, minCompetency, minAvailable, sort }).length === 0 && (
               <p className="text-xs text-gray-400 italic text-center py-3">No candidates match the current filters.</p>
@@ -982,22 +978,67 @@ function ReliefStaffingSection({ projectCode }: { projectCode: string }) {
           </div>
 
           {relief.data.available_soon_candidates.length > 0 && (
-            <AvailableSoonAccordion candidates={relief.data.available_soon_candidates} onSelect={setSelectedEmployee} />
+            <AvailableSoonAccordion candidates={relief.data.available_soon_candidates} onOpenProfile={handleOpenProfile} />
           )}
         </>
       )}
 
-      {selectedEmployee && <EmployeeProfileModal employeeId={selectedEmployee} initialTab="skills" onClose={() => setSelectedEmployee(null)} />}
+      {openProfile && (
+        <EmployeeProfileModal
+          employeeId={openProfile.employeeId}
+          initialTab={openProfile.tab}
+          skillMatchContext={openProfile.skillMatchContext}
+          onClose={() => setOpenProfile(null)}
+        />
+      )}
     </div>
   );
 }
 
-function ReliefCandidateCard({ c, onSelect, availableSoon }: { c: ReliefCandidate; onSelect: (id: string) => void; availableSoon?: boolean }) {
+function Metric({
+  label, value, suffix, weight, onClick,
+}: {
+  label: string; value: number; suffix: string; weight: string; onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      type="button"
+      className="text-left group"
+    >
+      <p className="text-gray-400 mb-0.5 group-hover:text-primary transition">
+        {label} <span className="text-gray-300">({weight})</span>
+      </p>
+      <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
+        <div className="h-full rounded-full bg-primary" style={{ width: `${Math.min(value, 1) * 100}%` }} />
+      </div>
+      <p className="text-gray-500 mt-0.5 group-hover:underline">{suffix}</p>
+    </button>
+  );
+}
+
+function ReliefCandidateCard({
+  c, onOpenProfile, availableSoon,
+}: {
+  c: ReliefCandidate;
+  onOpenProfile: (employeeId: string, tab: ProfileTab, skillMatchContext?: SkillMatchContext) => void;
+  availableSoon?: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-2.5">
-      <div className="flex items-center justify-between gap-2 flex-wrap">
+      <div className="flex items-center justify-between gap-2 flex-wrap cursor-pointer" onClick={() => setExpanded((v) => !v)}>
         <div className="flex items-center gap-1.5 min-w-0">
-          <button onClick={() => onSelect(c.employee_id)} className="text-xs font-medium text-primary hover:underline flex-shrink-0">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenProfile(c.employee_id, "overview");
+            }}
+            className="text-xs font-medium text-primary hover:underline flex-shrink-0"
+          >
             {c.employee_id}
           </button>
           <span className="text-[11px] text-gray-500 truncate">{c.job_name ?? "Employee"}</span>
@@ -1025,9 +1066,11 @@ function ReliefCandidateCard({ c, onSelect, availableSoon }: { c: ReliefCandidat
             </Badge>
           )}
           <Badge variant={c.skill_bucket}>{Math.round(c.composite_score * 100)}% {availableSoon ? "potential fit" : "fit"}</Badge>
+          <ChevronDown className={cn("w-3.5 h-3.5 text-gray-400 transition-transform flex-shrink-0", expanded && "rotate-180")} />
         </div>
       </div>
-      {(c.matched_skills.length > 0 || c.missing_skills.length > 0) && (
+
+      {!expanded && (c.matched_skills.length > 0 || c.missing_skills.length > 0) && (
         <div className="flex flex-wrap gap-1 mt-1.5 text-[10px]">
           {c.matched_skills.map((s) => (
             <span key={s} className="px-1.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-100 text-emerald-700">{s}</span>
@@ -1037,11 +1080,62 @@ function ReliefCandidateCard({ c, onSelect, availableSoon }: { c: ReliefCandidat
           ))}
         </div>
       )}
+
+      {expanded && (
+        <div className="mt-2.5 pt-2.5 border-t border-gray-100 space-y-2.5">
+          <div className="grid grid-cols-3 gap-3 text-[11px]">
+            <Metric
+              label="Skill"
+              value={c.skill_score}
+              suffix={`${Math.round(c.skill_score * 100)}%`}
+              weight="50%"
+              onClick={() => onOpenProfile(c.employee_id, "skills", { matchedSkills: c.matched_skills, missingSkills: c.missing_skills })}
+            />
+            <Metric
+              label="Competency"
+              value={c.competency_score}
+              suffix={`${Math.round(c.competency_score * 100)}%`}
+              weight="30%"
+              onClick={() => onOpenProfile(c.employee_id, "competency")}
+            />
+            <Metric
+              label="Available"
+              value={c.idle_capacity_pct / 100}
+              suffix={`${c.idle_capacity_pct.toFixed(0)}%`}
+              weight="20%"
+              onClick={() => onOpenProfile(c.employee_id, "allocations")}
+            />
+          </div>
+          <p className="text-[11px] text-gray-400">
+            {Math.round(c.composite_score * 100)}% fit = 50%×{Math.round(c.skill_score * 100)}% skill + 30%×
+            {Math.round(c.competency_score * 100)}% competency + 20%×{c.idle_capacity_pct.toFixed(0)}% available
+          </p>
+          {(c.matched_skills.length > 0 || c.missing_skills.length > 0) && (
+            <div className="flex flex-wrap gap-1 text-[10px]">
+              {c.matched_skills.map((s) => (
+                <span key={s} className="px-1.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-100 text-emerald-700">{s}</span>
+              ))}
+              {c.missing_skills.map((s) => (
+                <span key={s} className="px-1.5 py-0.5 rounded-full bg-gray-50 border border-gray-200 text-gray-400">{s}</span>
+              ))}
+            </div>
+          )}
+          <p className="text-[10px] text-gray-300">
+            skill data: {c.skill_confidence} · competency data: {c.competency_confidence}
+            {c.competency_confidence === "imputed" && " (tenure-based estimate, no direct assessment)"}
+          </p>
+        </div>
+      )}
     </div>
   );
 }
 
-function AvailableSoonAccordion({ candidates, onSelect }: { candidates: ReliefCandidate[]; onSelect: (id: string) => void }) {
+function AvailableSoonAccordion({
+  candidates, onOpenProfile,
+}: {
+  candidates: ReliefCandidate[];
+  onOpenProfile: (employeeId: string, tab: ProfileTab, skillMatchContext?: SkillMatchContext) => void;
+}) {
   const [open, setOpen] = useState(false);
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-3.5">
@@ -1059,7 +1153,7 @@ function AvailableSoonAccordion({ candidates, onSelect }: { candidates: ReliefCa
       {open && (
         <div className="space-y-2 mt-2.5">
           {candidates.map((c) => (
-            <ReliefCandidateCard key={c.employee_id} c={c} onSelect={onSelect} availableSoon />
+            <ReliefCandidateCard key={c.employee_id} c={c} onOpenProfile={onOpenProfile} availableSoon />
           ))}
         </div>
       )}
