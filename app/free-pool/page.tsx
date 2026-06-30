@@ -257,7 +257,7 @@ export default function FreePoolPage() {
                   {c.reason === "under_utilized" && c.current_allocation_pct != null && `${c.current_allocation_pct}% allocated`}
                   {c.reason === "fully_free" && (
                     <button onClick={() => setProofFor(c)} className="hover:underline">
-                      {c.days_free != null ? `free for ${c.days_free}d` : "no allocation history"}
+                      {c.last_ended_date != null ? `free from ${c.last_ended_date}` : "no allocation history"}
                     </button>
                   )}
                 </td>
