@@ -123,6 +123,9 @@ export interface RecommendationResult {
   candidate_pool_size: number;
   candidates_with_real_skill_match: number;
   genuine_skill_match_count?: number;
+  observed_skill_match_count?: number;
+  inferred_skill_match_count?: number;
+  semantic_only_match_count?: number;
   fallback_candidates?: FallbackCandidates | null;
   best_fit_if_delayed?: RecommendationCandidate[];
   deal_composition: DealCompositionRow[];

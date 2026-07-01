@@ -25,7 +25,7 @@ import { cn } from "@/lib/utils";
 type DemandSort = "date_asc" | "date_desc" | "client_asc" | "cluster_asc" | "priority_desc" | "status_asc";
 type StartConfirmedFilter = "all" | "confirmed" | "unconfirmed";
 type CandidateSignalFilter = "all" | "redeploy" | "training" | "hire" | "not_assessed";
-type SkillDataFilter = "all" | "observed" | "imputed" | "no_match" | "no_requirement";
+type SkillDataFilter = "all" | "observed" | "imputed" | "no_match" | "no_requirement" | "semantic_match";
 type CandidateSort = "composite" | "skill" | "competency" | "available";
 
 const SIGNAL_FILTER_TO_BUCKET: Record<Exclude<CandidateSignalFilter, "all">, RecommendationCandidate["bucket"]> = {
@@ -40,7 +40,19 @@ const SKILL_DATA_LABEL: Record<Exclude<SkillDataFilter, "all">, string> = {
   imputed: "Inferred",
   no_match: "No match found",
   no_requirement: "Not assessed (no skillset)",
+  semantic_match: "Semantic match (AI)",
 };
+
+function friendlyConfidence(value: string | null | undefined): string {
+  switch (value) {
+    case "observed": return "observed (real skill records)";
+    case "imputed": return "inferred (peer/default)";
+    case "no_match": return "no word match";
+    case "no_requirement": return "no skillset specified";
+    case "semantic_match": return "semantic match via AI embeddings";
+    default: return value ?? "—";
+  }
+}
 
 function normalizeLabel(value: string | null | undefined): string {
   return (value ?? "").trim();
@@ -182,7 +194,13 @@ function RecommendationsPageInner() {
   }, [selectedRow]);
 
   const pipeline = useQuery({ queryKey: ["pipeline-forecast"], queryFn: api.pipelineForecast });
-  const coverage = useQuery({ queryKey: ["recommendations-coverage-summary"], queryFn: api.recommendationsCoverageSummary });
+  const [coverageEnabled, setCoverageEnabled] = useState(false);
+  const coverage = useQuery({
+    queryKey: ["recommendations-coverage-summary"],
+    queryFn: api.recommendationsCoverageSummary,
+    enabled: coverageEnabled,
+    staleTime: 5 * 60 * 1000,
+  });
   const roleMixCoes = useQuery({ queryKey: ["role-mix-coes"], queryFn: api.roleMixCoes });
   const recommendation = useQuery({
     queryKey: ["recommendation", selectedRow, topN],
@@ -407,16 +425,29 @@ function RecommendationsPageInner() {
           <Users className="w-3.5 h-3.5" />
           By Project
         </button>
-        {viewMode === "by-role" && coverage.data && (
+        {viewMode === "by-role" && (
           <div className="ml-3 flex items-center gap-3 text-xs flex-wrap">
-            <span className="font-semibold text-gray-700">
-              Pipeline coverage across {coverage.data.total_demand_rows} role-requests:
-            </span>
-            <Badge variant="eligible">{coverage.data.redeploy_ready_count} ready to redeploy</Badge>
-            <Badge variant="trainable">{coverage.data.redeploy_with_training_count} need upskilling</Badge>
-            <Badge variant="gap">{coverage.data.hire_signal_count} ({coverage.data.hire_signal_pct}%) need external hire</Badge>
-            {coverage.data.no_skillset_specified_count > 0 && (
-              <Badge variant="pending">{coverage.data.no_skillset_specified_count} no skillset specified yet</Badge>
+            {coverage.data ? (
+              <>
+                <span className="font-semibold text-gray-700">
+                  Pipeline coverage across {coverage.data.total_demand_rows} role-requests:
+                </span>
+                <Badge variant="eligible">{coverage.data.redeploy_ready_count} ready to redeploy</Badge>
+                <Badge variant="trainable">{coverage.data.redeploy_with_training_count} need upskilling</Badge>
+                <Badge variant="gap">{coverage.data.hire_signal_count} ({coverage.data.hire_signal_pct}%) need external hire</Badge>
+                {coverage.data.no_skillset_specified_count > 0 && (
+                  <Badge variant="pending">{coverage.data.no_skillset_specified_count} no skillset specified yet</Badge>
+                )}
+              </>
+            ) : coverage.isFetching ? (
+              <span className="text-gray-400 italic">Computing pipeline coverage…</span>
+            ) : (
+              <button
+                onClick={() => setCoverageEnabled(true)}
+                className="text-gray-400 hover:text-primary underline underline-offset-2 text-[11px]"
+              >
+                Load pipeline coverage stats
+              </button>
             )}
           </div>
         )}
@@ -875,6 +906,13 @@ function RecommendationsPageInner() {
                 <Skeleton className="h-3 w-40" />
                 <FieldGridSkeleton count={6} className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 border-t border-gray-100 pt-3" />
               </div>
+              <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-xs text-blue-700 flex items-center gap-2">
+                <svg className="w-4 h-4 animate-spin flex-shrink-0" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                </svg>
+                Scoring {611} candidates against required skills — first request warms the AI model (~30s), subsequent clicks are instant.
+              </div>
               <div className="space-y-2.5">
                 {Array.from({ length: 4 }).map((_, i) => (
                   <CandidateCardSkeleton key={i} />
@@ -949,7 +987,17 @@ function RecommendationsPageInner() {
                     <p className="text-[11px] text-gray-400">
                       Showing top {recommendation.data.candidates.length} of {recommendation.data.candidate_pool_size} viable candidates
                       {" "}({recommendation.data.total_employees_considered} employees scored
-                      {recommendation.data.has_skillset && `, ${recommendation.data.candidates_with_real_skill_match} with a real skill match`})
+                      {recommendation.data.has_skillset && (() => {
+                        const observed = recommendation.data.observed_skill_match_count ?? recommendation.data.genuine_skill_match_count ?? 0;
+                        const inferred = recommendation.data.inferred_skill_match_count ?? 0;
+                        const semantic = recommendation.data.semantic_only_match_count ?? 0;
+                        const parts: string[] = [];
+                        if (observed > 0) parts.push(`${observed} with observed skills`);
+                        if (inferred > 0) parts.push(`${inferred} inferred`);
+                        if (semantic > 0) parts.push(`${semantic} AI-matched`);
+                        if (parts.length > 0) return `, ${parts.join(" · ")}`;
+                        return ", no skill overlap found";
+                      })()})
                     </p>
                     <div className="flex items-center gap-1.5">
                       <span className="text-[11px] text-gray-500 whitespace-nowrap">Show top</span>
@@ -1242,10 +1290,24 @@ function filterAndSortCandidates(candidates: RecommendationCandidate[], opts: Ca
   if (opts.minAvailable > 0) result = result.filter((c) => c.available_pct >= opts.minAvailable);
   if (opts.meetsCapacityOnly) result = result.filter((c) => c.meets_requested_capacity);
 
+  const BUCKET_RANK: Record<string, number> = { eligible: 3, trainable: 2, gap: 1, not_assessed: 0 };
+  const CONF_RANK: Record<string, number> = { observed: 2, imputed: 1, semantic_match: 1, no_match: 0, no_requirement: 0 };
+
   const sorted = [...result];
   switch (opts.sort) {
     case "composite":
-      sorted.sort((a, b) => b.composite_score - a.composite_score);
+      // Mirror the backend sort: bucket first (eligible > trainable > gap), then
+      // confidence tier (observed > imputed), then composite. This keeps the "Top pick"
+      // candidate (trainable with real skills) at visual #1 instead of being pushed down
+      // by a gap/hire-signal candidate who has a higher composite only because of
+      // unrelated competency or availability.
+      sorted.sort((a, b) => {
+        const bucketDiff = (BUCKET_RANK[b.bucket] ?? 0) - (BUCKET_RANK[a.bucket] ?? 0);
+        if (bucketDiff !== 0) return bucketDiff;
+        const confDiff = (CONF_RANK[b.skill_confidence] ?? 0) - (CONF_RANK[a.skill_confidence] ?? 0);
+        if (confDiff !== 0) return confDiff;
+        return b.composite_score - a.composite_score;
+      });
       break;
     case "skill":
       sorted.sort((a, b) => b.skill_score - a.skill_score);
@@ -1516,8 +1578,7 @@ function ProjectRoleSection({
 
               {/* Data confidence footer */}
               <p className="text-[10px] text-gray-400 pl-6">
-                skill data: {a.skill_confidence} · competency: {a.competency_confidence}
-                {a.competency_confidence === "imputed" && " (tenure estimate, no direct assessment)"}
+                skill: {friendlyConfidence(a.skill_confidence)} · competency: {friendlyConfidence(a.competency_confidence)}
               </p>
             </div>
           );
@@ -1598,8 +1659,7 @@ function ProjectRoleSection({
                             </div>
                           )}
                           <p className="text-[10px] text-gray-400">
-                            skill: {c.skill_confidence} · competency: {c.competency_confidence}
-                            {c.competency_confidence === "imputed" && " (tenure estimate)"}
+                            skill: {friendlyConfidence(c.skill_confidence)} · competency: {friendlyConfidence(c.competency_confidence)}
                           </p>
                         </div>
                       )}
@@ -2350,6 +2410,14 @@ function CandidateRow({
             adjacent level
           </span>
         )}
+        {candidate.skill_confidence === "semantic_match" && (
+          <span
+            title="AI semantic similarity only — no matching skill records found in this employee's profile. Verify skill fit before selecting."
+            className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-50 border border-blue-200 text-blue-600 whitespace-nowrap flex-shrink-0"
+          >
+            AI match only
+          </span>
+        )}
         <span className="ml-auto flex items-center gap-3 text-[11px] text-gray-400 whitespace-nowrap flex-shrink-0">
           <span>{Math.round(candidate.skill_score * 100)}% skill</span>
           <span>{Math.round(candidate.competency_score * 100)}% comp</span>
@@ -2404,8 +2472,7 @@ function CandidateRow({
             </p>
           )}
           <p className="text-[10px] text-gray-300">
-            skill data: {candidate.skill_confidence} · competency data: {candidate.competency_confidence}
-            {candidate.competency_confidence === "imputed" && " (tenure-based estimate, no direct assessment)"}
+            skill: {friendlyConfidence(candidate.skill_confidence)} · competency: {friendlyConfidence(candidate.competency_confidence)}
           </p>
         </div>
       )}
