@@ -3,15 +3,17 @@
 import { Suspense, useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
-import { AlertTriangle, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Sparkles, SlidersHorizontal, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Sparkles, SlidersHorizontal, XCircle, Users, List } from "lucide-react";
 import {
   api,
   type DealCompositionRow,
+  type DealSummary,
   type FallbackCandidates,
   type PipelineDemandRow,
   type RecommendationCandidate,
   type RecommendationResult,
   type SemanticMatchResult,
+  type TeamRoleResult,
 } from "@/lib/api";
 import { Badge } from "@/components/shared/Badge";
 import { LoadingState, ErrorState } from "@/components/shared/EmptyState";
@@ -66,7 +68,7 @@ function buildNormalizedOptions(values: (string | null | undefined)[]): string[]
 }
 
 const PRIORITY_RANK: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3, complete: 4 };
-const STATUS_RANK: Record<string, number> = { "not resourced": 0, "part resourced": 1, resourced: 2 };
+const STATUS_RANK: Record<string, number> = { "not resourced": 0, "part resourced": 1, resourced: 2, complete: 3 };
 
 function rankOf(map: Record<string, number>, value: string | null): number {
   return map[normalizeLabel(value).toLowerCase()] ?? 99;
@@ -80,7 +82,10 @@ export default function RecommendationsPage() {
   );
 }
 
+type ViewMode = "by-role" | "by-project";
+
 function RecommendationsPageInner() {
+  const [viewMode, setViewMode] = useState<ViewMode>("by-role");
   const [selectedRow, setSelectedRow] = useState<number | null>(null);
   const [openProfile, setOpenProfile] = useState<{ employeeId: string; tab: ProfileTab; skillMatchContext?: SkillMatchContext } | null>(null);
   const searchParams = useSearchParams();
@@ -127,6 +132,25 @@ function RecommendationsPageInner() {
   const [expandedCandidateId, setExpandedCandidateId] = useState<string | null>(null);
   const [pipelineCollapsed, setPipelineCollapsed] = useState(false);
 
+  // Project-mode state
+  const [selectedDealKey, setSelectedDealKey] = useState<string | null>(null);
+  const [dealListSearch, setDealListSearch] = useState("");
+  const [dealListPriority, setDealListPriority] = useState("all");
+  const [dealListStatus, setDealListStatus] = useState("all");
+  const [dealListCluster, setDealListCluster] = useState("all");
+  const [dealListClientPriority, setDealListClientPriority] = useState("all");
+  const [dealListRequestType, setDealListRequestType] = useState("all");
+  const [dealListStage, setDealListStage] = useState("all");
+  const [dealListStartConfirmed, setDealListStartConfirmed] = useState<"all" | "confirmed" | "unconfirmed">("all");
+  const [dealListDateFrom, setDealListDateFrom] = useState("");
+  const [dealListDateTo, setDealListDateTo] = useState("");
+  const [dealListLateOnly, setDealListLateOnly] = useState(false);
+  const [dealListSow, setDealListSow] = useState<"all" | "signed" | "unconfirmed">("all");
+  const [dealListSort, setDealListSort] = useState<"date_asc" | "date_desc" | "client_asc" | "cluster_asc" | "priority_desc" | "role_count_desc" | "status_asc">("date_asc");
+  const [dealListFiltersOpen, setDealListFiltersOpen] = useState(false);
+  const [projectTopN, setProjectTopN] = useState(15);
+  const [projectTopNInput, setProjectTopNInput] = useState("15");
+
   // On narrow screens the two panels stack instead of sitting side by side, so picking
   // a deal from a 293-row list otherwise leaves the recommendation buried below it --
   // collapse the list out of the way so the result is the first thing visible. Desktop
@@ -166,8 +190,71 @@ function RecommendationsPageInner() {
     enabled: selectedRow !== null,
   });
 
+  const dealsQuery = useQuery({
+    queryKey: ["deals"],
+    queryFn: api.listDeals,
+    enabled: viewMode === "by-project",
+  });
+  const selectedDeal = dealsQuery.data?.find((d) => d.deal_key === selectedDealKey) ?? null;
+  const projectTeamQuery = useQuery({
+    queryKey: ["project-team", selectedDealKey, projectTopN],
+    queryFn: () => api.projectTeamRecommendation(selectedDeal!.row_indices, projectTopN),
+    enabled: viewMode === "by-project" && selectedDealKey !== null && selectedDeal !== null,
+  });
+
   if (pipeline.isLoading) return <RecommendationsSkeleton />;
   if (pipeline.error) return <ErrorState message="Could not load pipeline demand." />;
+
+  // Deal list filter options
+  const allDeals = dealsQuery.data ?? [];
+  const dealClusters = Array.from(new Set(allDeals.map((d) => d.cluster).filter((c): c is number => c != null))).sort((a, b) => a - b);
+  const dealPriorityOptions = buildNormalizedOptions(allDeals.map((d) => d.priority));
+  const dealStatusOptions = buildNormalizedOptions(allDeals.map((d) => d.status));
+  const dealClientPriorityOptions = buildNormalizedOptions(allDeals.map((d) => d.client_priority));
+  const dealRequestTypeOptions = buildNormalizedOptions(allDeals.map((d) => d.request_type));
+  const dealStageOptions = buildNormalizedOptions(allDeals.map((d) => d.deal_stage_hubspot));
+  const filteredDeals = filterAndSortDeals(allDeals, {
+    search: dealListSearch,
+    priority: dealListPriority,
+    status: dealListStatus,
+    cluster: dealListCluster,
+    clientPriority: dealListClientPriority,
+    requestType: dealListRequestType,
+    stage: dealListStage,
+    startConfirmed: dealListStartConfirmed,
+    dateFrom: dealListDateFrom,
+    dateTo: dealListDateTo,
+    lateOnly: dealListLateOnly,
+    sow: dealListSow,
+    sort: dealListSort,
+  });
+  const dealFilterCount = [
+    dealListPriority !== "all",
+    dealListStatus !== "all",
+    dealListCluster !== "all",
+    dealListClientPriority !== "all",
+    dealListRequestType !== "all",
+    dealListStage !== "all",
+    dealListStartConfirmed !== "all",
+    dealListDateFrom !== "",
+    dealListDateTo !== "",
+    dealListLateOnly,
+    dealListSow !== "all",
+  ].filter(Boolean).length;
+  const clearDealFilters = () => {
+    setDealListSearch("");
+    setDealListPriority("all");
+    setDealListStatus("all");
+    setDealListCluster("all");
+    setDealListClientPriority("all");
+    setDealListRequestType("all");
+    setDealListStage("all");
+    setDealListStartConfirmed("all");
+    setDealListDateFrom("");
+    setDealListDateTo("");
+    setDealListLateOnly(false);
+    setDealListSow("all");
+  };
 
   const demandRows = (pipeline.data ?? []).filter((r) => r.skillset || r.resources_requested);
   const selected = recommendation.data?.pipeline_row;
@@ -294,28 +381,279 @@ function RecommendationsPageInner() {
 
   return (
     <div className="p-4 sm:p-6 space-y-4">
-      {coverage.data && (
-        <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 flex items-center gap-5 text-xs flex-wrap">
-          <span className="font-semibold text-gray-700">
-            Pipeline coverage across {coverage.data.total_demand_rows} role-requests:
-          </span>
-          <span className="flex items-center gap-1.5">
-            <Badge variant="eligible">{coverage.data.redeploy_ready_count} ready to redeploy</Badge>
-          </span>
-          <span className="flex items-center gap-1.5">
-            <Badge variant="trainable">{coverage.data.redeploy_with_training_count} need upskilling</Badge>
-          </span>
-          <span className="flex items-center gap-1.5">
-            <Badge variant="gap">{coverage.data.hire_signal_count} ({coverage.data.hire_signal_pct}%) need external hire</Badge>
-          </span>
-          {coverage.data.no_skillset_specified_count > 0 && (
-            <span className="flex items-center gap-1.5">
-              <Badge variant="pending">{coverage.data.no_skillset_specified_count} no skillset specified yet</Badge>
-            </span>
+      {/* View mode toggle */}
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => setViewMode("by-role")}
+          className={cn(
+            "flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border transition",
+            viewMode === "by-role"
+              ? "bg-primary text-white border-primary"
+              : "bg-white text-gray-600 border-gray-200 hover:border-primary hover:text-primary"
           )}
+        >
+          <List className="w-3.5 h-3.5" />
+          By Role
+        </button>
+        <button
+          onClick={() => setViewMode("by-project")}
+          className={cn(
+            "flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border transition",
+            viewMode === "by-project"
+              ? "bg-primary text-white border-primary"
+              : "bg-white text-gray-600 border-gray-200 hover:border-primary hover:text-primary"
+          )}
+        >
+          <Users className="w-3.5 h-3.5" />
+          By Project
+        </button>
+        {viewMode === "by-role" && coverage.data && (
+          <div className="ml-3 flex items-center gap-3 text-xs flex-wrap">
+            <span className="font-semibold text-gray-700">
+              Pipeline coverage across {coverage.data.total_demand_rows} role-requests:
+            </span>
+            <Badge variant="eligible">{coverage.data.redeploy_ready_count} ready to redeploy</Badge>
+            <Badge variant="trainable">{coverage.data.redeploy_with_training_count} need upskilling</Badge>
+            <Badge variant="gap">{coverage.data.hire_signal_count} ({coverage.data.hire_signal_pct}%) need external hire</Badge>
+            {coverage.data.no_skillset_specified_count > 0 && (
+              <Badge variant="pending">{coverage.data.no_skillset_specified_count} no skillset specified yet</Badge>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Project-based view */}
+      {viewMode === "by-project" && (
+        <div className={cn("grid grid-cols-1 gap-4", pipelineCollapsed ? "lg:grid-cols-[44px_1fr]" : "lg:grid-cols-[320px_1fr]")}>
+          {/* Left: Deal list */}
+          {pipelineCollapsed ? (
+            <>
+              <button
+                onClick={() => setPipelineCollapsed(false)}
+                className="lg:hidden sticky top-0 z-10 flex items-center justify-between gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2.5 shadow-sm text-left"
+              >
+                <span className="text-xs font-medium text-gray-600">Deals ({allDeals.length})</span>
+                <span className="flex items-center gap-1 text-[11px] text-primary flex-shrink-0">Tap to view <ChevronDown className="w-3.5 h-3.5" /></span>
+              </button>
+              <div className="hidden lg:flex rounded-xl border border-gray-200 bg-white flex-col items-center gap-3 py-3 lg:max-h-[calc(100dvh-180px)]">
+                <button onClick={() => setPipelineCollapsed(false)} title="Expand deal list" className="text-gray-400 hover:text-primary transition">
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+                <p className="text-[10px] text-gray-400 whitespace-nowrap [writing-mode:vertical-rl]">Deals ({allDeals.length})</p>
+              </div>
+            </>
+          ) : (
+            <div className="rounded-xl border border-gray-200 bg-white overflow-hidden flex flex-col lg:max-h-[calc(100dvh-180px)]">
+              <div className="px-3 py-2.5 border-b border-gray-100 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5">
+                    <button onClick={() => setPipelineCollapsed(true)} title="Collapse deal list" className="text-gray-400 hover:text-primary transition flex-shrink-0">
+                      <ChevronLeft className="w-3.5 h-3.5" />
+                    </button>
+                    <p className="text-xs font-semibold text-gray-700">Deals ({filteredDeals.length}/{allDeals.length})</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {(dealListSearch || dealFilterCount > 0) && (
+                      <button onClick={clearDealFilters} className="text-[11px] text-primary hover:underline whitespace-nowrap">Clear</button>
+                    )}
+                    <button
+                      onClick={() => setDealListFiltersOpen((v) => !v)}
+                      className={cn(
+                        "flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg border whitespace-nowrap transition",
+                        dealListFiltersOpen || dealFilterCount > 0 ? "border-primary/40 text-primary bg-primary/5" : "border-gray-200 text-gray-500"
+                      )}
+                    >
+                      <SlidersHorizontal className="w-3 h-3" />
+                      Filters{dealFilterCount > 0 && ` (${dealFilterCount})`}
+                      <ChevronDown className={cn("w-3 h-3 transition-transform", dealListFiltersOpen && "rotate-180")} />
+                    </button>
+                  </div>
+                </div>
+                <input
+                  value={dealListSearch}
+                  onChange={(e) => setDealListSearch(e.target.value)}
+                  placeholder="Search client, solution, role…"
+                  className="w-full text-xs px-2.5 py-1.5 rounded-lg border border-gray-200 outline-none focus:border-gray-300"
+                />
+                {dealListFiltersOpen && (
+                  <div className="rounded-lg border border-gray-100 bg-gray-50/70 p-2.5 space-y-2.5">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <FilterSelect label="Status" value={dealListStatus} onChange={setDealListStatus}>
+                        <option value="all">All</option>
+                        {dealStatusOptions.map((s) => <option key={s} value={s}>{s}</option>)}
+                      </FilterSelect>
+                      <FilterSelect label="Priority" value={dealListPriority} onChange={setDealListPriority}>
+                        <option value="all">All</option>
+                        {dealPriorityOptions.map((p) => <option key={p} value={p}>{p}</option>)}
+                      </FilterSelect>
+                      <FilterSelect label="Client priority" value={dealListClientPriority} onChange={setDealListClientPriority}>
+                        <option value="all">All</option>
+                        {dealClientPriorityOptions.map((p) => <option key={p} value={p}>{p}</option>)}
+                      </FilterSelect>
+                      <FilterSelect label="SOW" value={dealListSow} onChange={(v) => setDealListSow(v as typeof dealListSow)}>
+                        <option value="all">All</option>
+                        <option value="signed">Signed</option>
+                        <option value="unconfirmed">Unconfirmed</option>
+                      </FilterSelect>
+                      <FilterSelect label="Cluster" value={dealListCluster} onChange={setDealListCluster}>
+                        <option value="all">All</option>
+                        {dealClusters.map((c) => <option key={c} value={String(c)}>Cluster {c}</option>)}
+                      </FilterSelect>
+                      <FilterSelect label="Request type" value={dealListRequestType} onChange={setDealListRequestType}>
+                        <option value="all">All</option>
+                        {dealRequestTypeOptions.map((t) => <option key={t} value={t}>{t}</option>)}
+                      </FilterSelect>
+                      <FilterSelect label="Deal stage" value={dealListStage} onChange={setDealListStage}>
+                        <option value="all">All</option>
+                        {dealStageOptions.map((s) => <option key={s} value={s}>{s}</option>)}
+                      </FilterSelect>
+                      <FilterSelect
+                        label="Start confirmed"
+                        value={dealListStartConfirmed}
+                        onChange={(v) => setDealListStartConfirmed(v as typeof dealListStartConfirmed)}
+                      >
+                        <option value="all">All</option>
+                        <option value="confirmed">Confirmed</option>
+                        <option value="unconfirmed">Unconfirmed</option>
+                      </FilterSelect>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[10px] text-gray-400 block mb-0.5">Likely start from</label>
+                        <input
+                          type="date"
+                          value={dealListDateFrom}
+                          onChange={(e) => setDealListDateFrom(e.target.value)}
+                          className="w-full text-[11px] px-1.5 py-1 rounded-lg border border-gray-200 bg-white text-gray-600"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-gray-400 block mb-0.5">Likely start to</label>
+                        <input
+                          type="date"
+                          value={dealListDateTo}
+                          onChange={(e) => setDealListDateTo(e.target.value)}
+                          className="w-full text-[11px] px-1.5 py-1 rounded-lg border border-gray-200 bg-white text-gray-600"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setDealListLateOnly((v) => !v)}
+                        className={cn(
+                          "text-[11px] px-2 py-1.5 rounded-lg border whitespace-nowrap transition",
+                          dealListLateOnly ? "bg-red-50 border-red-200 text-red-700" : "border-gray-200 bg-white text-gray-500"
+                        )}
+                      >
+                        Late notice only
+                      </button>
+                      <select
+                        value={dealListSort}
+                        onChange={(e) => setDealListSort(e.target.value as typeof dealListSort)}
+                        className="flex-1 text-[11px] px-1.5 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-600"
+                      >
+                        <option value="date_asc">Sort: earliest start ↑</option>
+                        <option value="date_desc">Sort: earliest start ↓</option>
+                        <option value="client_asc">Sort: client A–Z</option>
+                        <option value="cluster_asc">Sort: cluster</option>
+                        <option value="priority_desc">Sort: priority (urgent first)</option>
+                        <option value="role_count_desc">Sort: most roles first</option>
+                        <option value="status_asc">Sort: status (not resourced first)</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="flex-1 overflow-y-auto scrollbar-thin">
+                {dealsQuery.isLoading && <p className="text-xs text-gray-400 italic px-3 py-4 text-center">Loading deals…</p>}
+                {filteredDeals.map((deal) => (
+                  <button
+                    key={deal.deal_key}
+                    onClick={() => {
+                      setSelectedDealKey(deal.deal_key);
+                      if (typeof window !== "undefined" && window.innerWidth < 1024) setPipelineCollapsed(true);
+                    }}
+                    className={`w-full text-left px-3 py-2.5 border-b border-gray-50 hover:bg-gray-50 transition ${selectedDealKey === deal.deal_key ? "bg-primary/5" : ""}`}
+                  >
+                    <p className="text-xs font-medium text-gray-700 truncate">{deal.client ?? "Unnamed client"}{deal.cluster != null && ` · Cluster ${deal.cluster}`}</p>
+                    <p className="text-[11px] text-gray-400 truncate">{deal.solution ?? (deal.roles.map((r) => r.resources_requested).filter(Boolean).join(", ") || "No roles specified")}</p>
+                    <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500">{deal.role_count} role{deal.role_count !== 1 ? "s" : ""}</span>
+                      {deal.sow_signed ? <Badge variant="billable">SOW signed</Badge> : <Badge variant="pending">unconfirmed</Badge>}
+                      {deal.is_late_notice && <Badge variant="red">late notice</Badge>}
+                      {deal.priority && <Badge variant="default">{deal.priority}</Badge>}
+                      {deal.earliest_start && <span className="text-[10px] text-gray-400">{deal.earliest_start}</span>}
+                    </div>
+                  </button>
+                ))}
+                {!dealsQuery.isLoading && filteredDeals.length === 0 && (
+                  <p className="text-xs text-gray-400 italic px-3 py-4 text-center">No deals match the current filters.</p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Right: Team recommendation */}
+          <div>
+            {selectedDealKey === null ? (
+              <div className="h-64 flex items-center justify-center text-gray-300 text-sm">Select a deal to see the team recommendation</div>
+            ) : projectTeamQuery.isLoading ? (
+              <div className="space-y-3">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <div key={i} className="rounded-xl border border-gray-200 bg-white p-4 space-y-3 animate-pulse">
+                    <div className="h-4 bg-gray-100 rounded w-48" />
+                    <div className="h-3 bg-gray-100 rounded w-32" />
+                    <div className="h-10 bg-gray-100 rounded" />
+                  </div>
+                ))}
+              </div>
+            ) : projectTeamQuery.error ? (
+              <ErrorState message="Could not compute team recommendation." />
+            ) : projectTeamQuery.data ? (
+              <div className="space-y-3">
+                {/* Coverage summary */}
+                <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 flex items-center gap-4 flex-wrap text-xs">
+                  <span className="font-semibold text-gray-700">
+                    {selectedDeal?.client ?? "Deal"} · {projectTeamQuery.data.coverage_summary.total} roles
+                  </span>
+                  <Badge variant="eligible">{projectTeamQuery.data.coverage_summary.assigned} assigned</Badge>
+                  {projectTeamQuery.data.coverage_summary.hire_signal > 0 && (
+                    <Badge variant="gap">{projectTeamQuery.data.coverage_summary.hire_signal} hire signal{projectTeamQuery.data.coverage_summary.hire_signal > 1 ? "s" : ""}</Badge>
+                  )}
+                  {projectTeamQuery.data.coverage_summary.conflict > 0 && (
+                    <Badge variant="amber">{projectTeamQuery.data.coverage_summary.conflict} conflict{projectTeamQuery.data.coverage_summary.conflict > 1 ? "s" : ""}</Badge>
+                  )}
+                  <div className="ml-auto flex items-center gap-1.5">
+                    <span className="text-gray-500">Candidates per role:</span>
+                    <input
+                      type="number" min={1} max={2000}
+                      value={projectTopNInput}
+                      onChange={(e) => setProjectTopNInput(e.target.value)}
+                      onBlur={() => {
+                        const p = Math.max(1, Math.min(2000, Number(projectTopNInput) || 15));
+                        setProjectTopN(p); setProjectTopNInput(String(p));
+                      }}
+                      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                      className="w-14 text-[11px] px-1.5 py-1 rounded-lg border border-gray-200 outline-none focus:border-gray-300"
+                    />
+                  </div>
+                </div>
+                {/* Per-role sections */}
+                {projectTeamQuery.data.roles.map((roleResult) => (
+                  <ProjectRoleSection
+                    key={roleResult.row_index}
+                    roleResult={roleResult}
+                    onOpenProfile={(employeeId, tab, skillMatchContext) => setOpenProfile({ employeeId, tab, skillMatchContext })}
+                  />
+                ))}
+              </div>
+            ) : null}
+          </div>
         </div>
       )}
 
+      {/* Role-based view */}
+      {viewMode === "by-role" && (
       <div className={cn("grid grid-cols-1 gap-4", pipelineCollapsed ? "lg:grid-cols-[44px_1fr]" : "lg:grid-cols-[320px_1fr]")}>
         {pipelineCollapsed ? (
           <>
@@ -768,6 +1106,7 @@ function RecommendationsPageInner() {
           ) : null}
         </div>
       </div>
+      )}
 
       {openProfile && (
         <EmployeeProfileModal
@@ -919,6 +1258,520 @@ function filterAndSortCandidates(candidates: RecommendationCandidate[], opts: Ca
       break;
   }
   return sorted;
+}
+
+interface DealFilterOptions {
+  search: string;
+  priority: string;
+  status: string;
+  cluster: string;
+  clientPriority: string;
+  requestType: string;
+  stage: string;
+  startConfirmed: "all" | "confirmed" | "unconfirmed";
+  dateFrom: string;
+  dateTo: string;
+  lateOnly: boolean;
+  sow: "all" | "signed" | "unconfirmed";
+  sort: "date_asc" | "date_desc" | "client_asc" | "cluster_asc" | "priority_desc" | "role_count_desc" | "status_asc";
+}
+
+function filterAndSortDeals(deals: DealSummary[], opts: DealFilterOptions): DealSummary[] {
+  let result = deals;
+  const q = opts.search.trim().toLowerCase();
+  if (q) {
+    result = result.filter(
+      (d) =>
+        (d.client ?? "").toLowerCase().includes(q) ||
+        (d.solution ?? "").toLowerCase().includes(q) ||
+        d.roles.some((r) => (r.resources_requested ?? "").toLowerCase().includes(q)) ||
+        d.roles.some((r) => (r.skillset ?? "").toLowerCase().includes(q))
+    );
+  }
+  if (opts.priority !== "all") result = result.filter((d) => matchesNormalized(d.priority, opts.priority));
+  if (opts.status !== "all") result = result.filter((d) => matchesNormalized(d.status, opts.status));
+  if (opts.cluster !== "all") result = result.filter((d) => String(d.cluster) === opts.cluster);
+  if (opts.clientPriority !== "all") result = result.filter((d) => matchesNormalized(d.client_priority, opts.clientPriority));
+  if (opts.requestType !== "all") result = result.filter((d) => matchesNormalized(d.request_type, opts.requestType));
+  if (opts.stage !== "all") result = result.filter((d) => matchesNormalized(d.deal_stage_hubspot, opts.stage));
+  if (opts.startConfirmed === "confirmed") result = result.filter((d) => matchesNormalized(d.start_date_confirmed, "Yes"));
+  if (opts.startConfirmed === "unconfirmed") result = result.filter((d) => !matchesNormalized(d.start_date_confirmed, "Yes"));
+  if (opts.dateFrom) result = result.filter((d) => (d.earliest_start ?? "") >= opts.dateFrom);
+  if (opts.dateTo) result = result.filter((d) => (d.earliest_start ?? "") <= opts.dateTo);
+  if (opts.lateOnly) result = result.filter((d) => d.is_late_notice);
+  if (opts.sow === "signed") result = result.filter((d) => d.sow_signed);
+  if (opts.sow === "unconfirmed") result = result.filter((d) => !d.sow_signed);
+
+  const sorted = [...result];
+  switch (opts.sort) {
+    case "date_asc":
+      sorted.sort((a, b) => (a.earliest_start ?? "9999").localeCompare(b.earliest_start ?? "9999"));
+      break;
+    case "date_desc":
+      sorted.sort((a, b) => (b.earliest_start ?? "0000").localeCompare(a.earliest_start ?? "0000"));
+      break;
+    case "client_asc":
+      sorted.sort((a, b) => (a.client ?? "").localeCompare(b.client ?? ""));
+      break;
+    case "cluster_asc":
+      sorted.sort((a, b) => (a.cluster ?? 0) - (b.cluster ?? 0));
+      break;
+    case "priority_desc":
+      sorted.sort((a, b) => rankOf(PRIORITY_RANK, a.priority) - rankOf(PRIORITY_RANK, b.priority));
+      break;
+    case "role_count_desc":
+      sorted.sort((a, b) => b.role_count - a.role_count);
+      break;
+    case "status_asc":
+      sorted.sort((a, b) => rankOf(STATUS_RANK, a.status) - rankOf(STATUS_RANK, b.status));
+      break;
+  }
+  return sorted;
+}
+
+const STATUS_COLOR: Record<string, string> = {
+  assigned: "bg-emerald-50 border-emerald-200",
+  hire_signal: "bg-red-50 border-red-200",
+  conflict: "bg-amber-50 border-amber-200",
+};
+
+function ProjectRoleSection({
+  roleResult,
+  onOpenProfile,
+}: {
+  roleResult: TeamRoleResult;
+  onOpenProfile: (employeeId: string, tab: ProfileTab, skillMatchContext?: SkillMatchContext) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [candidateSearch, setCandidateSearch] = useState("");
+  const [candidateSignal, setCandidateSignal] = useState<CandidateSignalFilter>("all");
+  const [candidateDesignation, setCandidateDesignation] = useState("all");
+  const [candidateCoe, setCandidateCoe] = useState("all");
+  const [candidateSkillData, setCandidateSkillData] = useState<SkillDataFilter>("all");
+  const [minSkill, setMinSkill] = useState(0);
+  const [minCompetency, setMinCompetency] = useState(0);
+  const [minAvailable, setMinAvailable] = useState(0);
+  const [meetsCapacityOnly, setMeetsCapacityOnly] = useState(false);
+  const [candidateSort, setCandidateSort] = useState<CandidateSort>("composite");
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [expandedCandidateId, setExpandedCandidateId] = useState<string | null>(null);
+  const [altExpanded, setAltExpanded] = useState(false);
+  const [expandedAltId, setExpandedAltId] = useState<string | null>(null);
+  const [displayN, setDisplayN] = useState(15);
+
+  const pr = roleResult.pipeline_row;
+  const designationOptions = buildNormalizedOptions(roleResult.candidates.map((c) => c.job_name));
+  const coeOptions = buildNormalizedOptions(roleResult.candidates.map((c) => c.coe));
+  const candidatesWithUnknownCoe = roleResult.candidates.some((c) => !c.coe);
+
+  const allFiltered = filterAndSortCandidates(roleResult.candidates, {
+    search: candidateSearch,
+    signal: candidateSignal,
+    designation: candidateDesignation,
+    coe: candidateCoe,
+    skillData: candidateSkillData,
+    minSkill,
+    minCompetency,
+    minAvailable,
+    meetsCapacityOnly,
+    sort: candidateSort,
+  });
+  const filteredCandidates = allFiltered.slice(0, displayN);
+
+  const hasActiveFilters =
+    candidateSearch !== "" ||
+    candidateSignal !== "all" ||
+    candidateDesignation !== "all" ||
+    candidateCoe !== "all" ||
+    candidateSkillData !== "all" ||
+    minSkill > 0 || minCompetency > 0 || minAvailable > 0 ||
+    meetsCapacityOnly;
+  const filterCount = [
+    candidateSignal !== "all", candidateDesignation !== "all", candidateCoe !== "all",
+    candidateSkillData !== "all", minSkill > 0, minCompetency > 0, minAvailable > 0, meetsCapacityOnly,
+  ].filter(Boolean).length;
+
+  const clearFilters = () => {
+    setCandidateSearch("");
+    setCandidateSignal("all");
+    setCandidateDesignation("all");
+    setCandidateCoe("all");
+    setCandidateSkillData("all");
+    setMinSkill(0); setMinCompetency(0); setMinAvailable(0);
+    setMeetsCapacityOnly(false);
+  };
+
+  return (
+    <div className={cn("rounded-xl border bg-white overflow-hidden", STATUS_COLOR[roleResult.status] ?? "border-gray-200")}>
+      {/* Role header */}
+      <div className="px-4 py-3 space-y-2">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <p className="text-sm font-semibold text-gray-800">
+              {pr?.resources_requested ?? "Role TBD"}
+              {pr?.requested_pct && <span className="text-gray-400 font-normal"> · {pr.requested_pct}%</span>}
+            </p>
+            <p className="text-[11px] text-gray-400 mt-0.5">
+              {pr?.likely_start_date && `Start ${pr.likely_start_date}`}
+              {pr?.solution && ` · ${pr.solution.slice(0, 60)}${(pr.solution?.length ?? 0) > 60 ? "…" : ""}`}
+            </p>
+          </div>
+          <div className="flex items-center gap-1.5">
+            {pr?.status && <Badge variant="default">{pr.status}</Badge>}
+            {pr?.priority && <Badge variant="default">{pr.priority}</Badge>}
+          </div>
+        </div>
+
+        {/* Assignment result — inline proof, always visible */}
+        {roleResult.status === "assigned" && roleResult.assigned && (() => {
+          const a = roleResult.assigned;
+          const isGradeOnly = a.match_tier === "same_grade_fallback" || a.match_tier === "adjacent_level_fallback";
+          return (
+            <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2.5 space-y-1.5">
+              {/* Identity + match score */}
+              <div className="flex items-center gap-2 flex-wrap">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                <span className="text-sm font-semibold text-emerald-800">{a.employee_id}</span>
+                <span className="text-xs text-emerald-700">{a.job_name ?? "—"}</span>
+                {a.coe && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-white border border-violet-200 text-violet-600 whitespace-nowrap flex-shrink-0">
+                    {a.coe}
+                  </span>
+                )}
+                <Badge variant={a.bucket}>{SIGNAL_LABEL[a.bucket]}</Badge>
+                <span className="ml-auto text-xs font-semibold text-emerald-700 whitespace-nowrap flex-shrink-0">
+                  {Math.round(a.composite_score * 100)}% match
+                </span>
+              </div>
+
+              {/* Clickable proof scores */}
+              <div className="flex items-center gap-1.5 pl-6 flex-wrap">
+                <button
+                  onClick={() => onOpenProfile(a.employee_id, "skills", { matchedSkills: a.matched_skills, missingSkills: a.missing_skills })}
+                  className="text-[11px] text-emerald-600 hover:text-emerald-800 hover:underline transition whitespace-nowrap"
+                  title="Click to see full skill proof"
+                >
+                  {Math.round(a.skill_score * 100)}% skill ↗
+                </button>
+                <span className="text-emerald-300 text-[11px]">·</span>
+                <button
+                  onClick={() => onOpenProfile(a.employee_id, "competency")}
+                  className="text-[11px] text-emerald-600 hover:text-emerald-800 hover:underline transition whitespace-nowrap"
+                  title="Click to see competency records"
+                >
+                  {Math.round(a.competency_score * 100)}% comp ↗
+                </button>
+                <span className="text-emerald-300 text-[11px]">·</span>
+                <button
+                  onClick={() => onOpenProfile(a.employee_id, "allocations")}
+                  className="text-[11px] text-emerald-600 hover:text-emerald-800 hover:underline transition whitespace-nowrap"
+                  title="Click to see current allocations"
+                >
+                  {a.available_pct}% avail ↗
+                </button>
+                <button
+                  onClick={() => onOpenProfile(a.employee_id, "overview")}
+                  className="ml-auto text-xs font-medium px-2.5 py-1 rounded-lg border border-emerald-300 bg-white text-emerald-700 hover:bg-emerald-50 transition whitespace-nowrap flex-shrink-0"
+                >
+                  View profile
+                </button>
+              </div>
+
+              {/* Matched skills inline */}
+              {a.matched_skills.length > 0 && (
+                <div className="flex items-start gap-1.5 pl-6">
+                  <CheckCircle2 className="w-3 h-3 text-emerald-500 flex-shrink-0 mt-0.5" />
+                  <span className="text-[11px] text-emerald-700/80 leading-relaxed">{a.matched_skills.join(", ")}</span>
+                </div>
+              )}
+              {a.missing_skills.length > 0 && (
+                <div className="flex items-start gap-1.5 pl-6">
+                  <XCircle className="w-3 h-3 text-gray-300 flex-shrink-0 mt-0.5" />
+                  <span className="text-[11px] text-gray-400 leading-relaxed">{a.missing_skills.join(", ")}</span>
+                </div>
+              )}
+
+              {/* Grade-only warning */}
+              {isGradeOnly && (
+                <div className="flex items-start gap-1.5 pl-6">
+                  <AlertTriangle className="w-3 h-3 text-amber-500 flex-shrink-0 mt-0.5" />
+                  <span className="text-[11px] text-amber-700">
+                    Matched by {a.match_tier === "same_grade_fallback" ? "grade / CoE" : "adjacent seniority"} only — no verified skill overlap.
+                    {" "}<button onClick={() => onOpenProfile(a.employee_id, "skills", { matchedSkills: a.matched_skills, missingSkills: a.missing_skills })} className="underline hover:text-amber-900 transition">See skills →</button>
+                  </span>
+                </div>
+              )}
+
+              {/* No skill data case */}
+              {!isGradeOnly && a.matched_skills.length === 0 && a.missing_skills.length === 0 && (
+                <p className="text-[11px] text-gray-400 pl-6 italic">No skillset specified for this role — availability-based match only.</p>
+              )}
+
+              {/* Earliest available if busy now */}
+              {a.earliest_available_date && (
+                <p className="text-[11px] text-blue-500 pl-6">
+                  Busy now · free from <strong>{a.earliest_available_date}</strong>
+                </p>
+              )}
+
+              {/* Data confidence footer */}
+              <p className="text-[10px] text-gray-400 pl-6">
+                skill data: {a.skill_confidence} · competency: {a.competency_confidence}
+                {a.competency_confidence === "imputed" && " (tenure estimate, no direct assessment)"}
+              </p>
+            </div>
+          );
+        })()}
+
+        {roleResult.status === "hire_signal" && (
+          <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 flex items-center gap-2 text-red-700 text-xs">
+            <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+            <span>No strong internal fit — <strong>hire signal</strong>. No internal candidate meets the skill requirements.</span>
+          </div>
+        )}
+        {roleResult.status === "conflict" && (
+          <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 flex items-center gap-2 text-amber-700 text-xs">
+            <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+            <span><strong>Capacity conflict</strong> — all suitable candidates are already assigned to sibling roles in this deal.</span>
+          </div>
+        )}
+
+        {/* Alternatives — inline proof per candidate */}
+        {roleResult.alternatives.length > 0 && (
+          <div>
+            <button
+              onClick={() => setAltExpanded((v) => !v)}
+              className="flex items-center gap-1 text-[11px] text-gray-500 hover:text-primary transition"
+            >
+              {roleResult.alternatives.length} alternative{roleResult.alternatives.length > 1 ? "s" : ""} available
+              <ChevronDown className={cn("w-3 h-3 transition-transform", altExpanded && "rotate-180")} />
+            </button>
+            {altExpanded && (
+              <div className="mt-1.5 space-y-1">
+                {roleResult.alternatives.map((c) => {
+                  const isAltExpanded = expandedAltId === c.employee_id;
+                  const isAltGradeOnly = c.match_tier === "same_grade_fallback" || c.match_tier === "adjacent_level_fallback";
+                  return (
+                    <div key={c.employee_id} className="rounded-lg border border-gray-200 bg-gray-50 overflow-hidden">
+                      <button
+                        onClick={() => setExpandedAltId((prev) => (prev === c.employee_id ? null : c.employee_id))}
+                        className="flex items-center gap-2 w-full text-left text-xs px-2.5 py-1.5 hover:bg-gray-100/80 transition flex-wrap"
+                      >
+                        <span className="font-medium text-gray-800">{c.employee_id}</span>
+                        <span className="text-gray-400 truncate">{c.job_name}</span>
+                        {c.coe && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-violet-50 border border-violet-200 text-violet-600 flex-shrink-0">{c.coe}</span>}
+                        <Badge variant={c.bucket}>{SIGNAL_LABEL[c.bucket]}</Badge>
+                        {isAltGradeOnly && <span className="text-[10px] px-1 py-0.5 rounded bg-amber-50 border border-amber-200 text-amber-600 whitespace-nowrap">grade only</span>}
+                        <span className="ml-auto flex items-center gap-1.5 text-gray-500 whitespace-nowrap flex-shrink-0">
+                          <span>{Math.round(c.composite_score * 100)}% match</span>
+                          <ChevronDown className={cn("w-3 h-3 transition-transform", isAltExpanded && "rotate-180")} />
+                        </span>
+                      </button>
+                      {isAltExpanded && (
+                        <div className="border-t border-gray-200 bg-white px-2.5 py-2.5 space-y-1.5">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <button onClick={() => onOpenProfile(c.employee_id, "skills", { matchedSkills: c.matched_skills, missingSkills: c.missing_skills })}
+                              className="text-[11px] text-primary hover:underline transition whitespace-nowrap">
+                              {Math.round(c.skill_score * 100)}% skill ↗
+                            </button>
+                            <span className="text-gray-300 text-[11px]">·</span>
+                            <button onClick={() => onOpenProfile(c.employee_id, "competency")}
+                              className="text-[11px] text-primary hover:underline transition whitespace-nowrap">
+                              {Math.round(c.competency_score * 100)}% comp ↗
+                            </button>
+                            <span className="text-gray-300 text-[11px]">·</span>
+                            <button onClick={() => onOpenProfile(c.employee_id, "allocations")}
+                              className="text-[11px] text-primary hover:underline transition whitespace-nowrap">
+                              {c.available_pct}% avail ↗
+                            </button>
+                          </div>
+                          {c.matched_skills.length > 0 && (
+                            <div className="flex items-start gap-1.5">
+                              <CheckCircle2 className="w-3 h-3 text-emerald-500 flex-shrink-0 mt-0.5" />
+                              <span className="text-[11px] text-gray-600">{c.matched_skills.join(", ")}</span>
+                            </div>
+                          )}
+                          {c.missing_skills.length > 0 && (
+                            <div className="flex items-start gap-1.5">
+                              <XCircle className="w-3 h-3 text-gray-300 flex-shrink-0 mt-0.5" />
+                              <span className="text-[11px] text-gray-400">{c.missing_skills.join(", ")}</span>
+                            </div>
+                          )}
+                          <p className="text-[10px] text-gray-400">
+                            skill: {c.skill_confidence} · competency: {c.competency_confidence}
+                            {c.competency_confidence === "imputed" && " (tenure estimate)"}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Full candidate list toggle */}
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full flex items-center justify-between px-4 py-2 border-t border-gray-100 text-[11px] font-medium text-gray-500 hover:bg-gray-50 transition"
+      >
+        <span>Full candidate list ({roleResult.candidates.length})</span>
+        <ChevronDown className={cn("w-3 h-3 transition-transform", expanded && "rotate-180")} />
+      </button>
+
+      {expanded && (
+        <div className="border-t border-gray-100 px-3 py-3 space-y-2">
+          {/* Pool info + topN controls */}
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <p className="text-[11px] text-gray-400">
+              Showing {filteredCandidates.length}/{allFiltered.length} of {roleResult.candidates.length} fetched candidates
+            </p>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] text-gray-500 whitespace-nowrap">Show top</span>
+              {[15, 25, 50].map((n) => (
+                <button
+                  key={n}
+                  onClick={() => setDisplayN(n)}
+                  className={cn(
+                    "text-[11px] px-2 py-1 rounded-lg border whitespace-nowrap transition",
+                    displayN === n ? "bg-primary/10 border-primary text-primary" : "border-gray-200 text-gray-500"
+                  )}
+                >
+                  {n}
+                </button>
+              ))}
+              <button
+                onClick={() => setDisplayN(roleResult.candidates.length)}
+                className={cn(
+                  "text-[11px] px-2 py-1 rounded-lg border whitespace-nowrap transition",
+                  displayN >= roleResult.candidates.length ? "bg-primary/10 border-primary text-primary" : "border-gray-200 text-gray-500"
+                )}
+              >
+                All ({roleResult.candidates.length})
+              </button>
+            </div>
+          </div>
+
+          {/* Search + filters row */}
+          <div className="flex items-center gap-2">
+            <input
+              value={candidateSearch}
+              onChange={(e) => setCandidateSearch(e.target.value)}
+              placeholder="Search employee, role, skill…"
+              className="flex-1 text-xs px-2.5 py-1.5 rounded-lg border border-gray-200 outline-none focus:border-gray-300"
+            />
+            {hasActiveFilters && (
+              <button onClick={clearFilters} className="text-[11px] text-primary hover:underline whitespace-nowrap">
+                Clear
+              </button>
+            )}
+            <button
+              onClick={() => setFiltersOpen((v) => !v)}
+              className={cn(
+                "flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg border whitespace-nowrap transition",
+                filtersOpen || filterCount > 0
+                  ? "border-primary/40 text-primary bg-primary/5"
+                  : "border-gray-200 text-gray-500"
+              )}
+            >
+              <SlidersHorizontal className="w-3 h-3" />
+              Filters{filterCount > 0 && ` (${filterCount})`}
+              <ChevronDown className={cn("w-3 h-3 transition-transform", filtersOpen && "rotate-180")} />
+            </button>
+          </div>
+
+          {filtersOpen && (
+            <div className="rounded-lg border border-gray-100 bg-gray-50/70 p-2.5 space-y-2.5">
+              <div>
+                <label className="text-[10px] text-gray-400 block mb-1">Signal</label>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {([
+                    ["all", "All"],
+                    ["redeploy", "Redeploy"],
+                    ["training", "Needs training"],
+                    ["hire", "Hire signal"],
+                    ["not_assessed", "Not assessed"],
+                  ] as [CandidateSignalFilter, string][]).map(([v, label]) => (
+                    <button
+                      key={v}
+                      onClick={() => setCandidateSignal(v)}
+                      className={cn(
+                        "text-[11px] px-2 py-1 rounded-lg border transition bg-white",
+                        candidateSignal === v ? "bg-primary/10 border-primary text-primary" : "border-gray-200 text-gray-500"
+                      )}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <FilterSelect label="Designation" value={candidateDesignation} onChange={setCandidateDesignation}>
+                  <option value="all">All</option>
+                  {designationOptions.map((d) => <option key={d} value={d}>{d}</option>)}
+                </FilterSelect>
+                <FilterSelect label="CoE" value={candidateCoe} onChange={setCandidateCoe}>
+                  <option value="all">All</option>
+                  {coeOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+                  {candidatesWithUnknownCoe && <option value={UNKNOWN_COE}>Not determined</option>}
+                </FilterSelect>
+                <FilterSelect label="Skill data" value={candidateSkillData} onChange={(v) => setCandidateSkillData(v as SkillDataFilter)}>
+                  <option value="all">All</option>
+                  {(Object.entries(SKILL_DATA_LABEL) as [Exclude<SkillDataFilter, "all">, string][]).map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </FilterSelect>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <RangeFilter label="Min skill" value={minSkill} onChange={setMinSkill} max={100} step={10} suffix="%" />
+                <RangeFilter label="Min competency" value={minCompetency} onChange={setMinCompetency} max={100} step={10} suffix="%" />
+                <RangeFilter label="Min available" value={minAvailable} onChange={setMinAvailable} max={100} step={10} suffix="%" />
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="flex items-center gap-1.5 text-[11px] text-gray-500 whitespace-nowrap">
+                  <input type="checkbox" checked={meetsCapacityOnly} onChange={(e) => setMeetsCapacityOnly(e.target.checked)} />
+                  Meets capacity
+                </label>
+                <select
+                  value={candidateSort}
+                  onChange={(e) => setCandidateSort(e.target.value as CandidateSort)}
+                  className="flex-1 text-[11px] px-1.5 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-600"
+                >
+                  <option value="composite">Sort: best match</option>
+                  <option value="skill">Sort: skill match</option>
+                  <option value="competency">Sort: competency</option>
+                  <option value="available">Sort: availability</option>
+                </select>
+              </div>
+            </div>
+          )}
+
+          {/* Candidates */}
+          <div className="space-y-1">
+            {filteredCandidates.map((c, i) => (
+              <CandidateRow
+                key={c.employee_id}
+                candidate={c}
+                rank={i + 1}
+                isTopPick={roleResult.assigned?.employee_id === c.employee_id}
+                isExpanded={expandedCandidateId === c.employee_id}
+                onToggleExpand={() => setExpandedCandidateId((prev) => (prev === c.employee_id ? null : c.employee_id))}
+                onOpenProfile={(tab, skillMatchContext) => onOpenProfile(c.employee_id, tab, skillMatchContext)}
+              />
+            ))}
+            {roleResult.candidates.length > 0 && filteredCandidates.length === 0 && (
+              <p className="text-xs text-gray-400 italic text-center py-2">No candidates match the current filters.</p>
+            )}
+            {roleResult.candidates.length === 0 && (
+              <p className="text-xs text-gray-400 italic text-center py-2">No candidates with available capacity were found.</p>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function RangeFilter({

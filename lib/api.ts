@@ -153,6 +153,67 @@ export interface RecommendationResult {
   };
 }
 
+export interface DealRole {
+  row_index: number;
+  resources_requested: string | null;
+  requested_pct: string | null;
+  skillset: string | null;
+  status: string | null;
+  priority: string | null;
+  likely_start_date: string | null;
+  client_priority: string | null;
+  request_type: string | null;
+  deal_stage_hubspot: string | null;
+  start_date_confirmed: string | null;
+  is_late_notice: boolean | null;
+}
+
+export interface DealSummary {
+  deal_key: string;
+  row_indices: number[];
+  client: string | null;
+  cluster: number | null;
+  solution: string | null;
+  role_count: number;
+  roles: DealRole[];
+  earliest_start: string | null;
+  priority: string | null;
+  status: string | null;
+  sow_signed: boolean;
+  is_late_notice: boolean;
+  start_date_confirmed: string | null;
+  client_priority: string | null;
+  request_type: string | null;
+  deal_stage_hubspot: string | null;
+}
+
+export type TeamRoleStatus = "assigned" | "hire_signal" | "conflict";
+
+export interface TeamRoleResult {
+  row_index: number;
+  pipeline_row: RecommendationResult["pipeline_row"];
+  requested_pct: number;
+  has_skillset: boolean;
+  hire_vs_redeploy_flag: boolean;
+  status: TeamRoleStatus;
+  assigned: RecommendationCandidate | null;
+  alternatives: RecommendationCandidate[];
+  candidates: RecommendationCandidate[];
+  fallback_candidates?: FallbackCandidates | null;
+}
+
+export interface TeamCoverageSummary {
+  total: number;
+  assigned: number;
+  hire_signal: number;
+  conflict: number;
+}
+
+export interface ProjectTeamRecommendation {
+  roles: TeamRoleResult[];
+  coverage_summary: TeamCoverageSummary;
+}
+
 export interface SkillsetClassificationProofRow {
   coe_skill: string | null;
   coe_skills_list: string | null;
@@ -912,6 +973,8 @@ export interface EmployeeProfile {
   location: string | null;
   date_of_join: string | null;
   account_status: boolean | null;
+  coe: string | null;
+  manager_employee_id: string | null;
   employee_total_allocation_pct: number | null;
   employee_client_allocation_pct: number | null;
   employee_internal_allocation_pct: number | null;
@@ -1007,6 +1070,9 @@ export const api = {
     getJSON<RecommendationResult>(
       `/recommendations/search?skillset_text=${encodeURIComponent(skillsetText)}&likely_start_date=${likelyStartDate}&requested_pct=${requestedPct}`
     ),
+  listDeals: () => getJSON<DealSummary[]>("/recommendations/deals"),
+  projectTeamRecommendation: (rowIndices: number[], topN: number = 15) =>
+    postJSON<ProjectTeamRecommendation>("/recommendations/project-team", { row_indices: rowIndices, top_n: topN }),
   pipelineForecast: () => getJSON<PipelineDemandRow[]>("/pipeline/forecast"),
   healthProjects: () => getJSON<HealthProject[]>("/health-monitor/projects"),
   projectRoster: (projectCode: string) => getJSON<ProjectRoster>(`/health-monitor/projects/${encodeURIComponent(projectCode)}/roster`),

@@ -272,15 +272,21 @@ function OverviewTab({ profile }: { profile: EmployeeProfile }) {
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 text-xs">
         <Field label="Designation" value={profile.job_name ?? "-"} />
         <Field label="Department" value={profile.department_name ?? "-"} />
+        <Field label="Manager" value={profile.manager_employee_id ?? "-"} />
         <Field label="Location" value={profile.location ?? "-"} />
         <Field label="Joined" value={profile.date_of_join ?? "-"} />
       </div>
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2 flex-wrap">
         {profile.account_status != null && (
           <Badge variant={profile.account_status ? "billable" : "default"}>{profile.account_status ? "Active employee" : "Inactive"}</Badge>
+        )}
+        {profile.coe && (
+          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-medium border bg-violet-50 text-violet-700 border-violet-200">
+            CoE · {profile.coe}
+          </span>
         )}
         <span className="text-xs text-gray-400">
           {profile.employee_total_allocation_pct != null ? `${profile.employee_total_allocation_pct}% total allocation right now` : "no current allocations"}
