@@ -36,12 +36,7 @@ export function ProjectHealthDetailModal({ projectCode, onClose, initialTab }: P
     queryFn: () => api.healthProjectDetail(projectCode),
   });
 
-  // Only a real, handy shortcut when there's actually something to relieve --
-  // a project with neither flag fired has no relief recommendation to show.
-  const needsRelief = detail.data ? detail.data.overtime_risk.fired || detail.data.understaffed.fired : false;
-  const tabs = needsRelief
-    ? [...BASE_TABS.slice(0, 4), { key: "relief" as const, label: "Relief Staffing" }, ...BASE_TABS.slice(4)]
-    : BASE_TABS;
+  const tabs = [...BASE_TABS.slice(0, 4), { key: "relief" as const, label: "Relief Staffing" }, ...BASE_TABS.slice(4)];
 
   return (
     <Modal

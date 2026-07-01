@@ -407,7 +407,8 @@ export default function BuddyPage() {
           });
         }
       }
-    } catch {
+    } catch (err) {
+      console.error("[Buddy] stream error:", err);
       appendMessage(conversationId, { role: "assistant", content: "Could not reach Buddy's backend." });
     } finally {
       setSending(false);
