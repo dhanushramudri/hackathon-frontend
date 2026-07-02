@@ -906,13 +906,6 @@ function RecommendationsPageInner() {
                 <Skeleton className="h-3 w-40" />
                 <FieldGridSkeleton count={6} className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 border-t border-gray-100 pt-3" />
               </div>
-              <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-xs text-blue-700 flex items-center gap-2">
-                <svg className="w-4 h-4 animate-spin flex-shrink-0" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                </svg>
-                Scoring {611} candidates against required skills — first request warms the AI model (~30s), subsequent clicks are instant.
-              </div>
               <div className="space-y-2.5">
                 {Array.from({ length: 4 }).map((_, i) => (
                   <CandidateCardSkeleton key={i} />
@@ -2372,6 +2365,7 @@ function CandidateRow({
   onToggleExpand: () => void;
   onOpenProfile: (tab: ProfileTab, skillMatchContext?: SkillMatchContext) => void;
 }) {
+  const [aiProofOpen, setAiProofOpen] = useState(false);
   return (
     <div
       className={cn(
@@ -2415,7 +2409,7 @@ function CandidateRow({
             title="AI semantic similarity only — no matching skill records found in this employee's profile. Verify skill fit before selecting."
             className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-50 border border-blue-200 text-blue-600 whitespace-nowrap flex-shrink-0"
           >
-            AI match only
+            AI{candidate.semantic_score != null ? ` ${Math.round(candidate.semantic_score * 100)}%` : ""} · no word match
           </span>
         )}
         <span className="ml-auto flex items-center gap-3 text-[11px] text-gray-400 whitespace-nowrap flex-shrink-0">
@@ -2453,6 +2447,76 @@ function CandidateRow({
               onClick={() => onOpenProfile("allocations")}
             />
           </div>
+          {/* Word match vs AI breakdown — clickable for proof */}
+          {(candidate.matched_skills.length + candidate.missing_skills.length > 0 || candidate.semantic_score != null) && (
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-3 text-[11px] bg-gray-50 rounded-lg px-3 py-2 border border-gray-100 flex-wrap">
+                <span className="text-gray-400 font-medium flex-shrink-0">Match method</span>
+                {candidate.matched_skills.length + candidate.missing_skills.length > 0 && (
+                  <button
+                    onClick={() => onOpenProfile("skills", { matchedSkills: candidate.matched_skills, missingSkills: candidate.missing_skills })}
+                    className="flex items-center gap-1 hover:underline group"
+                    title="Click to see full skill records proof"
+                  >
+                    <span className="text-gray-500">Word:</span>
+                    <span className={cn("font-semibold", candidate.matched_skills.length > 0 ? "text-emerald-600" : "text-gray-300")}>
+                      {candidate.matched_skills.length}/{candidate.matched_skills.length + candidate.missing_skills.length}
+                    </span>
+                    <span className="text-gray-400 group-hover:text-gray-600">skills ↗</span>
+                  </button>
+                )}
+                <span className="text-gray-200">·</span>
+                {candidate.semantic_score != null ? (
+                  <button
+                    onClick={() => setAiProofOpen((v) => !v)}
+                    className="flex items-center gap-1 hover:underline group"
+                    title="Click to see AI similarity proof"
+                  >
+                    <span className="text-gray-500">AI:</span>
+                    <span className={cn(
+                      "font-semibold",
+                      candidate.semantic_score >= 0.5 ? "text-blue-600" :
+                      candidate.semantic_score >= 0.3 ? "text-blue-400" :
+                      "text-gray-400"
+                    )}>
+                      {Math.round(candidate.semantic_score * 100)}% similarity
+                    </span>
+                    <span className="text-gray-400 group-hover:text-gray-600">↗</span>
+                  </button>
+                ) : (
+                  <span className="flex items-center gap-1">
+                    <span className="text-gray-500">AI:</span>
+                    <span className="text-gray-300">—</span>
+                  </span>
+                )}
+              </div>
+              {aiProofOpen && candidate.semantic_score != null && (
+                <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2.5 text-[11px] space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-blue-700">AI Semantic Similarity — Proof</span>
+                    <button onClick={() => setAiProofOpen(false)} className="text-blue-400 hover:text-blue-600 text-xs leading-none">✕</button>
+                  </div>
+                  <p className="text-blue-700">
+                    Score: <span className="font-semibold">{Math.round(candidate.semantic_score * 100)}%</span>
+                    {" — "}
+                    {candidate.semantic_score >= 0.6
+                      ? "Strong semantic overlap between this employee's skill profile and the job requirement."
+                      : candidate.semantic_score >= 0.4
+                      ? "Moderate semantic overlap detected."
+                      : candidate.semantic_score >= 0.25
+                      ? "Weak overlap — word token matching is the stronger signal here."
+                      : "Very low similarity — AI found minimal semantic overlap with the required skillset."}
+                  </p>
+                  <p className="text-blue-500">
+                    Method: all-MiniLM-L6-v2 sentence embeddings, cosine similarity. Final skill score blends 65% AI + 35% word token match.
+                    {candidate.skill_confidence === "semantic_match"
+                      ? " Word matching found no overlap — AI is the sole signal for surfacing this candidate."
+                      : " Word matching also found evidence — AI acts as a supporting signal."}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
           {candidate.matched_skills.length > 0 && (
             <div className="flex items-start gap-1.5 text-xs">
               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0 mt-0.5" />

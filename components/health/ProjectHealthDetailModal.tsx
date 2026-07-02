@@ -3,7 +3,7 @@
 import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { HeartPulse, ChevronDown, SlidersHorizontal, UserCheck } from "lucide-react";
-import { api, type ProjectHealthDetail, type ReliefCandidate, type WsrReportRow } from "@/lib/api";
+import { api, type ProjectHealthDetail, type ReliefCandidate, type WsrReportRow, type SentimentSummary } from "@/lib/api";
 import { Modal } from "@/components/shared/Modal";
 import { Badge } from "@/components/shared/Badge";
 import { ErrorState } from "@/components/shared/EmptyState";
@@ -72,7 +72,7 @@ export function ProjectHealthDetailModal({ projectCode, onClose, initialTab }: P
             {tab === "staffing" && <StaffingTab d={detail.data} />}
             {tab === "overtime" && <OvertimeTab d={detail.data} />}
             {tab === "relief" && <ReliefStaffingSection projectCode={detail.data.project_code} />}
-            {tab === "wsr" && <WsrTab d={detail.data} />}
+            {tab === "wsr" && <WsrTab d={detail.data} projectCode={projectCode} />}
           </>
         ) : null}
       </div>
@@ -662,9 +662,74 @@ function OvertimeTab({ d }: { d: ProjectHealthDetail }) {
 type WsrSignalFilter = "all" | "RED" | "AMBER" | "GREEN";
 type WsrSort = "week_desc" | "week_asc";
 
-function WsrTab({ d }: { d: ProjectHealthDetail }) {
+function SentimentSection({ s }: { s: SentimentSummary }) {
+  if (!s.has_data) return null;
+
+  const riskColor =
+    s.risk_signal === "high" ? "border-red-200 bg-red-50" :
+    s.risk_signal === "medium" ? "border-amber-200 bg-amber-50" :
+    "border-emerald-200 bg-emerald-50";
+  const labelColor =
+    s.risk_signal === "high" ? "text-red-700" :
+    s.risk_signal === "medium" ? "text-amber-700" :
+    "text-emerald-700";
+  const trendArrow = s.trend === "deteriorating" ? "↘ deteriorating" : s.trend === "improving" ? "↗ improving" : s.trend === "stable" ? "→ stable" : null;
+  const pct = s.compound != null ? Math.round(Math.abs(s.compound) * 100) : null;
+  const avgPct = s.avg_compound != null ? Math.round(Math.abs(s.avg_compound) * 100) : null;
+
+  return (
+    <div className={cn("rounded-lg border p-3 space-y-2", riskColor)}>
+      <div className="flex items-center justify-between">
+        <span className={cn("text-xs font-semibold", labelColor)}>
+          Comment Sentiment Risk — DistilBERT (primary) + VADER (secondary)
+        </span>
+        {trendArrow && (
+          <span className={cn("text-[11px] font-medium", labelColor)}>{trendArrow}</span>
+        )}
+      </div>
+      <div className="flex flex-wrap gap-3 text-[11px]">
+        <span className={labelColor}>
+          Latest: <strong>{s.label}</strong> {pct != null && `(${pct}% confidence)`}
+        </span>
+        {avgPct != null && (
+          <span className="text-gray-500">Avg last 8 weeks: {s.avg_compound != null && s.avg_compound < 0 ? "-" : "+"}{avgPct}%</span>
+        )}
+        <span className={cn("font-medium", s.risk_signal === "none" ? "text-emerald-600" : labelColor)}>
+          Signal: {s.risk_signal === "high" ? "⚠ HIGH RISK" : s.risk_signal === "medium" ? "↘ MEDIUM RISK" : "✓ low risk"}
+        </span>
+      </div>
+      {s.latest_comment && (
+        <p className="text-[11px] text-gray-600 italic border-l-2 border-gray-300 pl-2">
+          &ldquo;{s.latest_comment.slice(0, 220)}{s.latest_comment.length > 220 ? "…" : ""}&rdquo;
+        </p>
+      )}
+      {s.recent_scores && s.recent_scores.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 pt-0.5">
+          {s.recent_scores.map((sc, i) => {
+            const c = sc.compound;
+            const dot = c <= -0.6 ? "bg-red-500" : c <= -0.05 ? "bg-amber-400" : c >= 0.05 ? "bg-emerald-400" : "bg-gray-300";
+            return (
+              <span key={i} className={cn("inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium text-white", dot)} title={sc.comment}>
+                {sc.date?.slice(5) ?? "?"} {Math.round(Math.abs(c) * 100)}%
+              </span>
+            );
+          })}
+        </div>
+      )}
+      <p className="text-[10px] text-gray-400">
+        Model: <code>distilbert-base-uncased-finetuned-sst-2-english</code> · transformer, context-aware, handles negation and recovery language · VADER shown as secondary signal
+      </p>
+    </div>
+  );
+}
+
+function WsrTab({ d, projectCode }: { d: ProjectHealthDetail; projectCode: string }) {
   const [signalFilter, setSignalFilter] = useState<WsrSignalFilter>("all");
   const [sort, setSort] = useState<WsrSort>("week_desc");
+  // const sentimentQ = useQuery<SentimentSummary>({
+  //   queryKey: ["wsr-sentiment", projectCode],
+  //   queryFn: () => api.healthProjectSentiment(projectCode),
+  // });
 
   const w = d.wsr;
   if (!w.data_available) {
@@ -704,6 +769,16 @@ function WsrTab({ d }: { d: ProjectHealthDetail }) {
       </div>
       <p className="text-xs text-gray-500">{trendSummary}</p>
       <p className="text-xs text-gray-500">{longTermSummary}</p>
+
+      {/* ── Sentiment Risk Section (commented out — WSR table comments visible directly) ── */}
+      {/* {sentimentQ.isLoading && (
+        <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2.5 flex items-center gap-2 text-[11px] text-blue-600 animate-pulse">
+          <span className="inline-block w-3 h-3 rounded-full bg-blue-400 animate-bounce" />
+          Running DistilBERT sentiment analysis on WSR comments…
+        </div>
+      )}
+      {sentimentQ.data && <SentimentSection s={sentimentQ.data} />} */}
+
       <TableControls
         filters={[
           {
@@ -724,7 +799,7 @@ function WsrTab({ d }: { d: ProjectHealthDetail }) {
         <table className="w-full text-[11px]">
           <thead>
             <tr className="bg-gray-50 border-b border-gray-200">
-              {["Week", "Scope", "Schedule", "Quality", "CSAT", "Team", "Worst"].map((h) => (
+              {["Week", "Scope", "Schedule", "Quality", "CSAT", "Team", "Worst", "Comment"].map((h) => (
                 <th key={h} className="text-left font-semibold text-gray-500 px-2.5 py-1.5 whitespace-nowrap">{h}</th>
               ))}
             </tr>
@@ -741,6 +816,7 @@ function WsrTab({ d }: { d: ProjectHealthDetail }) {
                 <td className="px-2.5 py-1.5 whitespace-nowrap"><Badge variant={r.csat_status}>{r.csat_status}</Badge></td>
                 <td className="px-2.5 py-1.5 whitespace-nowrap"><Badge variant={r.team_status}>{r.team_status}</Badge></td>
                 <td className="px-2.5 py-1.5 whitespace-nowrap"><Badge variant={r.worst_signal}>{r.worst_signal}</Badge></td>
+                <td className="px-2.5 py-1.5 text-gray-500 max-w-xs truncate" title={r.comment ?? undefined}>{r.comment ?? "—"}</td>
               </tr>
             ))}
           </tbody>

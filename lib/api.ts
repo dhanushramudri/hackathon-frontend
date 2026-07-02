@@ -87,6 +87,7 @@ export interface RecommendationCandidate {
   matched_skills: string[];
   missing_skills: string[];
   skill_confidence: string;
+  semantic_score?: number | null;
   competency_score: number;
   competency_confidence: string;
   available_pct: number;
@@ -392,6 +393,24 @@ export interface EffortSpikeProof {
   weekly_hours: { week: string; hours: number }[];
 }
 
+export interface SentimentScore {
+  date: string | null;
+  label: string;
+  compound: number;
+  comment: string;
+}
+
+export interface SentimentSummary {
+  has_data: boolean;
+  label: string | null;
+  compound: number | null;
+  avg_compound?: number | null;
+  trend: string | null;
+  risk_signal: string;
+  latest_comment: string | null;
+  recent_scores?: SentimentScore[];
+}
+
 export interface WsrReportRow {
   week_start_date: string | null;
   week_end_date: string | null;
@@ -401,6 +420,7 @@ export interface WsrReportRow {
   csat_status: string;
   team_status: string;
   worst_signal: string;
+  comment?: string | null;
 }
 
 export interface WsrProof {
@@ -877,12 +897,13 @@ export interface BuddyStreamEvent {
  * token-by-token (the backend's final answer is parsed JSON, not free prose). */
 export async function* buddyAskStream(
   message: string,
-  history: { role: "user" | "assistant"; content: string }[] = []
+  history: { role: "user" | "assistant"; content: string }[] = [],
+  priorContext?: string
 ): AsyncGenerator<BuddyStreamEvent> {
   const res = await fetch(`${BASE}/buddy/ask/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message, history }),
+    body: JSON.stringify({ message, history, prior_context: priorContext }),
   });
   if (!res.ok || !res.body) {
     throw new Error(`/buddy/ask/stream failed: ${res.status}`);
@@ -901,6 +922,20 @@ export async function* buddyAskStream(
       if (line) yield JSON.parse(line.slice(6));
     }
   }
+}
+
+export async function buddyRate(params: {
+  session_id: string;
+  message_index: number;
+  question: string;
+  answer_snippet: string;
+  rating: "up" | "down";
+}): Promise<void> {
+  await fetch(`${BASE}/buddy/rate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...params, timestamp: new Date().toISOString() }),
+  });
 }
 
 export interface EmployeeSkillRow {
@@ -1082,6 +1117,8 @@ export const api = {
   healthProjectDetail: (projectCode: string) => getJSON<ProjectHealthDetail>(`/health-monitor/projects/${encodeURIComponent(projectCode)}/detail`),
   reliefStaffingCandidates: (projectCode: string) =>
     getJSON<ReliefStaffingResult>(`/health-monitor/projects/${encodeURIComponent(projectCode)}/relief-candidates`),
+  healthProjectSentiment: (projectCode: string, lastN?: number) =>
+    getJSON<SentimentSummary>(`/health-monitor/projects/${encodeURIComponent(projectCode)}/sentiment${lastN ? `?last_n=${lastN}` : ""}`),
   projectBurnoutOverview: () => getJSON<ProjectBurnoutOverview>("/wellbeing/projects"),
   employeeBurnoutOverview: () => getJSON<EmployeeBurnoutOverview>("/wellbeing/employees"),
   projectInfo: (projectCode: string) => getJSON<ProjectInfo>(`/health-monitor/projects/${encodeURIComponent(projectCode)}/info`),

@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Send, Sparkles, Loader2, Plus, Trash2, MessageSquare, PanelLeftClose, PanelLeftOpen, X, ChevronDown, ChevronUp, Wrench } from "lucide-react";
+import { Send, Sparkles, Loader2, Plus, Trash2, MessageSquare, PanelLeftClose, PanelLeftOpen, X, ChevronDown, ChevronUp, Wrench, ThumbsUp, ThumbsDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Mascot } from "@/components/shared/Mascot";
-import { buddyAskStream, type BuddyStat, type BuddyTable, type BuddyToolCall } from "@/lib/api";
+import { buddyAskStream, buddyRate, type BuddyStat, type BuddyTable, type BuddyToolCall } from "@/lib/api";
 import { EmployeeProfileModal } from "@/components/shared/EmployeeProfileModal";
 import { ProjectHealthDetailModal } from "@/components/health/ProjectHealthDetailModal";
 
@@ -55,6 +55,7 @@ interface Message {
   stats?: BuddyStat[];
   data?: unknown;
   toolTrace?: BuddyToolCall[];
+  rating?: "up" | "down";
 }
 
 interface BuddyConversation {
@@ -101,6 +102,23 @@ function relativeTime(iso: string): string {
   const diffHr = Math.round(diffMin / 60);
   if (diffHr < 24) return `${diffHr}h ago`;
   return `${Math.round(diffHr / 24)}d ago`;
+}
+
+function buildPriorContext(conversations: BuddyConversation[], excludeId: string | null): string | undefined {
+  const recent = [...conversations]
+    .filter((c) => c.id !== excludeId && c.messages.some((m) => m.role === "assistant" && m.content.trim()))
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    .slice(0, 3);
+  if (recent.length === 0) return undefined;
+  const parts = recent
+    .map((c) => {
+      const lastAsst = [...c.messages].reverse().find((m) => m.role === "assistant" && m.content.trim());
+      if (!lastAsst) return null;
+      return `Session "${c.title}" (${relativeTime(c.updatedAt)}): ${lastAsst.content.slice(0, 280)}`;
+    })
+    .filter(Boolean) as string[];
+  if (parts.length === 0) return undefined;
+  return parts.join("\n\n");
 }
 
 const SUGGESTIONS = [
@@ -172,27 +190,106 @@ function ChatStats({ items }: { items: BuddyStat[] }) {
   );
 }
 
+function formatArgValue(v: unknown): string {
+  if (v === null || v === undefined) return "—";
+  if (typeof v === "string") return v.length > 50 ? `${v.slice(0, 50)}…` : v;
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  if (Array.isArray(v)) {
+    if (v.length === 0) return "—";
+    const items = v.slice(0, 4).map((x) => (typeof x === "string" ? x : JSON.stringify(x)));
+    return items.join(", ") + (v.length > 4 ? ` +${v.length - 4} more` : "");
+  }
+  const s = JSON.stringify(v);
+  return s.length > 60 ? `${s.slice(0, 60)}…` : s;
+}
+
 function ToolTrace({ trace }: { trace: BuddyToolCall[] }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true);
   if (!trace.length) return null;
   return (
-    <div className="w-full">
+    <div className="w-full mt-1">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1 text-[11px] font-medium text-gray-400 hover:text-gray-600 transition"
+        className="flex items-center gap-1.5 text-[11px] font-semibold text-gray-500 hover:text-gray-700 transition mb-1.5 w-full group"
       >
-        {open ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-        <Wrench className="w-3 h-3" />
-        {trace.length} tool {trace.length === 1 ? "call" : "calls"} used
+        <Wrench className="w-3 h-3 text-primary flex-shrink-0" />
+        <span>Agent trace</span>
+        <span className="text-gray-400 font-normal ml-1">
+          · {trace.length} tool {trace.length === 1 ? "call" : "calls"}
+        </span>
+        <span className="ml-auto text-gray-300 group-hover:text-gray-400 transition flex-shrink-0">
+          {open ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+        </span>
       </button>
       {open && (
-        <div className="mt-1.5 space-y-1.5">
-          {trace.map((t, i) => (
-            <div key={i} className="text-[11px] font-mono text-gray-400 bg-gray-50 rounded-lg px-2.5 py-1.5 border border-gray-100">
-              <span className="text-primary">{t.tool}</span>
-              <span className="text-gray-400">({JSON.stringify(t.arguments)})</span>
-            </div>
-          ))}
+        <div className="rounded-xl border border-gray-100 bg-[#fafafa] overflow-hidden text-[11px]">
+          {trace.map((t, i) => {
+            const args = Object.entries(t.arguments).filter(
+              ([, v]) =>
+                v !== null &&
+                v !== undefined &&
+                v !== "" &&
+                !(Array.isArray(v) && v.length === 0)
+            );
+            return (
+              <div
+                key={i}
+                className={cn("flex gap-3 px-3 py-2.5", i < trace.length - 1 && "border-b border-gray-100")}
+              >
+                {/* Step indicator + vertical connector */}
+                <div className="flex flex-col items-center flex-shrink-0 pt-0.5">
+                  <div
+                    className="rounded-full flex items-center justify-center text-[9px] font-bold text-white flex-shrink-0"
+                    style={{
+                      backgroundColor: "hsl(var(--primary))",
+                      width: "18px",
+                      height: "18px",
+                      minWidth: "18px",
+                    }}
+                  >
+                    {i + 1}
+                  </div>
+                  {i < trace.length - 1 && (
+                    <div
+                      className="w-px bg-gray-200 mt-1 flex-1"
+                      style={{ minHeight: "12px" }}
+                    />
+                  )}
+                </div>
+
+                {/* Tool name + arguments */}
+                <div className="flex-1 min-w-0 pb-0.5">
+                  <div className="flex items-baseline gap-2 flex-wrap">
+                    <span className="font-semibold text-gray-800 text-[12px] leading-tight">
+                      {toolLabel(t.tool)}
+                    </span>
+                    <span className="font-mono text-gray-400 text-[10px]">{t.tool}</span>
+                  </div>
+                  {args.length > 0 && (
+                    <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5">
+                      {args.map(([k, v]) => (
+                        <span key={k} className="text-gray-500">
+                          <span className="text-gray-400">{k}:</span>{" "}
+                          <span
+                            className="font-mono text-[10px]"
+                            style={{ color: "hsl(var(--primary) / 0.75)" }}
+                          >
+                            {formatArgValue(v)}
+                          </span>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Guardrail footer */}
+          <div className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-50 border-t border-gray-100 text-[10px] text-gray-400">
+            <span className="text-emerald-500">🔒</span>
+            Read-only · Buddy never modifies data · All results from live JMAN data
+          </div>
         </div>
       )}
     </div>
@@ -350,6 +447,10 @@ export default function BuddyPage() {
   const activeConversation = conversations.find((c) => c.id === activeId) ?? null;
   const messages = activeConversation?.messages ?? [];
 
+  const allRated = conversations.flatMap((c) => c.messages).filter((m) => m.role === "assistant" && m.rating);
+  const upCount = allRated.filter((m) => m.rating === "up").length;
+  const pctHelpful = allRated.length > 0 ? Math.round((upCount / allRated.length) * 100) : null;
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length, sending, liveTools.length]);
@@ -369,6 +470,7 @@ export default function BuddyPage() {
     const isNew = activeId === null;
     const conversationId = activeId ?? crypto.randomUUID();
     const history = (isNew ? [] : activeConversation?.messages ?? []).map((m) => ({ role: m.role, content: m.content }));
+    const priorContext = isNew ? buildPriorContext(conversations, null) : undefined;
 
     if (isNew) {
       setConversations((prev) => [
@@ -383,7 +485,7 @@ export default function BuddyPage() {
     setLiveTools([]);
     try {
       const trace: { tool: string; arguments: Record<string, unknown> }[] = [];
-      for await (const event of buddyAskStream(message, history)) {
+      for await (const event of buddyAskStream(message, history, priorContext)) {
         if (event.type === "tool_call" && event.tool) {
           trace.push({ tool: event.tool, arguments: event.arguments ?? {} });
           setLiveTools((prev) => [...prev, { tool: event.tool!, done: false }]);
@@ -421,6 +523,30 @@ export default function BuddyPage() {
     if (id === activeId) setActiveId(null);
   };
 
+  const handleRate = (conversationId: string, messageIndex: number, rating: "up" | "down") => {
+    setConversations((prev) =>
+      prev.map((c) => {
+        if (c.id !== conversationId) return c;
+        const msgs = [...c.messages];
+        msgs[messageIndex] = { ...msgs[messageIndex], rating };
+        return { ...c, messages: msgs };
+      })
+    );
+    // Persist to backend (fire-and-forget)
+    const conv = conversations.find((c) => c.id === conversationId);
+    if (conv) {
+      const question = conv.messages[messageIndex - 1]?.content ?? "";
+      const answer = conv.messages[messageIndex]?.content ?? "";
+      buddyRate({
+        session_id: conversationId,
+        message_index: messageIndex,
+        question,
+        answer_snippet: answer.slice(0, 300),
+        rating,
+      }).catch(() => {});
+    }
+  };
+
   return (
     <div className="h-[calc(100dvh-56px)] flex bg-white">
       <ConversationRail
@@ -453,6 +579,16 @@ export default function BuddyPage() {
           <div className="min-w-0">
             <h1 className="text-sm font-bold text-gray-900 leading-tight">Buddy</h1>
           </div>
+          <div className="flex-1" />
+          {pctHelpful !== null && (
+            <div className="hidden sm:flex items-center gap-1.5 text-[11px] bg-gray-50 border border-gray-100 rounded-lg px-2.5 py-1 flex-shrink-0">
+              <span>{upCount === allRated.length ? "👍" : upCount > allRated.length / 2 ? "👍" : "📊"}</span>
+              <span className="font-semibold text-gray-700">{pctHelpful}%</span>
+              <span className="text-gray-400">helpful</span>
+              <span className="text-gray-200">·</span>
+              <span className="text-gray-400">{allRated.length} rated</span>
+            </div>
+          )}
         </div>
 
         <div className="flex-1 overflow-y-auto scrollbar-thin px-3 sm:px-6 py-5">
@@ -494,6 +630,30 @@ export default function BuddyPage() {
                     )}
                     {m.role === "assistant" && m.format === "stats" && m.stats && <ChatStats items={m.stats} />}
                     {m.role === "assistant" && m.toolTrace && m.toolTrace.length > 0 && <ToolTrace trace={m.toolTrace} />}
+                    {m.role === "assistant" && (
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        <span className="text-[10px] text-gray-300">Helpful?</span>
+                        <button
+                          onClick={() => handleRate(activeId!, i, "up")}
+                          className={cn("p-1 rounded hover:bg-gray-100 transition", m.rating === "up" ? "text-emerald-500" : "text-gray-300 hover:text-gray-500")}
+                          title="Helpful"
+                        >
+                          <ThumbsUp className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleRate(activeId!, i, "down")}
+                          className={cn("p-1 rounded hover:bg-gray-100 transition", m.rating === "down" ? "text-red-400" : "text-gray-300 hover:text-gray-500")}
+                          title="Not helpful"
+                        >
+                          <ThumbsDown className="w-3.5 h-3.5" />
+                        </button>
+                        {m.rating && (
+                          <span className="text-[10px] text-gray-400">
+                            {m.rating === "up" ? "Thanks!" : "Got it — we'll improve."}
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
