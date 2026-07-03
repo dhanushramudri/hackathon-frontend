@@ -1160,4 +1160,45 @@ export const api = {
     getJSON<RedeployMatch[]>(`/free-pool/${encodeURIComponent(employeeId)}/matches?top_n=${topN}`),
   revenueTrend: () => getJSON<RevenueMonth[]>("/revenue/trend"),
   leaveImpact: () => getJSON<LeaveImpact[]>("/leave/impact"),
+  predictionForecast: (horizonMonths: number = 24) =>
+    getJSON<PredictionForecastResult>(`/forecast/prediction?horizon_months=${horizonMonths}`),
 };
+
+// ── Prediction Forecast ────────────────────────────────────────────────────
+export interface PredictionHistoryRow {
+  month: string;
+  total_headcount_demand: number;
+  confirmed_headcount: number;
+  win_rate_pct: number;
+  revenue_usd: number;
+}
+
+export interface PredictionForecastRow {
+  month: string;
+  forecast: number;
+  lower: number;
+  upper: number;
+}
+
+export interface PredictionForecastResult {
+  history: PredictionHistoryRow[];
+  horizon_months: number;
+  demand_forecast: PredictionForecastRow[];
+  revenue_forecast: PredictionForecastRow[];
+  winrate_forecast: PredictionForecastRow[];
+  summary: {
+    peak_demand_month: string;
+    peak_demand_headcount: number;
+    total_forecast_headcount: number;
+    total_forecast_revenue_usd: number;
+    demand_monthly_growth_rate: number;
+  };
+  model_info: {
+    type: string;
+    formula: string;
+    training_months: number;
+    training_period: string;
+    confidence_interval: string;
+    note: string;
+  };
+}
