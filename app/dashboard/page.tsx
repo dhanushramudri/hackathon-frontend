@@ -110,18 +110,19 @@ export default function DashboardPage() {
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
-          label="Total Employees"
-          value={headcount.data?.currently_active ?? "-"}
-          sub={headcount.data ? `of ${headcount.data.total_ever} ever on roster` : undefined}
+          label="Delivery Staff"
+          value={headcount.data?.delivery_active ?? "-"}
+          sub={headcount.data ? `of ${headcount.data.currently_active} total active` : undefined}
           icon={<Users className="w-4 h-4" />}
           href="/employees"
           tooltip={
             headcount.data && (
               <div className="space-y-1">
-                <p className="font-semibold text-gray-700">Currently active: {headcount.data.currently_active}</p>
+                <p className="font-semibold text-gray-700">Delivery staff (active, client-facing): {headcount.data.delivery_active}</p>
+                <p>All active accounts (incl. Finance, HR, IT): {headcount.data.currently_active}</p>
                 <p>Total ever on roster: {headcount.data.total_ever}</p>
                 <p>Already departed: {headcount.data.already_departed}</p>
-                <p>In notice period (resigning soon, still active): {headcount.data.in_notice_period}</p>
+                <p>In notice period: {headcount.data.in_notice_period}</p>
               </div>
             )
           }

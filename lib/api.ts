@@ -95,6 +95,8 @@ export interface RecommendationCandidate {
   match_tier?: MatchTier;
   earliest_available_date?: string | null;
   earliest_available_proof?: string | null;
+  on_leave_now?: boolean;
+  in_free_pool?: boolean;
 }
 
 export interface FallbackCandidates {
@@ -1045,8 +1047,27 @@ export interface ProjectInfo {
 export interface EmployeeHeadcountSummary {
   total_ever: number;
   currently_active: number;
+  delivery_active: number;
   already_departed: number;
   in_notice_period: number;
+}
+
+export interface BackfillContext {
+  pulled_employee_id: string;
+  pulled_employee_job: string | null;
+  pulled_employee_coe: string | null;
+  source_project_id: string;
+  vacated_allocation_pct: number;
+  skill_basis: string[];
+}
+
+export interface BackfillResult {
+  candidates: RecommendationCandidate[];
+  best_fit_if_delayed?: RecommendationCandidate[];
+  fallback_candidates?: FallbackCandidates | null;
+  hire_vs_redeploy_flag?: boolean;
+  backfill_context: BackfillContext | null;
+  error?: string;
 }
 
 export interface OvertimeRiskSummary {
@@ -1158,6 +1179,8 @@ export const api = {
   freePool: () => getJSON<FreePoolCandidate[]>("/free-pool"),
   freePoolMatches: (employeeId: string, topN = 20) =>
     getJSON<RedeployMatch[]>(`/free-pool/${encodeURIComponent(employeeId)}/matches?top_n=${topN}`),
+  backfillCandidates: (employeeId: string, sourceProjectId: string, topN = 15) =>
+    getJSON<BackfillResult>(`/recommendations/backfill?employee_id=${encodeURIComponent(employeeId)}&source_project_id=${encodeURIComponent(sourceProjectId)}&top_n=${topN}`),
   revenueTrend: () => getJSON<RevenueMonth[]>("/revenue/trend"),
   leaveImpact: () => getJSON<LeaveImpact[]>("/leave/impact"),
   predictionForecast: (horizonMonths: number = 24) =>
