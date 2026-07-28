@@ -6,9 +6,11 @@ import { useSearchParams } from "next/navigation";
 import { AlertTriangle, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Sparkles, SlidersHorizontal, XCircle, Users, List } from "lucide-react";
 import {
   api,
+  DEFAULT_INCLUDE_PARAMS,
   type DealCompositionRow,
   type DealSummary,
-  type FallbackCandidates,
+  type EmployeeProjectHistoryRow,
+  type IncludeParams,
   type PipelineDemandRow,
   type RecommendationCandidate,
   type RecommendationResult,
@@ -26,7 +28,7 @@ type DemandSort = "date_asc" | "date_desc" | "client_asc" | "cluster_asc" | "pri
 type StartConfirmedFilter = "all" | "confirmed" | "unconfirmed";
 type CandidateSignalFilter = "all" | "redeploy" | "training" | "hire" | "not_assessed";
 type SkillDataFilter = "all" | "observed" | "imputed" | "no_match" | "no_requirement" | "semantic_match";
-type CandidateSort = "composite" | "skill" | "competency" | "available";
+type CandidateSort = "composite" | "skill" | "competency" | "available" | "experience";
 
 const SIGNAL_FILTER_TO_BUCKET: Record<Exclude<CandidateSignalFilter, "all">, RecommendationCandidate["bucket"]> = {
   redeploy: "eligible",
@@ -107,9 +109,6 @@ function RecommendationsPageInner() {
     if (row !== null && !Number.isNaN(Number(row))) setSelectedRow(Number(row));
   }, []);
 
-  const [semanticMatchByRow, setSemanticMatchByRow] = useState<Record<number, SemanticMatchResult>>({});
-  const semanticMatchMutation = useMutation({ mutationFn: (rowIndex: number) => api.semanticMatch(rowIndex) });
-
   const [demandFiltersOpen, setDemandFiltersOpen] = useState(false);
   const [demandSearch, setDemandSearch] = useState("");
   const [demandSowFilter, setDemandSowFilter] = useState<"all" | "signed" | "unconfirmed">("all");
@@ -125,27 +124,33 @@ function RecommendationsPageInner() {
   const [demandStartConfirmed, setDemandStartConfirmed] = useState<StartConfirmedFilter>("all");
   const [demandSort, setDemandSort] = useState<DemandSort>("date_asc");
 
-  const [candidateFiltersOpen, setCandidateFiltersOpen] = useState(false);
-  const [candidateSearch, setCandidateSearch] = useState("");
-  const [candidateSignal, setCandidateSignal] = useState<CandidateSignalFilter>("all");
-  const [candidateDesignation, setCandidateDesignation] = useState("all");
-  const [candidateCoe, setCandidateCoe] = useState("all");
-  const [candidateSkillData, setCandidateSkillData] = useState<SkillDataFilter>("all");
-  const [minSkill, setMinSkill] = useState(0);
-  const [minCompetency, setMinCompetency] = useState(0);
-  const [minAvailable, setMinAvailable] = useState(0);
-  const [meetsCapacityOnly, setMeetsCapacityOnly] = useState(false);
-  const [candidateSort, setCandidateSort] = useState<CandidateSort>("composite");
-  const [topN, setTopN] = useState(15);
-  const [topNInput, setTopNInput] = useState("15");
+  // All 5 ranking parameters (skill, competency, availability, category match,
+  // project count) are independently selectable in Advanced Filters -- the
+  // selected subset gets its base weights renormalized to sum to 1.0, see
+  // composite_score_v2() in scoring.py. Shared across both By Role and By
+  // Project views (one panel governs ranking parameters regardless of view) --
+  // and now also across every role tab within a project, so switching roles
+  // doesn't reset your chosen ranking parameters.
+  const [includeParams, setIncludeParams] = useState<IncludeParams>(DEFAULT_INCLUDE_PARAMS);
+  // Separate from includeParams: a hard pool gate, not a ranking weight. Off by
+  // default -- someone who can't actually take the requested % stays out of
+  // Candidates regardless of which ranking parameters are selected.
+  const [includeBelowCapacity, setIncludeBelowCapacity] = useState(false);
 
-  const [dealDetailsOpen, setDealDetailsOpen] = useState(false);
-  const [otherOptionsOpen, setOtherOptionsOpen] = useState(false);
-  const [expandedCandidateId, setExpandedCandidateId] = useState<string | null>(null);
   const [pipelineCollapsed, setPipelineCollapsed] = useState(false);
 
   // Project-mode state
   const [selectedDealKey, setSelectedDealKey] = useState<string | null>(null);
+  // Which role tab is active within the selected deal -- null means "default to
+  // the first role", reset whenever the deal changes so a new deal doesn't
+  // inherit a stale tab selection from the previous one.
+  const [selectedRoleRowIndex, setSelectedRoleRowIndex] = useState<number | null>(null);
+  // "tabs": one role's full detail at a time. "all": every role stacked as a
+  // lazy-loading accordion on one page -- no tab-switching, but each section
+  // only fetches its recommendation once expanded so an 11-role deal doesn't
+  // fire 11 heavy scoring requests at once.
+  const [projectRoleViewMode, setProjectRoleViewMode] = useState<"tabs" | "all">("tabs");
+  const [expandedAllRoles, setExpandedAllRoles] = useState<Set<number>>(new Set());
   const [dealListSearch, setDealListSearch] = useState("");
   const [dealListPriority, setDealListPriority] = useState("all");
   const [dealListStatus, setDealListStatus] = useState("all");
@@ -175,24 +180,6 @@ function RecommendationsPageInner() {
     }
   };
 
-  useEffect(() => {
-    setCandidateSearch("");
-    setCandidateSignal("all");
-    setCandidateDesignation("all");
-    setCandidateCoe("all");
-    setCandidateSkillData("all");
-    setMinSkill(0);
-    setMinCompetency(0);
-    setMinAvailable(0);
-    setMeetsCapacityOnly(false);
-    setTopN(15);
-    setTopNInput("15");
-    semanticMatchMutation.reset();
-    setDealDetailsOpen(false);
-    setOtherOptionsOpen(false);
-    setExpandedCandidateId(null);
-  }, [selectedRow]);
-
   const pipeline = useQuery({ queryKey: ["pipeline-forecast"], queryFn: api.pipelineForecast });
   const [coverageEnabled, setCoverageEnabled] = useState(false);
   const coverage = useQuery({
@@ -200,12 +187,6 @@ function RecommendationsPageInner() {
     queryFn: api.recommendationsCoverageSummary,
     enabled: coverageEnabled,
     staleTime: 5 * 60 * 1000,
-  });
-  const roleMixCoes = useQuery({ queryKey: ["role-mix-coes"], queryFn: api.roleMixCoes });
-  const recommendation = useQuery({
-    queryKey: ["recommendation", selectedRow, topN],
-    queryFn: () => api.recommendationsForPipelineRow(selectedRow!, topN),
-    enabled: selectedRow !== null,
   });
 
   const dealsQuery = useQuery({
@@ -215,8 +196,8 @@ function RecommendationsPageInner() {
   });
   const selectedDeal = dealsQuery.data?.find((d) => d.deal_key === selectedDealKey) ?? null;
   const projectTeamQuery = useQuery({
-    queryKey: ["project-team", selectedDealKey, projectTopN],
-    queryFn: () => api.projectTeamRecommendation(selectedDeal!.row_indices, projectTopN),
+    queryKey: ["project-team", selectedDealKey, projectTopN, includeParams],
+    queryFn: () => api.projectTeamRecommendation(selectedDeal!.row_indices, projectTopN, includeParams),
     enabled: viewMode === "by-project" && selectedDealKey !== null && selectedDeal !== null,
   });
 
@@ -275,11 +256,6 @@ function RecommendationsPageInner() {
   };
 
   const demandRows = (pipeline.data ?? []).filter((r) => r.skillset || r.resources_requested);
-  const selected = recommendation.data?.pipeline_row;
-  const topCandidate =
-    recommendation.data && !recommendation.data.hire_vs_redeploy_flag && recommendation.data.has_skillset && recommendation.data.candidates.length > 0
-      ? recommendation.data.candidates[0]
-      : null;
 
   const clusters = Array.from(new Set(demandRows.map((r) => r.cluster).filter((c): c is number => c != null))).sort(
     (a, b) => a - b
@@ -344,57 +320,6 @@ function RecommendationsPageInner() {
     setDemandRequestType("all");
     setDemandStage("all");
     setDemandStartConfirmed("all");
-  };
-
-  const designationOptions = buildNormalizedOptions((recommendation.data?.candidates ?? []).map((c) => c.job_name));
-  // The full canonical CoE list, not just whichever ones happen to appear in the
-  // currently-shown top-N candidates -- otherwise a real CoE (e.g. Full Stack
-  // Engineering) silently disappears from the filter whenever none of its people
-  // happen to rank in the visible slice, even though they exist org-wide.
-  const coeOptions = (roleMixCoes.data ?? []).map((c) => c.coe).sort();
-  const candidatesWithUnknownCoe = (recommendation.data?.candidates ?? []).some((c) => !c.coe);
-  const filteredCandidates = filterAndSortCandidates(recommendation.data?.candidates ?? [], {
-    search: candidateSearch,
-    signal: candidateSignal,
-    designation: candidateDesignation,
-    coe: candidateCoe,
-    skillData: candidateSkillData,
-    minSkill,
-    minCompetency,
-    minAvailable,
-    meetsCapacityOnly,
-    sort: candidateSort,
-  });
-  const hasActiveCandidateFilters =
-    candidateSearch !== "" ||
-    candidateSignal !== "all" ||
-    candidateDesignation !== "all" ||
-    candidateCoe !== "all" ||
-    candidateSkillData !== "all" ||
-    minSkill > 0 ||
-    minCompetency > 0 ||
-    minAvailable > 0 ||
-    meetsCapacityOnly;
-  const candidateFilterCount = [
-    candidateSignal !== "all",
-    candidateDesignation !== "all",
-    candidateCoe !== "all",
-    candidateSkillData !== "all",
-    minSkill > 0,
-    minCompetency > 0,
-    minAvailable > 0,
-    meetsCapacityOnly,
-  ].filter(Boolean).length;
-  const clearCandidateFilters = () => {
-    setCandidateSearch("");
-    setCandidateSignal("all");
-    setCandidateDesignation("all");
-    setCandidateCoe("all");
-    setCandidateSkillData("all");
-    setMinSkill(0);
-    setMinCompetency(0);
-    setMinAvailable(0);
-    setMeetsCapacityOnly(false);
   };
 
   return (
@@ -602,6 +527,8 @@ function RecommendationsPageInner() {
                     key={deal.deal_key}
                     onClick={() => {
                       setSelectedDealKey(deal.deal_key);
+                      setSelectedRoleRowIndex(null);
+                      setExpandedAllRoles(new Set());
                       if (typeof window !== "undefined" && window.innerWidth < 1024) setPipelineCollapsed(true);
                     }}
                     className={`w-full text-left px-3 py-2.5 border-b border-gray-50 hover:bg-gray-50 transition ${selectedDealKey === deal.deal_key ? "bg-primary/5" : ""}`}
@@ -625,7 +552,11 @@ function RecommendationsPageInner() {
           )}
 
           {/* Right: Team recommendation */}
-          <div>
+          {/* min-w-0 is required here -- a CSS grid track defaults to min-width:auto,
+              so without it a wide child (the role tab bar on an 11-role deal) expands
+              the whole grid column instead of clipping/scrolling within it, dragging
+              the entire page into horizontal scroll. */}
+          <div className="min-w-0">
             {selectedDealKey === null ? (
               <div className="h-64 flex items-center justify-center text-gray-300 text-sm">Select a deal to see the team recommendation</div>
             ) : projectTeamQuery.isLoading ? (
@@ -669,14 +600,139 @@ function RecommendationsPageInner() {
                     />
                   </div>
                 </div>
-                {/* Per-role sections */}
-                {projectTeamQuery.data.roles.map((roleResult) => (
-                  <ProjectRoleSection
-                    key={roleResult.row_index}
-                    roleResult={roleResult}
-                    onOpenProfile={(employeeId, tab, skillMatchContext) => setOpenProfile({ employeeId, tab, skillMatchContext })}
-                  />
-                ))}
+
+                {/* Roles container -- sits right after the deal/project details
+                    (coverage summary) card. Its own overflow-x-auto is scoped to just
+                    this row (min-w-0 on the grid column above stops it from dragging
+                    the whole page into horizontal scroll on high-role-count deals). */}
+                <div className="rounded-xl border border-gray-200 bg-white p-2.5 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[11px] font-medium text-gray-500">
+                      {projectTeamQuery.data.roles.length} role{projectTeamQuery.data.roles.length !== 1 ? "s" : ""} in this deal
+                    </p>
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      <button
+                        onClick={() => setProjectRoleViewMode("tabs")}
+                        className={cn(
+                          "text-[11px] px-2 py-1 rounded-lg border transition",
+                          projectRoleViewMode === "tabs" ? "bg-primary text-white border-primary" : "border-gray-200 text-gray-500"
+                        )}
+                      >
+                        One at a time
+                      </button>
+                      <button
+                        onClick={() => setProjectRoleViewMode("all")}
+                        className={cn(
+                          "text-[11px] px-2 py-1 rounded-lg border transition",
+                          projectRoleViewMode === "all" ? "bg-primary text-white border-primary" : "border-gray-200 text-gray-500"
+                        )}
+                      >
+                        All roles, one page
+                      </button>
+                    </div>
+                  </div>
+
+                  {projectRoleViewMode === "tabs" ? (
+                    <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-thin pb-1">
+                      {projectTeamQuery.data.roles.map((roleResult) => {
+                        const active = (selectedRoleRowIndex ?? projectTeamQuery.data.roles[0]?.row_index) === roleResult.row_index;
+                        const dotColor =
+                          roleResult.status === "assigned" ? "bg-emerald-500" :
+                          roleResult.status === "hire_signal" ? "bg-red-500" : "bg-amber-500";
+                        return (
+                          <button
+                            key={roleResult.row_index}
+                            onClick={() => setSelectedRoleRowIndex(roleResult.row_index)}
+                            className={cn(
+                              "flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border whitespace-nowrap transition flex-shrink-0",
+                              active ? "bg-primary text-white border-primary" : "bg-white text-gray-600 border-gray-200 hover:border-primary hover:text-primary"
+                            )}
+                          >
+                            <span className={cn("w-1.5 h-1.5 rounded-full flex-shrink-0", active ? "bg-white" : dotColor)} />
+                            {roleResult.pipeline_row?.resources_requested ?? "Role"}
+                            <span className={active ? "text-white/70" : "text-gray-400"}>{roleResult.requested_pct}%</span>
+                            {roleResult.assigned && (
+                              <span className={active ? "text-white/70" : "text-gray-400"}>· {roleResult.assigned.employee_id}</span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-gray-400">
+                      Click a role below to expand its full recommendation — collapsed roles haven&apos;t loaded yet, so opening a deal doesn&apos;t fire every role&apos;s scoring at once.
+                    </p>
+                  )}
+                </div>
+
+                {projectRoleViewMode === "tabs" ? (
+                  (() => {
+                    const activeRowIndex = selectedRoleRowIndex ?? projectTeamQuery.data.roles[0]?.row_index ?? null;
+                    if (activeRowIndex === null) return null;
+                    return (
+                      <RoleRecommendationDetail
+                        key={activeRowIndex}
+                        rowIndex={activeRowIndex}
+                        includeParams={includeParams}
+                        setIncludeParams={setIncludeParams}
+                        includeBelowCapacity={includeBelowCapacity}
+                        setIncludeBelowCapacity={setIncludeBelowCapacity}
+                        onOpenProfile={(employeeId, tab, skillMatchContext) => setOpenProfile({ employeeId, tab, skillMatchContext })}
+                        onSelectSibling={setSelectedRoleRowIndex}
+                      />
+                    );
+                  })()
+                ) : (
+                  <div className="space-y-2.5">
+                    {projectTeamQuery.data.roles.map((roleResult) => {
+                      const isOpen = expandedAllRoles.has(roleResult.row_index);
+                      const dotColor =
+                        roleResult.status === "assigned" ? "bg-emerald-500" :
+                        roleResult.status === "hire_signal" ? "bg-red-500" : "bg-amber-500";
+                      return (
+                        <div key={roleResult.row_index} className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+                          <button
+                            onClick={() =>
+                              setExpandedAllRoles((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(roleResult.row_index)) next.delete(roleResult.row_index);
+                                else next.add(roleResult.row_index);
+                                return next;
+                              })
+                            }
+                            className="w-full flex items-center gap-2 px-4 py-2.5 text-left hover:bg-gray-50 transition"
+                          >
+                            <span className={cn("w-2 h-2 rounded-full flex-shrink-0", dotColor)} />
+                            <span className="text-sm font-semibold text-gray-800">{roleResult.pipeline_row?.resources_requested ?? "Role"}</span>
+                            <span className="text-xs text-gray-400">{roleResult.requested_pct}%</span>
+                            {roleResult.assigned && (
+                              <span className="text-xs text-gray-500">Recommended: {roleResult.assigned.employee_id} · {Math.round(roleResult.assigned.composite_score * 100)}% match</span>
+                            )}
+                            {roleResult.status === "hire_signal" && <Badge variant="gap">hire signal</Badge>}
+                            {roleResult.status === "conflict" && <Badge variant="amber">conflict</Badge>}
+                            <ChevronDown className={cn("w-3.5 h-3.5 text-gray-400 transition-transform ml-auto flex-shrink-0", isOpen && "rotate-180")} />
+                          </button>
+                          {isOpen && (
+                            <div className="border-t border-gray-100 p-3.5">
+                              <RoleRecommendationDetail
+                                key={roleResult.row_index}
+                                rowIndex={roleResult.row_index}
+                                includeParams={includeParams}
+                                setIncludeParams={setIncludeParams}
+                                includeBelowCapacity={includeBelowCapacity}
+                                setIncludeBelowCapacity={setIncludeBelowCapacity}
+                                onOpenProfile={(employeeId, tab, skillMatchContext) => setOpenProfile({ employeeId, tab, skillMatchContext })}
+                                onSelectSibling={(ri) => {
+                                  setExpandedAllRoles((prev) => new Set(prev).add(ri));
+                                }}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             ) : null}
           </div>
@@ -896,255 +952,21 @@ function RecommendationsPageInner() {
         </div>
         )}
 
-        <div>
+        <div className="min-w-0">
           {selectedRow === null ? (
             <div className="h-64 flex items-center justify-center text-gray-300 text-sm">Select a pipeline demand row to see ranked candidates</div>
-          ) : recommendation.isLoading ? (
-            <div className="space-y-4">
-              <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
-                <Skeleton className="h-4 w-56" />
-                <Skeleton className="h-3 w-40" />
-                <FieldGridSkeleton count={6} className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 border-t border-gray-100 pt-3" />
-              </div>
-              <div className="space-y-2.5">
-                {Array.from({ length: 4 }).map((_, i) => (
-                  <CandidateCardSkeleton key={i} />
-                ))}
-              </div>
-            </div>
-          ) : recommendation.error ? (
-            <ErrorState message="Could not compute recommendations." />
-          ) : recommendation.data ? (
-            <div className="space-y-4">
-              {selected && (
-                <DecisionHeader
-                  selected={selected}
-                  dealComposition={recommendation.data.deal_composition}
-                  skillsetText={recommendation.data.request.skillset_text}
-                  requiredPhrases={recommendation.data.request.required_phrases}
-                  hireFlag={recommendation.data.hire_vs_redeploy_flag}
-                  hasSkillset={recommendation.data.has_skillset}
-                  topCandidate={topCandidate}
-                  dealDetailsOpen={dealDetailsOpen}
-                  onToggleDealDetails={() => setDealDetailsOpen((v) => !v)}
-                  onSelectSibling={handleSelectRow}
-                  semanticMatchResult={selectedRow !== null ? semanticMatchByRow[selectedRow] : undefined}
-                  semanticMatchPending={semanticMatchMutation.isPending}
-                  semanticMatchError={semanticMatchMutation.isError}
-                  onAskSemanticMatch={() => {
-                    if (selectedRow === null) return;
-                    semanticMatchMutation.mutate(selectedRow, {
-                      onSuccess: (data) => setSemanticMatchByRow((prev) => ({ ...prev, [selectedRow]: data })),
-                    });
-                  }}
-                  onOpenProfile={(employeeId, tab, skillMatchContext) => setOpenProfile({ employeeId, tab, skillMatchContext })}
-                />
-              )}
-
-              <OtherOptionsAccordion
-                fallback={recommendation.data.fallback_candidates ?? undefined}
-                bestFitIfDelayed={recommendation.data.best_fit_if_delayed}
-                open={otherOptionsOpen}
-                onToggle={() => setOtherOptionsOpen((v) => !v)}
-                onOpenProfile={(employeeId, tab) => setOpenProfile({ employeeId, tab })}
-              />
-
-              {recommendation.data.candidates.length > 0 && (
-                <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-xs font-semibold text-gray-700">
-                      Candidates ({filteredCandidates.length}/{recommendation.data.candidates.length} shown)
-                    </p>
-                    <div className="flex items-center gap-2">
-                      {hasActiveCandidateFilters && (
-                        <button onClick={clearCandidateFilters} className="text-[11px] text-primary hover:underline whitespace-nowrap">
-                          Clear filters
-                        </button>
-                      )}
-                      <button
-                        onClick={() => setCandidateFiltersOpen((v) => !v)}
-                        className={cn(
-                          "flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg border whitespace-nowrap transition",
-                          candidateFiltersOpen || candidateFilterCount > 0
-                            ? "border-primary/40 text-primary bg-primary/5"
-                            : "border-gray-200 text-gray-500"
-                        )}
-                      >
-                        <SlidersHorizontal className="w-3 h-3" />
-                        Filters{candidateFilterCount > 0 && ` (${candidateFilterCount})`}
-                        <ChevronDown className={cn("w-3 h-3 transition-transform", candidateFiltersOpen && "rotate-180")} />
-                      </button>
-                    </div>
-                  </div>
-                  <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <p className="text-[11px] text-gray-400">
-                      Showing top {recommendation.data.candidates.length} of {recommendation.data.candidate_pool_size} viable candidates
-                      {" "}({recommendation.data.total_employees_considered} employees scored
-                      {recommendation.data.has_skillset && (() => {
-                        const observed = recommendation.data.observed_skill_match_count ?? recommendation.data.genuine_skill_match_count ?? 0;
-                        const inferred = recommendation.data.inferred_skill_match_count ?? 0;
-                        const semantic = recommendation.data.semantic_only_match_count ?? 0;
-                        const parts: string[] = [];
-                        if (observed > 0) parts.push(`${observed} with observed skills`);
-                        if (inferred > 0) parts.push(`${inferred} inferred`);
-                        if (semantic > 0) parts.push(`${semantic} AI-matched`);
-                        if (parts.length > 0) return `, ${parts.join(" · ")}`;
-                        return ", no skill overlap found";
-                      })()})
-                    </p>
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[11px] text-gray-500 whitespace-nowrap">Show top</span>
-                      <input
-                        type="number"
-                        min={1}
-                        max={2000}
-                        value={topNInput}
-                        onChange={(e) => setTopNInput(e.target.value)}
-                        onBlur={() => {
-                          const parsed = Math.max(1, Math.min(2000, Number(topNInput) || 15));
-                          setTopN(parsed);
-                          setTopNInput(String(parsed));
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-                        }}
-                        className="w-16 text-[11px] px-1.5 py-1 rounded-lg border border-gray-200 outline-none focus:border-gray-300"
-                      />
-                      {[15, 25, 50].map((n) => (
-                        <button
-                          key={n}
-                          onClick={() => {
-                            setTopN(n);
-                            setTopNInput(String(n));
-                          }}
-                          className={cn(
-                            "text-[11px] px-2 py-1 rounded-lg border whitespace-nowrap transition",
-                            topN === n ? "bg-primary/10 border-primary text-primary" : "border-gray-200 text-gray-500"
-                          )}
-                        >
-                          {n}
-                        </button>
-                      ))}
-                      <button
-                        onClick={() => {
-                          const all = recommendation.data!.candidate_pool_size;
-                          setTopN(all);
-                          setTopNInput(String(all));
-                        }}
-                        className={cn(
-                          "text-[11px] px-2 py-1 rounded-lg border whitespace-nowrap transition",
-                          topN === recommendation.data.candidate_pool_size
-                            ? "bg-primary/10 border-primary text-primary"
-                            : "border-gray-200 text-gray-500"
-                        )}
-                      >
-                        Everyone
-                      </button>
-                    </div>
-                  </div>
-                  <input
-                    value={candidateSearch}
-                    onChange={(e) => setCandidateSearch(e.target.value)}
-                    placeholder="Search employee ID, role, or skill…"
-                    className="w-full text-xs px-2.5 py-1.5 rounded-lg border border-gray-200 outline-none focus:border-gray-300"
-                  />
-                  {candidateFiltersOpen && (
-                    <div className="rounded-lg border border-gray-100 bg-gray-50/70 p-2.5 space-y-2.5">
-                      <div>
-                        <label className="text-[10px] text-gray-400 block mb-1">Signal</label>
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          {([
-                            ["all", "All"],
-                            ["redeploy", "Redeploy"],
-                            ["training", "Needs training"],
-                            ["hire", "Hire signal"],
-                            ["not_assessed", "Not assessed"],
-                          ] as [CandidateSignalFilter, string][]).map(([value, label]) => (
-                            <button
-                              key={value}
-                              onClick={() => setCandidateSignal(value)}
-                              className={cn(
-                                "text-[11px] px-2 py-1 rounded-lg border transition bg-white",
-                                candidateSignal === value ? "bg-primary/10 border-primary text-primary" : "border-gray-200 text-gray-500"
-                              )}
-                            >
-                              {label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                        <FilterSelect label="Designation" value={candidateDesignation} onChange={setCandidateDesignation}>
-                          <option value="all">All</option>
-                          {designationOptions.map((d) => (
-                            <option key={d} value={d}>{d}</option>
-                          ))}
-                        </FilterSelect>
-                        <FilterSelect label="CoE" value={candidateCoe} onChange={setCandidateCoe}>
-                          <option value="all">All</option>
-                          {coeOptions.map((c) => (
-                            <option key={c} value={c}>{c}</option>
-                          ))}
-                          {candidatesWithUnknownCoe && <option value={UNKNOWN_COE}>Not determined</option>}
-                        </FilterSelect>
-                        <FilterSelect
-                          label="Skill data"
-                          value={candidateSkillData}
-                          onChange={(v) => setCandidateSkillData(v as SkillDataFilter)}
-                        >
-                          <option value="all">All</option>
-                          {(Object.entries(SKILL_DATA_LABEL) as [Exclude<SkillDataFilter, "all">, string][]).map(([value, label]) => (
-                            <option key={value} value={value}>{label}</option>
-                          ))}
-                        </FilterSelect>
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                        <RangeFilter label="Min skill" value={minSkill} onChange={setMinSkill} max={100} step={10} suffix="%" />
-                        <RangeFilter label="Min competency" value={minCompetency} onChange={setMinCompetency} max={100} step={10} suffix="%" />
-                        <RangeFilter label="Min available" value={minAvailable} onChange={setMinAvailable} max={100} step={10} suffix="%" />
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <label className="flex items-center gap-1.5 text-[11px] text-gray-500 whitespace-nowrap">
-                          <input type="checkbox" checked={meetsCapacityOnly} onChange={(e) => setMeetsCapacityOnly(e.target.checked)} />
-                          Meets capacity
-                        </label>
-                        <select
-                          value={candidateSort}
-                          onChange={(e) => setCandidateSort(e.target.value as CandidateSort)}
-                          className="flex-1 text-[11px] px-1.5 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-600"
-                        >
-                          <option value="composite">Sort: best match</option>
-                          <option value="skill">Sort: skill match</option>
-                          <option value="competency">Sort: competency</option>
-                          <option value="available">Sort: availability</option>
-                        </select>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              <div className="space-y-1.5">
-                {filteredCandidates.map((c, i) => (
-                  <CandidateRow
-                    key={c.employee_id}
-                    candidate={c}
-                    rank={i + 1}
-                    isTopPick={topCandidate?.employee_id === c.employee_id}
-                    isExpanded={expandedCandidateId === c.employee_id}
-                    onToggleExpand={() => setExpandedCandidateId((prev) => (prev === c.employee_id ? null : c.employee_id))}
-                    onOpenProfile={(tab, skillMatchContext) => setOpenProfile({ employeeId: c.employee_id, tab, skillMatchContext })}
-                  />
-                ))}
-                {recommendation.data.candidates.length === 0 && (
-                  <p className="text-sm text-gray-400 italic">No candidates with available capacity were found.</p>
-                )}
-                {recommendation.data.candidates.length > 0 && filteredCandidates.length === 0 && (
-                  <p className="text-sm text-gray-400 italic">No candidates match the current filters.</p>
-                )}
-              </div>
-            </div>
-          ) : null}
+          ) : (
+            <RoleRecommendationDetail
+              key={selectedRow}
+              rowIndex={selectedRow}
+              includeParams={includeParams}
+              setIncludeParams={setIncludeParams}
+              includeBelowCapacity={includeBelowCapacity}
+              setIncludeBelowCapacity={setIncludeBelowCapacity}
+              onOpenProfile={(employeeId, tab, skillMatchContext) => setOpenProfile({ employeeId, tab, skillMatchContext })}
+              onSelectSibling={handleSelectRow}
+            />
+          )}
         </div>
       </div>
       )}
@@ -1247,7 +1069,15 @@ interface CandidateFilterOptions {
   minCompetency: number;
   minAvailable: number;
   meetsCapacityOnly: boolean;
+  minRelevantProjects: number;
+  relevantExperienceOnly: boolean;
   sort: CandidateSort;
+  // Whether "skill" is currently a selected ranking parameter (Advanced Filters).
+  // Bucket/confidence are skill-derived, so they must only drive the default
+  // sort priority when skill is actually included -- otherwise unchecking
+  // "Skill match" would silently have no effect on ordering. Defaults true to
+  // match the platform default (skill included).
+  includeSkill?: boolean;
 }
 
 function filterAndSortCandidates(candidates: RecommendationCandidate[], opts: CandidateFilterOptions): RecommendationCandidate[] {
@@ -1282,6 +1112,8 @@ function filterAndSortCandidates(candidates: RecommendationCandidate[], opts: Ca
   if (opts.minCompetency > 0) result = result.filter((c) => c.competency_score >= opts.minCompetency / 100);
   if (opts.minAvailable > 0) result = result.filter((c) => c.available_pct >= opts.minAvailable);
   if (opts.meetsCapacityOnly) result = result.filter((c) => c.meets_requested_capacity);
+  if (opts.minRelevantProjects > 0) result = result.filter((c) => c.relevant_project_count >= opts.minRelevantProjects);
+  if (opts.relevantExperienceOnly) result = result.filter((c) => c.relevant_project_count > 0);
 
   const BUCKET_RANK: Record<string, number> = { eligible: 3, trainable: 2, gap: 1, not_assessed: 0 };
   const CONF_RANK: Record<string, number> = { observed: 2, imputed: 1, semantic_match: 1, no_match: 0, no_requirement: 0 };
@@ -1290,16 +1122,25 @@ function filterAndSortCandidates(candidates: RecommendationCandidate[], opts: Ca
   switch (opts.sort) {
     case "composite":
       // Mirror the backend sort: bucket first (eligible > trainable > gap), then
-      // confidence tier (observed > imputed), then composite. This keeps the "Top pick"
-      // candidate (trainable with real skills) at visual #1 instead of being pushed down
-      // by a gap/hire-signal candidate who has a higher composite only because of
-      // unrelated competency or availability.
+      // confidence tier (observed > imputed), then composite -- but ONLY when
+      // skill is actually a selected ranking parameter (both are skill-derived).
+      // If the RM excluded skill via Advanced Filters, ordering falls back to
+      // pure composite_score so that exclusion isn't silently a no-op.
       sorted.sort((a, b) => {
-        const bucketDiff = (BUCKET_RANK[b.bucket] ?? 0) - (BUCKET_RANK[a.bucket] ?? 0);
-        if (bucketDiff !== 0) return bucketDiff;
-        const confDiff = (CONF_RANK[b.skill_confidence] ?? 0) - (CONF_RANK[a.skill_confidence] ?? 0);
-        if (confDiff !== 0) return confDiff;
-        return b.composite_score - a.composite_score;
+        if (opts.includeSkill !== false) {
+          const bucketDiff = (BUCKET_RANK[b.bucket] ?? 0) - (BUCKET_RANK[a.bucket] ?? 0);
+          if (bucketDiff !== 0) return bucketDiff;
+          const confDiff = (CONF_RANK[b.skill_confidence] ?? 0) - (CONF_RANK[a.skill_confidence] ?? 0);
+          if (confDiff !== 0) return confDiff;
+        }
+        const compositeDiff = b.composite_score - a.composite_score;
+        if (compositeDiff !== 0) return compositeDiff;
+        // Tie-break on track record — mirrors the backend sort (recommendation_service.py):
+        // a candidate with more (and more concentrated) relevant project history wins
+        // when everything else is equal.
+        const relevantDiff = b.relevant_project_count - a.relevant_project_count;
+        if (relevantDiff !== 0) return relevantDiff;
+        return b.relevant_project_ratio - a.relevant_project_ratio;
       });
       break;
     case "skill":
@@ -1310,6 +1151,9 @@ function filterAndSortCandidates(candidates: RecommendationCandidate[], opts: Ca
       break;
     case "available":
       sorted.sort((a, b) => b.available_pct - a.available_pct);
+      break;
+    case "experience":
+      sorted.sort((a, b) => b.relevant_project_count - a.relevant_project_count || b.relevant_project_ratio - a.relevant_project_ratio);
       break;
   }
   return sorted;
@@ -1384,445 +1228,157 @@ function filterAndSortDeals(deals: DealSummary[], opts: DealFilterOptions): Deal
   return sorted;
 }
 
-const STATUS_COLOR: Record<string, string> = {
-  assigned: "bg-emerald-50 border-emerald-200",
-  hire_signal: "bg-red-50 border-red-200",
-  conflict: "bg-amber-50 border-amber-200",
-};
+function isNonDefaultParams(include: IncludeParams): boolean {
+  return (Object.keys(DEFAULT_INCLUDE_PARAMS) as (keyof IncludeParams)[]).some((k) => include[k] !== DEFAULT_INCLUDE_PARAMS[k]);
+}
 
-function ProjectRoleSection({
-  roleResult,
-  onOpenProfile,
+function AdvancedFiltersButton({
+  open, include, includeBelowCapacity, onClick,
 }: {
-  roleResult: TeamRoleResult;
-  onOpenProfile: (employeeId: string, tab: ProfileTab, skillMatchContext?: SkillMatchContext) => void;
+  open: boolean; include: IncludeParams; includeBelowCapacity?: boolean; onClick: () => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
-  const [candidateSearch, setCandidateSearch] = useState("");
-  const [candidateSignal, setCandidateSignal] = useState<CandidateSignalFilter>("all");
-  const [candidateDesignation, setCandidateDesignation] = useState("all");
-  const [candidateCoe, setCandidateCoe] = useState("all");
-  const [candidateSkillData, setCandidateSkillData] = useState<SkillDataFilter>("all");
-  const [minSkill, setMinSkill] = useState(0);
-  const [minCompetency, setMinCompetency] = useState(0);
-  const [minAvailable, setMinAvailable] = useState(0);
-  const [meetsCapacityOnly, setMeetsCapacityOnly] = useState(false);
-  const [candidateSort, setCandidateSort] = useState<CandidateSort>("composite");
-  const [filtersOpen, setFiltersOpen] = useState(false);
-  const [expandedCandidateId, setExpandedCandidateId] = useState<string | null>(null);
-  const [altExpanded, setAltExpanded] = useState(false);
-  const [expandedAltId, setExpandedAltId] = useState<string | null>(null);
-  const [displayN, setDisplayN] = useState(15);
+  const activeCount = Object.values(include).filter(Boolean).length;
+  const nonDefault = isNonDefaultParams(include) || !!includeBelowCapacity;
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        "flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg border-2 whitespace-nowrap transition",
+        open || nonDefault ? "border-amber-400 text-amber-700 bg-amber-50" : "border-amber-300 text-amber-600"
+      )}
+      title="Choose exactly which parameters (skill, competency, availability, category match, project count) shape the ranking"
+    >
+      <SlidersHorizontal className="w-3 h-3" />
+      Advanced{nonDefault && ` (${activeCount}/5${includeBelowCapacity ? "+pool" : ""})`}
+      <ChevronDown className={cn("w-3 h-3 transition-transform", open && "rotate-180")} />
+    </button>
+  );
+}
 
-  const pr = roleResult.pipeline_row;
-  const designationOptions = buildNormalizedOptions(roleResult.candidates.map((c) => c.job_name));
-  const coeOptions = buildNormalizedOptions(roleResult.candidates.map((c) => c.coe));
-  const candidatesWithUnknownCoe = roleResult.candidates.some((c) => !c.coe);
+interface AdvancedParamDef {
+  key: keyof IncludeParams;
+  label: string;
+  weightPct: number; // base weight this parameter contributes when checked -- see BASE_WEIGHTS in scoring.py. Selected subset is renormalized to sum to 100%.
+  description: string;
+}
 
-  const allFiltered = filterAndSortCandidates(roleResult.candidates, {
-    search: candidateSearch,
-    signal: candidateSignal,
-    designation: candidateDesignation,
-    coe: candidateCoe,
-    skillData: candidateSkillData,
-    minSkill,
-    minCompetency,
-    minAvailable,
-    meetsCapacityOnly,
-    sort: candidateSort,
-  });
-  const filteredCandidates = allFiltered.slice(0, displayN);
+// One entry per independently-selectable ranking parameter, all 5 editable --
+// nothing is hard-locked "always on". Extensible by design -- adding a new
+// parameter later is just another entry here, a matching field on
+// RecommendationCandidate, and a matching key on IncludeParams/BASE_WEIGHTS.
+const ADVANCED_PARAMS: AdvancedParamDef[] = [
+  { key: "skill", label: "Skill match", weightPct: 50, description: "How well the employee's skill records match the requested skillset." },
+  { key: "competency", label: "Competency", weightPct: 30, description: "Employee's overall competency assessment score." },
+  { key: "availability", label: "Availability", weightPct: 20, description: "How much of the requested allocation percentage the employee has free." },
+  { key: "category_match", label: "COE / Proposition category match", weightPct: 15, description: "Past projects matching this deal's proposition category (e.g. Data Advisory, Pricing) — a specialist with 4/4 matching projects can outrank a generalist with 1/4." },
+  { key: "project_count", label: "Number of projects completed", weightPct: 15, description: "Overall completed/active project experience (breadth/seniority), regardless of category — capped at 20+ projects." },
+];
 
-  const hasActiveFilters =
-    candidateSearch !== "" ||
-    candidateSignal !== "all" ||
-    candidateDesignation !== "all" ||
-    candidateCoe !== "all" ||
-    candidateSkillData !== "all" ||
-    minSkill > 0 || minCompetency > 0 || minAvailable > 0 ||
-    meetsCapacityOnly;
-  const filterCount = [
-    candidateSignal !== "all", candidateDesignation !== "all", candidateCoe !== "all",
-    candidateSkillData !== "all", minSkill > 0, minCompetency > 0, minAvailable > 0, meetsCapacityOnly,
-  ].filter(Boolean).length;
+// Inline dropdown, not a modal -- opens/closes exactly like the Filters panel.
+// Each parameter is its own checkbox; any combination can be applied, including
+// turning off any of the 3 defaults. At least one must stay checked (enforced
+// below) since a fully-empty selection has nothing to rank by. Checking a box
+// only stages a draft choice; nothing re-ranks until "Apply" is clicked.
+function AdvancedFiltersPanel({
+  include,
+  onApply,
+  includeBelowCapacity,
+  onApplyBelowCapacity,
+}: {
+  include: IncludeParams;
+  onApply: (v: IncludeParams) => void;
+  // Optional: the "candidate pool" gate (separate from ranking weights above).
+  // Only the By-Role view wires this in today.
+  includeBelowCapacity?: boolean;
+  onApplyBelowCapacity?: (v: boolean) => void;
+}) {
+  const [draft, setDraft] = useState<IncludeParams>(include);
+  const [draftBelowCapacity, setDraftBelowCapacity] = useState(includeBelowCapacity ?? false);
+  // Stay in sync if applied state changes from outside (e.g. a row/deal change
+  // resets it) so the draft never silently disagrees with reality.
+  useEffect(() => {
+    setDraft(include);
+  }, [include]);
+  useEffect(() => {
+    setDraftBelowCapacity(includeBelowCapacity ?? false);
+  }, [includeBelowCapacity]);
 
-  const clearFilters = () => {
-    setCandidateSearch("");
-    setCandidateSignal("all");
-    setCandidateDesignation("all");
-    setCandidateCoe("all");
-    setCandidateSkillData("all");
-    setMinSkill(0); setMinCompetency(0); setMinAvailable(0);
-    setMeetsCapacityOnly(false);
+  const draftCount = Object.values(draft).filter(Boolean).length;
+  const isDirty = ADVANCED_PARAMS.some((p) => draft[p.key] !== include[p.key]) || draftBelowCapacity !== (includeBelowCapacity ?? false);
+  const appliedLabels = ADVANCED_PARAMS.filter((p) => include[p.key]).map((p) => p.label);
+  const totalWeight = ADVANCED_PARAMS.filter((p) => draft[p.key]).reduce((sum, p) => sum + p.weightPct, 0);
+
+  const toggle = (key: keyof IncludeParams, checked: boolean) => {
+    // Refuse to uncheck the last remaining parameter -- nothing left to rank by.
+    if (!checked && draftCount <= 1) return;
+    setDraft((prev) => ({ ...prev, [key]: checked }));
+  };
+
+  const apply = () => {
+    onApply(draft);
+    if (onApplyBelowCapacity) onApplyBelowCapacity(draftBelowCapacity);
   };
 
   return (
-    <div className={cn("rounded-xl border bg-white overflow-hidden", STATUS_COLOR[roleResult.status] ?? "border-gray-200")}>
-      {/* Role header */}
-      <div className="px-4 py-3 space-y-2">
-        <div className="flex items-start justify-between gap-3 flex-wrap">
-          <div>
-            <p className="text-sm font-semibold text-gray-800">
-              {pr?.resources_requested ?? "Role TBD"}
-              {pr?.requested_pct && <span className="text-gray-400 font-normal"> · {pr.requested_pct}%</span>}
-            </p>
-            <p className="text-[11px] text-gray-400 mt-0.5">
-              {pr?.likely_start_date && `Start ${pr.likely_start_date}`}
-              {pr?.solution && ` · ${pr.solution.slice(0, 60)}${(pr.solution?.length ?? 0) > 60 ? "…" : ""}`}
-            </p>
-          </div>
-          <div className="flex items-center gap-1.5">
-            {pr?.status && <Badge variant="default">{pr.status}</Badge>}
-            {pr?.priority && <Badge variant="default">{pr.priority}</Badge>}
-          </div>
-        </div>
-
-        {/* Assignment result — inline proof, always visible */}
-        {roleResult.status === "assigned" && roleResult.assigned && (() => {
-          const a = roleResult.assigned;
-          const isGradeOnly = a.match_tier === "same_grade_fallback" || a.match_tier === "adjacent_level_fallback";
-          return (
-            <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2.5 space-y-1.5">
-              {/* Identity + match score */}
-              <div className="flex items-center gap-2 flex-wrap">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-                <span className="text-sm font-semibold text-emerald-800">{a.employee_id}</span>
-                <span className="text-xs text-emerald-700">{a.job_name ?? "—"}</span>
-                {a.coe && (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-white border border-violet-200 text-violet-600 whitespace-nowrap flex-shrink-0">
-                    {a.coe}
-                  </span>
-                )}
-                <Badge variant={a.bucket}>{SIGNAL_LABEL[a.bucket]}</Badge>
-                <span className="ml-auto text-xs font-semibold text-emerald-700 whitespace-nowrap flex-shrink-0">
-                  {Math.round(a.composite_score * 100)}% match
-                </span>
-              </div>
-
-              {/* Clickable proof scores */}
-              <div className="flex items-center gap-1.5 pl-6 flex-wrap">
-                <button
-                  onClick={() => onOpenProfile(a.employee_id, "skills", { matchedSkills: a.matched_skills, missingSkills: a.missing_skills })}
-                  className="text-[11px] text-emerald-600 hover:text-emerald-800 hover:underline transition whitespace-nowrap"
-                  title="Click to see full skill proof"
-                >
-                  {Math.round(a.skill_score * 100)}% skill ↗
-                </button>
-                <span className="text-emerald-300 text-[11px]">·</span>
-                <button
-                  onClick={() => onOpenProfile(a.employee_id, "competency")}
-                  className="text-[11px] text-emerald-600 hover:text-emerald-800 hover:underline transition whitespace-nowrap"
-                  title="Click to see competency records"
-                >
-                  {Math.round(a.competency_score * 100)}% comp ↗
-                </button>
-                <span className="text-emerald-300 text-[11px]">·</span>
-                <button
-                  onClick={() => onOpenProfile(a.employee_id, "allocations")}
-                  className="text-[11px] text-emerald-600 hover:text-emerald-800 hover:underline transition whitespace-nowrap"
-                  title="Click to see current allocations"
-                >
-                  {a.available_pct}% avail ↗
-                </button>
-                <button
-                  onClick={() => onOpenProfile(a.employee_id, "overview")}
-                  className="ml-auto text-xs font-medium px-2.5 py-1 rounded-lg border border-emerald-300 bg-white text-emerald-700 hover:bg-emerald-50 transition whitespace-nowrap flex-shrink-0"
-                >
-                  View profile
-                </button>
-              </div>
-
-              {/* Matched skills inline */}
-              {a.matched_skills.length > 0 && (
-                <div className="flex items-start gap-1.5 pl-6">
-                  <CheckCircle2 className="w-3 h-3 text-emerald-500 flex-shrink-0 mt-0.5" />
-                  <span className="text-[11px] text-emerald-700/80 leading-relaxed">{a.matched_skills.join(", ")}</span>
-                </div>
-              )}
-              {a.missing_skills.length > 0 && (
-                <div className="flex items-start gap-1.5 pl-6">
-                  <XCircle className="w-3 h-3 text-gray-300 flex-shrink-0 mt-0.5" />
-                  <span className="text-[11px] text-gray-400 leading-relaxed">{a.missing_skills.join(", ")}</span>
-                </div>
-              )}
-
-              {/* Grade-only warning */}
-              {isGradeOnly && (
-                <div className="flex items-start gap-1.5 pl-6">
-                  <AlertTriangle className="w-3 h-3 text-amber-500 flex-shrink-0 mt-0.5" />
-                  <span className="text-[11px] text-amber-700">
-                    Matched by {a.match_tier === "same_grade_fallback" ? "grade / CoE" : "adjacent seniority"} only — no verified skill overlap.
-                    {" "}<button onClick={() => onOpenProfile(a.employee_id, "skills", { matchedSkills: a.matched_skills, missingSkills: a.missing_skills })} className="underline hover:text-amber-900 transition">See skills →</button>
-                  </span>
-                </div>
-              )}
-
-              {/* No skill data case */}
-              {!isGradeOnly && a.matched_skills.length === 0 && a.missing_skills.length === 0 && (
-                <p className="text-[11px] text-gray-400 pl-6 italic">No skillset specified for this role — availability-based match only.</p>
-              )}
-
-              {/* Earliest available if busy now */}
-              {a.earliest_available_date && (
-                <p className="text-[11px] text-blue-500 pl-6">
-                  Busy now · free from <strong>{a.earliest_available_date}</strong>
-                </p>
-              )}
-
-              {/* Data confidence footer */}
-              <p className="text-[10px] text-gray-400 pl-6">
-                skill: {friendlyConfidence(a.skill_confidence)} · competency: {friendlyConfidence(a.competency_confidence)}
-              </p>
-            </div>
-          );
-        })()}
-
-        {roleResult.status === "hire_signal" && (
-          <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 flex items-center gap-2 text-red-700 text-xs">
-            <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
-            <span>No strong internal fit — <strong>hire signal</strong>. No internal candidate meets the skill requirements.</span>
-          </div>
-        )}
-        {roleResult.status === "conflict" && (
-          <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 flex items-center gap-2 text-amber-700 text-xs">
-            <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
-            <span><strong>Capacity conflict</strong> — all suitable candidates are already assigned to sibling roles in this deal.</span>
-          </div>
-        )}
-
-        {/* Alternatives — inline proof per candidate */}
-        {roleResult.alternatives.length > 0 && (
-          <div>
-            <button
-              onClick={() => setAltExpanded((v) => !v)}
-              className="flex items-center gap-1 text-[11px] text-gray-500 hover:text-primary transition"
-            >
-              {roleResult.alternatives.length} alternative{roleResult.alternatives.length > 1 ? "s" : ""} available
-              <ChevronDown className={cn("w-3 h-3 transition-transform", altExpanded && "rotate-180")} />
-            </button>
-            {altExpanded && (
-              <div className="mt-1.5 space-y-1">
-                {roleResult.alternatives.map((c) => {
-                  const isAltExpanded = expandedAltId === c.employee_id;
-                  const isAltGradeOnly = c.match_tier === "same_grade_fallback" || c.match_tier === "adjacent_level_fallback";
-                  return (
-                    <div key={c.employee_id} className="rounded-lg border border-gray-200 bg-gray-50 overflow-hidden">
-                      <button
-                        onClick={() => setExpandedAltId((prev) => (prev === c.employee_id ? null : c.employee_id))}
-                        className="flex items-center gap-2 w-full text-left text-xs px-2.5 py-1.5 hover:bg-gray-100/80 transition flex-wrap"
-                      >
-                        <span className="font-medium text-gray-800">{c.employee_id}</span>
-                        <span className="text-gray-400 truncate">{c.job_name}</span>
-                        {c.coe && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-violet-50 border border-violet-200 text-violet-600 flex-shrink-0">{c.coe}</span>}
-                        <Badge variant={c.bucket}>{SIGNAL_LABEL[c.bucket]}</Badge>
-                        {isAltGradeOnly && <span className="text-[10px] px-1 py-0.5 rounded bg-amber-50 border border-amber-200 text-amber-600 whitespace-nowrap">grade only</span>}
-                        <span className="ml-auto flex items-center gap-1.5 text-gray-500 whitespace-nowrap flex-shrink-0">
-                          <span>{Math.round(c.composite_score * 100)}% match</span>
-                          <ChevronDown className={cn("w-3 h-3 transition-transform", isAltExpanded && "rotate-180")} />
-                        </span>
-                      </button>
-                      {isAltExpanded && (
-                        <div className="border-t border-gray-200 bg-white px-2.5 py-2.5 space-y-1.5">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <button onClick={() => onOpenProfile(c.employee_id, "skills", { matchedSkills: c.matched_skills, missingSkills: c.missing_skills })}
-                              className="text-[11px] text-primary hover:underline transition whitespace-nowrap">
-                              {Math.round(c.skill_score * 100)}% skill ↗
-                            </button>
-                            <span className="text-gray-300 text-[11px]">·</span>
-                            <button onClick={() => onOpenProfile(c.employee_id, "competency")}
-                              className="text-[11px] text-primary hover:underline transition whitespace-nowrap">
-                              {Math.round(c.competency_score * 100)}% comp ↗
-                            </button>
-                            <span className="text-gray-300 text-[11px]">·</span>
-                            <button onClick={() => onOpenProfile(c.employee_id, "allocations")}
-                              className="text-[11px] text-primary hover:underline transition whitespace-nowrap">
-                              {c.available_pct}% avail ↗
-                            </button>
-                          </div>
-                          {c.matched_skills.length > 0 && (
-                            <div className="flex items-start gap-1.5">
-                              <CheckCircle2 className="w-3 h-3 text-emerald-500 flex-shrink-0 mt-0.5" />
-                              <span className="text-[11px] text-gray-600">{c.matched_skills.join(", ")}</span>
-                            </div>
-                          )}
-                          {c.missing_skills.length > 0 && (
-                            <div className="flex items-start gap-1.5">
-                              <XCircle className="w-3 h-3 text-gray-300 flex-shrink-0 mt-0.5" />
-                              <span className="text-[11px] text-gray-400">{c.missing_skills.join(", ")}</span>
-                            </div>
-                          )}
-                          <p className="text-[10px] text-gray-400">
-                            skill: {friendlyConfidence(c.skill_confidence)} · competency: {friendlyConfidence(c.competency_confidence)}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Full candidate list toggle */}
-      <button
-        onClick={() => setExpanded((v) => !v)}
-        className="w-full flex items-center justify-between px-4 py-2 border-t border-gray-100 text-[11px] font-medium text-gray-500 hover:bg-gray-50 transition"
-      >
-        <span>Full candidate list ({roleResult.candidates.length})</span>
-        <ChevronDown className={cn("w-3 h-3 transition-transform", expanded && "rotate-180")} />
-      </button>
-
-      {expanded && (
-        <div className="border-t border-gray-100 px-3 py-3 space-y-2">
-          {/* Pool info + topN controls */}
-          <div className="flex items-center justify-between gap-2 flex-wrap">
-            <p className="text-[11px] text-gray-400">
-              Showing {filteredCandidates.length}/{allFiltered.length} of {roleResult.candidates.length} fetched candidates
-            </p>
-            <div className="flex items-center gap-1.5">
-              <span className="text-[11px] text-gray-500 whitespace-nowrap">Show top</span>
-              {[15, 25, 50].map((n) => (
-                <button
-                  key={n}
-                  onClick={() => setDisplayN(n)}
-                  className={cn(
-                    "text-[11px] px-2 py-1 rounded-lg border whitespace-nowrap transition",
-                    displayN === n ? "bg-primary/10 border-primary text-primary" : "border-gray-200 text-gray-500"
-                  )}
-                >
-                  {n}
-                </button>
-              ))}
-              <button
-                onClick={() => setDisplayN(roleResult.candidates.length)}
-                className={cn(
-                  "text-[11px] px-2 py-1 rounded-lg border whitespace-nowrap transition",
-                  displayN >= roleResult.candidates.length ? "bg-primary/10 border-primary text-primary" : "border-gray-200 text-gray-500"
-                )}
-              >
-                All ({roleResult.candidates.length})
-              </button>
-            </div>
-          </div>
-
-          {/* Search + filters row */}
-          <div className="flex items-center gap-2">
+    <div className="rounded-lg border border-amber-200 bg-amber-50/40 p-2.5 space-y-3">
+      <div className="space-y-2.5">
+        <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Ranking parameters — select any (at least one)</p>
+        {ADVANCED_PARAMS.map((p) => (
+          <label key={p.key} className={cn("flex items-start gap-2.5", draftCount <= 1 && draft[p.key] ? "cursor-not-allowed opacity-70" : "cursor-pointer")}>
             <input
-              value={candidateSearch}
-              onChange={(e) => setCandidateSearch(e.target.value)}
-              placeholder="Search employee, role, skill…"
-              className="flex-1 text-xs px-2.5 py-1.5 rounded-lg border border-gray-200 outline-none focus:border-gray-300"
+              type="checkbox"
+              className="mt-0.5"
+              checked={draft[p.key]}
+              onChange={(e) => toggle(p.key, e.target.checked)}
             />
-            {hasActiveFilters && (
-              <button onClick={clearFilters} className="text-[11px] text-primary hover:underline whitespace-nowrap">
-                Clear
-              </button>
-            )}
-            <button
-              onClick={() => setFiltersOpen((v) => !v)}
-              className={cn(
-                "flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg border whitespace-nowrap transition",
-                filtersOpen || filterCount > 0
-                  ? "border-primary/40 text-primary bg-primary/5"
-                  : "border-gray-200 text-gray-500"
-              )}
-            >
-              <SlidersHorizontal className="w-3 h-3" />
-              Filters{filterCount > 0 && ` (${filterCount})`}
-              <ChevronDown className={cn("w-3 h-3 transition-transform", filtersOpen && "rotate-180")} />
-            </button>
-          </div>
-
-          {filtersOpen && (
-            <div className="rounded-lg border border-gray-100 bg-gray-50/70 p-2.5 space-y-2.5">
-              <div>
-                <label className="text-[10px] text-gray-400 block mb-1">Signal</label>
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  {([
-                    ["all", "All"],
-                    ["redeploy", "Redeploy"],
-                    ["training", "Needs training"],
-                    ["hire", "Hire signal"],
-                    ["not_assessed", "Not assessed"],
-                  ] as [CandidateSignalFilter, string][]).map(([v, label]) => (
-                    <button
-                      key={v}
-                      onClick={() => setCandidateSignal(v)}
-                      className={cn(
-                        "text-[11px] px-2 py-1 rounded-lg border transition bg-white",
-                        candidateSignal === v ? "bg-primary/10 border-primary text-primary" : "border-gray-200 text-gray-500"
-                      )}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                <FilterSelect label="Designation" value={candidateDesignation} onChange={setCandidateDesignation}>
-                  <option value="all">All</option>
-                  {designationOptions.map((d) => <option key={d} value={d}>{d}</option>)}
-                </FilterSelect>
-                <FilterSelect label="CoE" value={candidateCoe} onChange={setCandidateCoe}>
-                  <option value="all">All</option>
-                  {coeOptions.map((c) => <option key={c} value={c}>{c}</option>)}
-                  {candidatesWithUnknownCoe && <option value={UNKNOWN_COE}>Not determined</option>}
-                </FilterSelect>
-                <FilterSelect label="Skill data" value={candidateSkillData} onChange={(v) => setCandidateSkillData(v as SkillDataFilter)}>
-                  <option value="all">All</option>
-                  {(Object.entries(SKILL_DATA_LABEL) as [Exclude<SkillDataFilter, "all">, string][]).map(([value, label]) => (
-                    <option key={value} value={value}>{label}</option>
-                  ))}
-                </FilterSelect>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <RangeFilter label="Min skill" value={minSkill} onChange={setMinSkill} max={100} step={10} suffix="%" />
-                <RangeFilter label="Min competency" value={minCompetency} onChange={setMinCompetency} max={100} step={10} suffix="%" />
-                <RangeFilter label="Min available" value={minAvailable} onChange={setMinAvailable} max={100} step={10} suffix="%" />
-              </div>
-              <div className="flex items-center gap-2">
-                <label className="flex items-center gap-1.5 text-[11px] text-gray-500 whitespace-nowrap">
-                  <input type="checkbox" checked={meetsCapacityOnly} onChange={(e) => setMeetsCapacityOnly(e.target.checked)} />
-                  Meets capacity
-                </label>
-                <select
-                  value={candidateSort}
-                  onChange={(e) => setCandidateSort(e.target.value as CandidateSort)}
-                  className="flex-1 text-[11px] px-1.5 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-600"
-                >
-                  <option value="composite">Sort: best match</option>
-                  <option value="skill">Sort: skill match</option>
-                  <option value="competency">Sort: competency</option>
-                  <option value="available">Sort: availability</option>
-                </select>
-              </div>
-            </div>
-          )}
-
-          {/* Candidates */}
-          <div className="space-y-1">
-            {filteredCandidates.map((c, i) => (
-              <CandidateRow
-                key={c.employee_id}
-                candidate={c}
-                rank={i + 1}
-                isTopPick={roleResult.assigned?.employee_id === c.employee_id}
-                isExpanded={expandedCandidateId === c.employee_id}
-                onToggleExpand={() => setExpandedCandidateId((prev) => (prev === c.employee_id ? null : c.employee_id))}
-                onOpenProfile={(tab, skillMatchContext) => onOpenProfile(c.employee_id, tab, skillMatchContext)}
-              />
-            ))}
-            {roleResult.candidates.length > 0 && filteredCandidates.length === 0 && (
-              <p className="text-xs text-gray-400 italic text-center py-2">No candidates match the current filters.</p>
-            )}
-            {roleResult.candidates.length === 0 && (
-              <p className="text-xs text-gray-400 italic text-center py-2">No candidates with available capacity were found.</p>
-            )}
-          </div>
+            <span className="flex-1">
+              <span className="text-sm font-medium text-gray-800">{p.label}</span>
+              <span className="text-[10px] text-gray-400 ml-1.5">
+                (base weight {p.weightPct}%{draft[p.key] && totalWeight > 0 ? ` → ${Math.round((p.weightPct / totalWeight) * 100)}% of ranking` : ""})
+              </span>
+              <span className="block text-[11px] text-gray-400 mt-0.5">{p.description}</span>
+            </span>
+          </label>
+        ))}
+      </div>
+      {onApplyBelowCapacity && (
+        <div className="pt-2 border-t border-amber-100">
+          <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Candidate pool — not a ranking weight</p>
+          <label className="flex items-start gap-2.5 cursor-pointer">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={draftBelowCapacity}
+              onChange={(e) => setDraftBelowCapacity(e.target.checked)}
+            />
+            <span className="flex-1">
+              <span className="text-sm font-medium text-gray-800">Include candidates below requested capacity</span>
+              <span className="block text-[11px] text-gray-400 mt-0.5">
+                Off by default: someone who can't actually take the requested % stays out of Candidates no matter which
+                ranking parameters above are selected. Turn this on to see them anyway (e.g. to weigh pulling them off
+                something else) — they'll show with a "below requested %" tag.
+              </span>
+            </span>
+          </label>
         </div>
       )}
+      <div className="flex items-center justify-between pt-2 border-t border-amber-100">
+        <span className="text-[11px] text-gray-400">
+          {isDirty
+            ? "Not applied yet — click Apply to update the ranking"
+            : `Applied: ${appliedLabels.join(", ")}${includeBelowCapacity ? " + below-capacity included" : ""}`}
+        </span>
+        <button
+          onClick={apply}
+          disabled={!isDirty}
+          className={cn(
+            "text-xs font-medium px-4 py-1.5 rounded-lg transition",
+            isDirty ? "bg-primary text-white hover:opacity-90" : "bg-gray-100 text-gray-400 cursor-not-allowed"
+          )}
+        >
+          Apply
+        </button>
+      </div>
     </div>
   );
 }
@@ -1958,6 +1514,391 @@ function SemanticMatchPanel({
           {m.rationale && <p className="text-gray-400 mt-1">{m.rationale}</p>}
         </div>
       ))}
+    </div>
+  );
+}
+
+// Full single-role recommendation view -- identical content/behavior whether
+// reached from the By Role sidebar or a By Project role tab. Mounted with
+// key={rowIndex} at both call sites so switching rows/tabs gives every piece
+// of local filter/expand state a clean reset for free (no manual reset effect
+// needed, unlike the old per-page useEffect this replaced).
+function RoleRecommendationDetail({
+  rowIndex,
+  includeParams,
+  setIncludeParams,
+  includeBelowCapacity,
+  setIncludeBelowCapacity,
+  onOpenProfile,
+  onSelectSibling,
+}: {
+  rowIndex: number;
+  includeParams: IncludeParams;
+  setIncludeParams: (v: IncludeParams) => void;
+  includeBelowCapacity: boolean;
+  setIncludeBelowCapacity: (v: boolean) => void;
+  onOpenProfile: (employeeId: string, tab: ProfileTab, skillMatchContext?: SkillMatchContext) => void;
+  onSelectSibling: (rowIndex: number) => void;
+}) {
+  const [semanticMatchResult, setSemanticMatchResult] = useState<SemanticMatchResult | undefined>(undefined);
+  const semanticMatchMutation = useMutation({ mutationFn: (ri: number) => api.semanticMatch(ri) });
+
+  const [candidateFiltersOpen, setCandidateFiltersOpen] = useState(false);
+  const [candidateSearch, setCandidateSearch] = useState("");
+  const [candidateSignal, setCandidateSignal] = useState<CandidateSignalFilter>("all");
+  const [candidateDesignation, setCandidateDesignation] = useState("all");
+  const [candidateCoe, setCandidateCoe] = useState("all");
+  const [candidateSkillData, setCandidateSkillData] = useState<SkillDataFilter>("all");
+  const [minSkill, setMinSkill] = useState(0);
+  const [minCompetency, setMinCompetency] = useState(0);
+  const [minAvailable, setMinAvailable] = useState(0);
+  const [meetsCapacityOnly, setMeetsCapacityOnly] = useState(false);
+  const [minRelevantProjects, setMinRelevantProjects] = useState(0);
+  const [relevantExperienceOnly, setRelevantExperienceOnly] = useState(false);
+  const [candidateSort, setCandidateSort] = useState<CandidateSort>("composite");
+  const [topN, setTopN] = useState(15);
+  const [topNInput, setTopNInput] = useState("15");
+  const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
+  const [dealDetailsOpen, setDealDetailsOpen] = useState(false);
+  const [expandedCandidateId, setExpandedCandidateId] = useState<string | null>(null);
+
+  const roleMixCoes = useQuery({ queryKey: ["role-mix-coes"], queryFn: api.roleMixCoes });
+  const recommendation = useQuery({
+    queryKey: ["recommendation", rowIndex, topN, includeParams, includeBelowCapacity],
+    queryFn: () => api.recommendationsForPipelineRow(rowIndex, topN, includeParams, includeBelowCapacity),
+  });
+
+  const selected = recommendation.data?.pipeline_row;
+  const topCandidate =
+    recommendation.data && !recommendation.data.hire_vs_redeploy_flag && recommendation.data.has_skillset && recommendation.data.candidates.length > 0
+      ? recommendation.data.candidates[0]
+      : null;
+
+  const designationOptions = buildNormalizedOptions((recommendation.data?.candidates ?? []).map((c) => c.job_name));
+  const coeOptions = (roleMixCoes.data ?? []).map((c) => c.coe).sort();
+  const candidatesWithUnknownCoe = (recommendation.data?.candidates ?? []).some((c) => !c.coe);
+  const filteredCandidates = filterAndSortCandidates(recommendation.data?.candidates ?? [], {
+    search: candidateSearch,
+    signal: candidateSignal,
+    designation: candidateDesignation,
+    coe: candidateCoe,
+    skillData: candidateSkillData,
+    minSkill,
+    minCompetency,
+    minAvailable,
+    meetsCapacityOnly,
+    minRelevantProjects,
+    relevantExperienceOnly,
+    sort: candidateSort,
+    includeSkill: includeParams.skill,
+  });
+  const hasActiveCandidateFilters =
+    candidateSearch !== "" ||
+    candidateSignal !== "all" ||
+    candidateDesignation !== "all" ||
+    candidateCoe !== "all" ||
+    candidateSkillData !== "all" ||
+    minSkill > 0 ||
+    minCompetency > 0 ||
+    minAvailable > 0 ||
+    meetsCapacityOnly ||
+    minRelevantProjects > 0 ||
+    relevantExperienceOnly;
+  const candidateFilterCount = [
+    candidateSignal !== "all",
+    candidateDesignation !== "all",
+    candidateCoe !== "all",
+    candidateSkillData !== "all",
+    minSkill > 0,
+    minCompetency > 0,
+    minAvailable > 0,
+    meetsCapacityOnly,
+    minRelevantProjects > 0,
+    relevantExperienceOnly,
+  ].filter(Boolean).length;
+  const clearCandidateFilters = () => {
+    setCandidateSearch("");
+    setCandidateSignal("all");
+    setCandidateDesignation("all");
+    setCandidateCoe("all");
+    setCandidateSkillData("all");
+    setMinSkill(0);
+    setMinCompetency(0);
+    setMinAvailable(0);
+    setMeetsCapacityOnly(false);
+    setMinRelevantProjects(0);
+    setRelevantExperienceOnly(false);
+  };
+
+  if (recommendation.isLoading) {
+    return (
+      <div className="space-y-4">
+        <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
+          <Skeleton className="h-4 w-56" />
+          <Skeleton className="h-3 w-40" />
+          <FieldGridSkeleton count={6} className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 border-t border-gray-100 pt-3" />
+        </div>
+        <div className="space-y-2.5">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <CandidateCardSkeleton key={i} />
+          ))}
+        </div>
+      </div>
+    );
+  }
+  if (recommendation.error) return <ErrorState message="Could not compute recommendations." />;
+  if (!recommendation.data) return null;
+
+  return (
+    <div className="space-y-4">
+      {selected && (
+        <DecisionHeader
+          selected={selected}
+          dealComposition={recommendation.data.deal_composition}
+          skillsetText={recommendation.data.request.skillset_text}
+          requiredPhrases={recommendation.data.request.required_phrases}
+          hireFlag={recommendation.data.hire_vs_redeploy_flag}
+          hasSkillset={recommendation.data.has_skillset}
+          topCandidate={topCandidate}
+          dealDetailsOpen={dealDetailsOpen}
+          onToggleDealDetails={() => setDealDetailsOpen((v) => !v)}
+          onSelectSibling={onSelectSibling}
+          semanticMatchResult={semanticMatchResult}
+          semanticMatchPending={semanticMatchMutation.isPending}
+          semanticMatchError={semanticMatchMutation.isError}
+          onAskSemanticMatch={() => {
+            semanticMatchMutation.mutate(rowIndex, {
+              onSuccess: (data) => setSemanticMatchResult(data),
+            });
+          }}
+          onOpenProfile={onOpenProfile}
+        />
+      )}
+
+      <OtherOptionsSection
+        otherOptions={recommendation.data.other_options}
+        windowDays={recommendation.data.other_options_window_days}
+        includeParams={includeParams}
+        onOpenProfile={onOpenProfile}
+      />
+
+      {recommendation.data.candidates.length > 0 && (
+        <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs font-semibold text-gray-700">
+              Candidates ({filteredCandidates.length}/{recommendation.data.candidates.length} shown)
+            </p>
+            <div className="flex items-center gap-2">
+              {hasActiveCandidateFilters && (
+                <button onClick={clearCandidateFilters} className="text-[11px] text-primary hover:underline whitespace-nowrap">
+                  Clear filters
+                </button>
+              )}
+              <AdvancedFiltersButton
+                open={advancedFiltersOpen}
+                include={includeParams}
+                includeBelowCapacity={includeBelowCapacity}
+                onClick={() => setAdvancedFiltersOpen((v) => !v)}
+              />
+              <button
+                onClick={() => setCandidateFiltersOpen((v) => !v)}
+                className={cn(
+                  "flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg border whitespace-nowrap transition",
+                  candidateFiltersOpen || candidateFilterCount > 0
+                    ? "border-primary/40 text-primary bg-primary/5"
+                    : "border-gray-200 text-gray-500"
+                )}
+              >
+                <SlidersHorizontal className="w-3 h-3" />
+                Filters{candidateFilterCount > 0 && ` (${candidateFilterCount})`}
+                <ChevronDown className={cn("w-3 h-3 transition-transform", candidateFiltersOpen && "rotate-180")} />
+              </button>
+            </div>
+          </div>
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <p className="text-[11px] text-gray-400">
+              Showing top {recommendation.data.candidates.length} of {recommendation.data.candidate_pool_size} viable candidates
+              {" "}({recommendation.data.total_employees_considered} employees scored
+              {recommendation.data.has_skillset && (() => {
+                const observed = recommendation.data.observed_skill_match_count ?? recommendation.data.genuine_skill_match_count ?? 0;
+                const inferred = recommendation.data.inferred_skill_match_count ?? 0;
+                const semantic = recommendation.data.semantic_only_match_count ?? 0;
+                const parts: string[] = [];
+                if (observed > 0) parts.push(`${observed} with observed skills`);
+                if (inferred > 0) parts.push(`${inferred} inferred`);
+                if (semantic > 0) parts.push(`${semantic} AI-matched`);
+                if (parts.length > 0) return `, ${parts.join(" · ")}`;
+                return ", no skill overlap found";
+              })()})
+            </p>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] text-gray-500 whitespace-nowrap">Show top</span>
+              <input
+                type="number"
+                min={1}
+                max={2000}
+                value={topNInput}
+                onChange={(e) => setTopNInput(e.target.value)}
+                onBlur={() => {
+                  const parsed = Math.max(1, Math.min(2000, Number(topNInput) || 15));
+                  setTopN(parsed);
+                  setTopNInput(String(parsed));
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                }}
+                className="w-16 text-[11px] px-1.5 py-1 rounded-lg border border-gray-200 outline-none focus:border-gray-300"
+              />
+              {[15, 25, 50].map((n) => (
+                <button
+                  key={n}
+                  onClick={() => {
+                    setTopN(n);
+                    setTopNInput(String(n));
+                  }}
+                  className={cn(
+                    "text-[11px] px-2 py-1 rounded-lg border whitespace-nowrap transition",
+                    topN === n ? "bg-primary/10 border-primary text-primary" : "border-gray-200 text-gray-500"
+                  )}
+                >
+                  {n}
+                </button>
+              ))}
+              <button
+                onClick={() => {
+                  const all = recommendation.data!.candidate_pool_size;
+                  setTopN(all);
+                  setTopNInput(String(all));
+                }}
+                className={cn(
+                  "text-[11px] px-2 py-1 rounded-lg border whitespace-nowrap transition",
+                  topN === recommendation.data.candidate_pool_size
+                    ? "bg-primary/10 border-primary text-primary"
+                    : "border-gray-200 text-gray-500"
+                )}
+              >
+                Everyone
+              </button>
+            </div>
+          </div>
+          <input
+            value={candidateSearch}
+            onChange={(e) => setCandidateSearch(e.target.value)}
+            placeholder="Search employee ID, role, or skill…"
+            className="w-full text-xs px-2.5 py-1.5 rounded-lg border border-gray-200 outline-none focus:border-gray-300"
+          />
+          {advancedFiltersOpen && (
+            <AdvancedFiltersPanel
+              include={includeParams}
+              onApply={setIncludeParams}
+              includeBelowCapacity={includeBelowCapacity}
+              onApplyBelowCapacity={setIncludeBelowCapacity}
+            />
+          )}
+          {candidateFiltersOpen && (
+            <div className="rounded-lg border border-gray-100 bg-gray-50/70 p-2.5 space-y-2.5">
+              <div>
+                <label className="text-[10px] text-gray-400 block mb-1">Signal</label>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {([
+                    ["all", "All"],
+                    ["redeploy", "Redeploy"],
+                    ["training", "Needs training"],
+                    ["hire", "Hire signal"],
+                    ["not_assessed", "Not assessed"],
+                  ] as [CandidateSignalFilter, string][]).map(([value, label]) => (
+                    <button
+                      key={value}
+                      onClick={() => setCandidateSignal(value)}
+                      className={cn(
+                        "text-[11px] px-2 py-1 rounded-lg border transition bg-white",
+                        candidateSignal === value ? "bg-primary/10 border-primary text-primary" : "border-gray-200 text-gray-500"
+                      )}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <FilterSelect label="Designation" value={candidateDesignation} onChange={setCandidateDesignation}>
+                  <option value="all">All</option>
+                  {designationOptions.map((d) => (
+                    <option key={d} value={d}>{d}</option>
+                  ))}
+                </FilterSelect>
+                <FilterSelect label="CoE" value={candidateCoe} onChange={setCandidateCoe}>
+                  <option value="all">All</option>
+                  {coeOptions.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                  {candidatesWithUnknownCoe && <option value={UNKNOWN_COE}>Not determined</option>}
+                </FilterSelect>
+                <FilterSelect
+                  label="Skill data"
+                  value={candidateSkillData}
+                  onChange={(v) => setCandidateSkillData(v as SkillDataFilter)}
+                >
+                  <option value="all">All</option>
+                  {(Object.entries(SKILL_DATA_LABEL) as [Exclude<SkillDataFilter, "all">, string][]).map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </FilterSelect>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <RangeFilter label="Min skill" value={minSkill} onChange={setMinSkill} max={100} step={10} suffix="%" />
+                <RangeFilter label="Min competency" value={minCompetency} onChange={setMinCompetency} max={100} step={10} suffix="%" />
+                <RangeFilter label="Min available" value={minAvailable} onChange={setMinAvailable} max={100} step={10} suffix="%" />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <RangeFilter label="Min relevant projects" value={minRelevantProjects} onChange={setMinRelevantProjects} max={10} step={1} suffix="" />
+                <label className="flex items-end pb-1.5 gap-1.5 text-[11px] text-gray-500 whitespace-nowrap">
+                  <input type="checkbox" checked={relevantExperienceOnly} onChange={(e) => setRelevantExperienceOnly(e.target.checked)} />
+                  Has relevant experience only
+                </label>
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="flex items-center gap-1.5 text-[11px] text-gray-500 whitespace-nowrap">
+                  <input type="checkbox" checked={meetsCapacityOnly} onChange={(e) => setMeetsCapacityOnly(e.target.checked)} />
+                  Meets capacity
+                </label>
+                <select
+                  value={candidateSort}
+                  onChange={(e) => setCandidateSort(e.target.value as CandidateSort)}
+                  className="flex-1 text-[11px] px-1.5 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-600"
+                >
+                  <option value="composite">Sort: best match</option>
+                  <option value="skill">Sort: skill match</option>
+                  <option value="competency">Sort: competency</option>
+                  <option value="available">Sort: availability</option>
+                  <option value="experience">Sort: relevant experience</option>
+                </select>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="space-y-1.5">
+        {filteredCandidates.map((c, i) => (
+          <CandidateRow
+            key={c.employee_id}
+            candidate={c}
+            rank={i + 1}
+            isTopPick={topCandidate?.employee_id === c.employee_id}
+            isExpanded={expandedCandidateId === c.employee_id}
+            onToggleExpand={() => setExpandedCandidateId((prev) => (prev === c.employee_id ? null : c.employee_id))}
+            onOpenProfile={(tab, skillMatchContext) => onOpenProfile(c.employee_id, tab, skillMatchContext)}
+            includeParams={includeParams}
+          />
+        ))}
+        {recommendation.data.candidates.length === 0 && (
+          <p className="text-sm text-gray-400 italic">No candidates with available capacity were found.</p>
+        )}
+        {recommendation.data.candidates.length > 0 && filteredCandidates.length === 0 && (
+          <p className="text-sm text-gray-400 italic">No candidates match the current filters.</p>
+        )}
+      </div>
     </div>
   );
 }
@@ -2201,152 +2142,310 @@ function DecisionHeader({
   );
 }
 
-function OtherOptionsAccordion({
-  fallback,
-  bestFitIfDelayed,
-  open,
-  onToggle,
+// Full replacement for the old accordion (fallback tiers + best-fit-if-delayed,
+// capped at 5/3 results): everyone scored who isn't already in the main
+// Candidates list, same filter/sort engine, same CandidateRow rendering, plus
+// an availability-by-date filter. No cap -- "Show everyone" is a real option.
+function OtherOptionsSection({
+  otherOptions,
+  windowDays,
+  includeParams,
   onOpenProfile,
 }: {
-  fallback?: FallbackCandidates;
-  bestFitIfDelayed?: RecommendationCandidate[];
-  open: boolean;
-  onToggle: () => void;
-  onOpenProfile: (employeeId: string, tab: ProfileTab) => void;
+  // Optional/nullable on purpose: an un-restarted or older backend simply
+  // won't have this field yet -- render nothing rather than crash.
+  otherOptions?: RecommendationCandidate[] | null;
+  windowDays?: number;
+  includeParams: IncludeParams;
+  onOpenProfile: (employeeId: string, tab: ProfileTab, skillMatchContext?: SkillMatchContext) => void;
 }) {
-  if (!fallback && (!bestFitIfDelayed || bestFitIfDelayed.length === 0)) return null;
-  const fallbackCount = (fallback?.same_grade.length ?? 0) + (fallback?.adjacent_level.length ?? 0);
-  const delayedCount = bestFitIfDelayed?.length ?? 0;
-  const total = fallbackCount + delayedCount;
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [signal, setSignal] = useState<CandidateSignalFilter>("all");
+  const [designation, setDesignation] = useState("all");
+  const [coe, setCoe] = useState("all");
+  const [skillData, setSkillData] = useState<SkillDataFilter>("all");
+  const [minSkill, setMinSkill] = useState(0);
+  const [minCompetency, setMinCompetency] = useState(0);
+  const [minAvailable, setMinAvailable] = useState(0);
+  const [meetsCapacityOnly, setMeetsCapacityOnly] = useState(false);
+  const [minRelevantProjects, setMinRelevantProjects] = useState(0);
+  const [relevantExperienceOnly, setRelevantExperienceOnly] = useState(false);
+  const [sort, setSort] = useState<CandidateSort>("composite");
+  const [availableByDate, setAvailableByDate] = useState("");
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [showN, setShowN] = useState(20);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  if (!otherOptions || otherOptions.length === 0) return null;
+  const windowDaysLabel = windowDays ?? 365;
+
+  const designationOptions = buildNormalizedOptions(otherOptions.map((c) => c.job_name));
+  const coeOptions = buildNormalizedOptions(otherOptions.map((c) => c.coe));
+  const hasUnknownCoe = otherOptions.some((c) => !c.coe);
+
+  const filteredBase = filterAndSortCandidates(otherOptions, {
+    search, signal, designation, coe, skillData, minSkill, minCompetency, minAvailable,
+    meetsCapacityOnly, minRelevantProjects, relevantExperienceOnly, sort,
+    includeSkill: includeParams.skill,
+  });
+  const filtered = availableByDate
+    ? filteredBase.filter((c) => c.meets_requested_capacity || (c.earliest_available_date != null && c.earliest_available_date <= availableByDate))
+    : filteredBase;
+  const shown = filtered.slice(0, showN);
+
+  const hasActiveFilters =
+    search !== "" || signal !== "all" || designation !== "all" || coe !== "all" || skillData !== "all" ||
+    minSkill > 0 || minCompetency > 0 || minAvailable > 0 || meetsCapacityOnly ||
+    minRelevantProjects > 0 || relevantExperienceOnly || availableByDate !== "";
+  const filterCount = [
+    signal !== "all", designation !== "all", coe !== "all", skillData !== "all",
+    minSkill > 0, minCompetency > 0, minAvailable > 0, meetsCapacityOnly,
+    minRelevantProjects > 0, relevantExperienceOnly, availableByDate !== "",
+  ].filter(Boolean).length;
+
+  const clearFilters = () => {
+    setSearch(""); setSignal("all"); setDesignation("all"); setCoe("all"); setSkillData("all");
+    setMinSkill(0); setMinCompetency(0); setMinAvailable(0); setMeetsCapacityOnly(false);
+    setMinRelevantProjects(0); setRelevantExperienceOnly(false); setAvailableByDate("");
+  };
 
   return (
     <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
       <button
-        onClick={onToggle}
+        onClick={() => setOpen((v) => !v)}
         className="w-full flex items-center justify-between px-4 py-2.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition"
       >
-        <span>Other options to consider{total > 0 && ` (${total})`}</span>
+        <span>Other options to consider ({otherOptions.length})</span>
         <ChevronDown className={cn("w-3.5 h-3.5 text-gray-400 transition-transform", open && "rotate-180")} />
       </button>
       {open && (
         <div className="border-t border-gray-100 p-3.5 space-y-3">
-          {fallback && <FallbackCascadePanel fallback={fallback} onOpenProfile={onOpenProfile} />}
-          {bestFitIfDelayed && bestFitIfDelayed.length > 0 && (
-            <BestFitIfDelayedPanel candidates={bestFitIfDelayed} onOpenProfile={onOpenProfile} />
+          <p className="text-[11px] text-gray-400">
+            Everyone else scored for this role — same engine and ranking parameters as Candidates above.
+            Availability lookahead: {windowDaysLabel} days.
+          </p>
+          <div className="flex items-center gap-2">
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search employee ID, role, skill…"
+              className="flex-1 text-xs px-2.5 py-1.5 rounded-lg border border-gray-200 outline-none focus:border-gray-300"
+            />
+            {hasActiveFilters && (
+              <button onClick={clearFilters} className="text-[11px] text-primary hover:underline whitespace-nowrap">
+                Clear
+              </button>
+            )}
+            <button
+              onClick={() => setFiltersOpen((v) => !v)}
+              className={cn(
+                "flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg border whitespace-nowrap transition",
+                filtersOpen || filterCount > 0 ? "border-primary/40 text-primary bg-primary/5" : "border-gray-200 text-gray-500"
+              )}
+            >
+              <SlidersHorizontal className="w-3 h-3" />
+              Filters{filterCount > 0 && ` (${filterCount})`}
+              <ChevronDown className={cn("w-3 h-3 transition-transform", filtersOpen && "rotate-180")} />
+            </button>
+          </div>
+          {filtersOpen && (
+            <div className="rounded-lg border border-gray-100 bg-gray-50/70 p-2.5 space-y-2.5">
+              <div>
+                <label className="text-[10px] text-gray-400 block mb-1">Signal</label>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {([
+                    ["all", "All"],
+                    ["redeploy", "Redeploy"],
+                    ["training", "Needs training"],
+                    ["hire", "Hire signal"],
+                    ["not_assessed", "Not assessed"],
+                  ] as [CandidateSignalFilter, string][]).map(([v, label]) => (
+                    <button
+                      key={v}
+                      onClick={() => setSignal(v)}
+                      className={cn(
+                        "text-[11px] px-2 py-1 rounded-lg border transition bg-white",
+                        signal === v ? "bg-primary/10 border-primary text-primary" : "border-gray-200 text-gray-500"
+                      )}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <FilterSelect label="Designation" value={designation} onChange={setDesignation}>
+                  <option value="all">All</option>
+                  {designationOptions.map((d) => <option key={d} value={d}>{d}</option>)}
+                </FilterSelect>
+                <FilterSelect label="CoE" value={coe} onChange={setCoe}>
+                  <option value="all">All</option>
+                  {coeOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+                  {hasUnknownCoe && <option value={UNKNOWN_COE}>Not determined</option>}
+                </FilterSelect>
+                <FilterSelect label="Skill data" value={skillData} onChange={(v) => setSkillData(v as SkillDataFilter)}>
+                  <option value="all">All</option>
+                  {(Object.entries(SKILL_DATA_LABEL) as [Exclude<SkillDataFilter, "all">, string][]).map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </FilterSelect>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <RangeFilter label="Min skill" value={minSkill} onChange={setMinSkill} max={100} step={10} suffix="%" />
+                <RangeFilter label="Min competency" value={minCompetency} onChange={setMinCompetency} max={100} step={10} suffix="%" />
+                <RangeFilter label="Min available" value={minAvailable} onChange={setMinAvailable} max={100} step={10} suffix="%" />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <RangeFilter label="Min relevant projects" value={minRelevantProjects} onChange={setMinRelevantProjects} max={10} step={1} suffix="" />
+                <label className="flex items-end pb-1.5 gap-1.5 text-[11px] text-gray-500 whitespace-nowrap">
+                  <input type="checkbox" checked={relevantExperienceOnly} onChange={(e) => setRelevantExperienceOnly(e.target.checked)} />
+                  Has relevant experience only
+                </label>
+              </div>
+              <div>
+                <label className="text-[10px] text-gray-400 block mb-1">Available by date</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="date"
+                    value={availableByDate}
+                    onChange={(e) => setAvailableByDate(e.target.value)}
+                    className="text-[11px] px-2 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-600"
+                  />
+                  <span className="text-[10px] text-gray-400">
+                    Shows people free now, or free by this date (within the {windowDaysLabel}-day lookahead)
+                  </span>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="flex items-center gap-1.5 text-[11px] text-gray-500 whitespace-nowrap">
+                  <input type="checkbox" checked={meetsCapacityOnly} onChange={(e) => setMeetsCapacityOnly(e.target.checked)} />
+                  Meets capacity now
+                </label>
+                <select
+                  value={sort}
+                  onChange={(e) => setSort(e.target.value as CandidateSort)}
+                  className="flex-1 text-[11px] px-1.5 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-600"
+                >
+                  <option value="composite">Sort: best match</option>
+                  <option value="skill">Sort: skill match</option>
+                  <option value="competency">Sort: competency</option>
+                  <option value="available">Sort: availability</option>
+                  <option value="experience">Sort: relevant experience</option>
+                </select>
+              </div>
+            </div>
           )}
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <p className="text-[11px] text-gray-400">
+              Showing {shown.length} of {filtered.length} filtered ({otherOptions.length} total)
+            </p>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] text-gray-500 whitespace-nowrap">Show</span>
+              {[10, 20, 50, 100].map((n) => (
+                <button
+                  key={n}
+                  onClick={() => setShowN(n)}
+                  className={cn(
+                    "text-[11px] px-2 py-1 rounded-lg border transition",
+                    showN === n ? "bg-primary text-white border-primary" : "border-gray-200 text-gray-500"
+                  )}
+                >
+                  {n}
+                </button>
+              ))}
+              <button
+                onClick={() => setShowN(otherOptions.length)}
+                className={cn(
+                  "text-[11px] px-2 py-1 rounded-lg border transition",
+                  showN >= otherOptions.length ? "bg-primary text-white border-primary" : "border-gray-200 text-gray-500"
+                )}
+              >
+                Everyone
+              </button>
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            {shown.map((c, i) => (
+              <CandidateRow
+                key={c.employee_id}
+                candidate={c}
+                rank={i + 1}
+                isTopPick={false}
+                isExpanded={expandedId === c.employee_id}
+                onToggleExpand={() => setExpandedId((prev) => (prev === c.employee_id ? null : c.employee_id))}
+                onOpenProfile={(tab, skillMatchContext) => onOpenProfile(c.employee_id, tab, skillMatchContext)}
+                includeParams={includeParams}
+              />
+            ))}
+            {shown.length === 0 && (
+              <p className="text-xs text-gray-400 italic text-center py-2">No one matches the current filters.</p>
+            )}
+          </div>
         </div>
       )}
     </div>
   );
 }
 
-function FallbackCascadePanel({
-  fallback,
-  onOpenProfile,
+// Raw project list drilldown -- opened by clicking a project count, client
+// count, or category chip. Shows actual data (client, category, status,
+// dates), not a summary sentence.
+function ProjectHistoryModal({
+  employeeId,
+  category,
+  onClose,
 }: {
-  fallback: FallbackCandidates;
-  onOpenProfile: (employeeId: string, tab: ProfileTab) => void;
+  employeeId: string;
+  category?: string;
+  onClose: () => void;
 }) {
-  return (
-    <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-3.5 space-y-3">
-      <p className="text-xs text-amber-800">
-        No one requesting <strong>{fallback.requested_designations.join(" / ")}</strong> has a verified skill match
-        right now. Falling back: tier 2 is the same grade/CoE with no skill overlap, tier 3 is one level up/down the
-        seniority ladder.
-      </p>
-      {fallback.same_grade.length > 0 && (
-        <FallbackTierList
-          title="Tier 2 -- same grade, no verified skill match"
-          candidates={fallback.same_grade}
-          onOpenProfile={onOpenProfile}
-        />
-      )}
-      {fallback.adjacent_level.length > 0 && (
-        <FallbackTierList
-          title="Tier 3 -- adjacent level (one up/down the ladder)"
-          candidates={fallback.adjacent_level}
-          onOpenProfile={onOpenProfile}
-        />
-      )}
-      {fallback.same_grade.length === 0 && fallback.adjacent_level.length === 0 && (
-        <p className="text-[11px] text-amber-700 italic">
-          No one at this grade or an adjacent level is available either -- this is a genuine hire signal, not just a
-          skill gap.
-        </p>
-      )}
-    </div>
-  );
-}
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["employee-project-history", employeeId, category],
+    queryFn: () => api.employeeProjectHistory(employeeId, category),
+  });
 
-function FallbackTierList({
-  title,
-  candidates,
-  onOpenProfile,
-}: {
-  title: string;
-  candidates: RecommendationCandidate[];
-  onOpenProfile: (employeeId: string, tab: ProfileTab) => void;
-}) {
   return (
-    <div>
-      <p className="text-[11px] font-semibold text-amber-800 mb-1.5">{title}</p>
-      <div className="space-y-1.5">
-        {candidates.map((c) => (
-          <button
-            key={c.employee_id}
-            onClick={() => onOpenProfile(c.employee_id, "allocations")}
-            className="flex items-center gap-2 w-full text-left text-xs bg-white rounded-lg border border-amber-100 px-2.5 py-1.5 hover:border-amber-300 transition"
-          >
-            <span className="font-medium text-gray-800">{c.employee_id}</span>
-            <span className="text-gray-400">{c.job_name}</span>
-            {c.coe ? (
-              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-violet-50 border border-violet-200 text-violet-600">
-                {c.coe}
-              </span>
-            ) : (
-              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-50 border border-gray-200 text-gray-400">
-                CoE not determined
-              </span>
-            )}
-            <span className="ml-auto text-gray-500 whitespace-nowrap">{c.available_pct}% available</span>
-            <span className="text-gray-400 whitespace-nowrap">competency {Math.round(c.competency_score * 100)}%</span>
-          </button>
-        ))}
+    <Modal
+      title={category ? `${employeeId} — ${category} projects` : `${employeeId} — Project history`}
+      subtitle={data ? `${data.length} project${data.length === 1 ? "" : "s"}` : undefined}
+      onClose={onClose}
+      widthClassName="max-w-2xl"
+    >
+      <div className="p-4">
+        {isLoading && <p className="text-xs text-gray-400">Loading…</p>}
+        {error != null && <p className="text-xs text-red-500">Could not load project history.</p>}
+        {data && data.length === 0 && <p className="text-xs text-gray-400">No matching projects.</p>}
+        {data && data.length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-left text-gray-400 border-b border-gray-100">
+                  <th className="py-1.5 pr-3 font-medium">Client</th>
+                  <th className="py-1.5 pr-3 font-medium">Category</th>
+                  <th className="py-1.5 pr-3 font-medium">Tech CoE</th>
+                  <th className="py-1.5 pr-3 font-medium">Status</th>
+                  <th className="py-1.5 pr-3 font-medium">Period</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.map((row: EmployeeProjectHistoryRow) => (
+                  <tr key={row.project_code} className="border-b border-gray-50">
+                    <td className="py-1.5 pr-3 text-gray-700">{row.client_id ?? "—"}</td>
+                    <td className="py-1.5 pr-3 text-gray-500">{row.proposition_coe.join(", ") || "—"}</td>
+                    <td className="py-1.5 pr-3 text-gray-500">{row.tech_coe.join(", ") || "—"}</td>
+                    <td className="py-1.5 pr-3">
+                      <Badge variant={row.status === "ACTIVE" ? "eligible" : "trainable"}>{row.status}</Badge>
+                    </td>
+                    <td className="py-1.5 pr-3 text-gray-400 whitespace-nowrap">{row.start_date ?? "?"} → {row.end_date ?? "?"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
-    </div>
-  );
-}
-
-function BestFitIfDelayedPanel({
-  candidates,
-  onOpenProfile,
-}: {
-  candidates: RecommendationCandidate[];
-  onOpenProfile: (employeeId: string, tab: ProfileTab) => void;
-}) {
-  return (
-    <div className="rounded-xl border border-blue-200 bg-blue-50/40 p-3.5 space-y-2">
-      <p className="text-xs text-blue-800">
-        Strong fit, but busy right now -- here&apos;s when they&apos;d actually free up, within the next 180 days.
-      </p>
-      <div className="space-y-1.5">
-        {candidates.map((c) => (
-          <button
-            key={c.employee_id}
-            onClick={() => onOpenProfile(c.employee_id, "allocations")}
-            className="flex flex-wrap items-center gap-2 w-full text-left text-xs bg-white rounded-lg border border-blue-100 px-2.5 py-2 hover:border-blue-300 transition"
-          >
-            <span className="font-medium text-gray-800">{c.employee_id}</span>
-            <span className="text-gray-400">{c.job_name}</span>
-            <span className="text-gray-500 whitespace-nowrap">score {Math.round(c.composite_score * 100)}%</span>
-            <span className="ml-auto text-blue-700 whitespace-nowrap">
-              free from <strong>{c.earliest_available_date}</strong>
-            </span>
-            <span className="w-full text-[11px] text-gray-400">{c.earliest_available_proof}</span>
-          </button>
-        ))}
-      </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -2357,6 +2456,7 @@ function CandidateRow({
   isExpanded,
   onToggleExpand,
   onOpenProfile,
+  includeParams = DEFAULT_INCLUDE_PARAMS,
 }: {
   candidate: RecommendationCandidate;
   rank: number;
@@ -2364,8 +2464,10 @@ function CandidateRow({
   isExpanded: boolean;
   onToggleExpand: () => void;
   onOpenProfile: (tab: ProfileTab, skillMatchContext?: SkillMatchContext) => void;
+  includeParams?: IncludeParams;
 }) {
   const [aiProofOpen, setAiProofOpen] = useState(false);
+  const [projectHistoryFilter, setProjectHistoryFilter] = useState<{ category?: string } | null>(null);
   return (
     <div
       className={cn(
@@ -2385,7 +2487,7 @@ function CandidateRow({
             {candidate.coe}
           </span>
         ) : null}
-        <Badge variant={candidate.bucket}>{SIGNAL_LABEL[candidate.bucket]}</Badge>
+        {candidate.bucket !== "gap" && <Badge variant={candidate.bucket}>{SIGNAL_LABEL[candidate.bucket]}</Badge>}
         {isTopPick && <Badge variant="eligible">Top pick</Badge>}
         {!candidate.meets_requested_capacity && <Badge variant="amber">below requested %</Badge>}
         {candidate.match_tier === "same_grade_fallback" && (
@@ -2410,6 +2512,20 @@ function CandidateRow({
             className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-50 border border-blue-200 text-blue-600 whitespace-nowrap flex-shrink-0"
           >
             AI{candidate.semantic_score != null ? ` ${Math.round(candidate.semantic_score * 100)}%` : ""} · no word match
+          </span>
+        )}
+        {candidate.experience_confidence === "observed" && (
+          <span
+            title={`${candidate.relevant_project_count} of ${candidate.total_projects} completed/active projects match this deal's category`}
+            className={cn(
+              "text-[10px] px-1.5 py-0.5 rounded-full border whitespace-nowrap flex-shrink-0",
+              candidate.relevant_project_ratio >= 0.6
+                ? "bg-teal-50 border-teal-200 text-teal-700"
+                : "bg-gray-50 border-gray-200 text-gray-500"
+            )}
+          >
+            {candidate.relevant_project_ratio >= 0.6 ? "specialist · " : ""}
+            {candidate.relevant_project_count}/{candidate.total_projects} relevant projects
           </span>
         )}
         <span className="ml-auto flex items-center gap-3 text-[11px] text-gray-400 whitespace-nowrap flex-shrink-0">
@@ -2529,15 +2645,55 @@ function CandidateRow({
               <span className="text-gray-400">{candidate.missing_skills.join(", ")}</span>
             </div>
           )}
-          <p className="text-xs text-gray-600 leading-relaxed border-t border-gray-100 pt-2">{candidate.explanation}</p>
+          {candidate.total_projects > 0 && (
+            <div className="flex items-center gap-1.5 text-[11px] flex-wrap">
+              <span className="text-gray-400 font-medium flex-shrink-0">Track record</span>
+              <button
+                onClick={() => setProjectHistoryFilter({})}
+                className="px-1.5 py-0.5 rounded-full border border-gray-200 bg-white text-gray-600 hover:border-primary hover:text-primary"
+              >
+                {candidate.total_projects} projects ↗
+              </button>
+              <button
+                onClick={() => setProjectHistoryFilter({})}
+                className="px-1.5 py-0.5 rounded-full border border-gray-200 bg-white text-gray-600 hover:border-primary hover:text-primary"
+              >
+                {candidate.distinct_clients} clients ↗
+              </button>
+              {candidate.top_categories.map((tc) => (
+                <button
+                  key={tc.category}
+                  onClick={() => setProjectHistoryFilter({ category: tc.category })}
+                  className={cn(
+                    "px-1.5 py-0.5 rounded-full border",
+                    candidate.experience_confidence === "observed" && tc.category === candidate.top_categories[0].category
+                      ? "bg-teal-50 border-teal-200 text-teal-700 hover:border-teal-400"
+                      : "bg-white border-gray-200 text-gray-500 hover:border-primary hover:text-primary"
+                  )}
+                >
+                  {tc.category} ({tc.count}) ↗
+                </button>
+              ))}
+              {includeParams.category_match && (
+                <span className="ml-auto text-gray-400">cat {Math.round(candidate.relevant_project_ratio * 100)}%</span>
+              )}
+              {includeParams.project_count && (
+                <span className="text-gray-400">count {Math.round(candidate.project_count_score * 100)}%</span>
+              )}
+            </div>
+          )}
+          {projectHistoryFilter && (
+            <ProjectHistoryModal
+              employeeId={candidate.employee_id}
+              category={projectHistoryFilter.category}
+              onClose={() => setProjectHistoryFilter(null)}
+            />
+          )}
           {candidate.earliest_available_date && (
             <p className="text-[11px] text-blue-600">
-              Busy now, but free from <strong>{candidate.earliest_available_date}</strong> -- {candidate.earliest_available_proof}
+              Free from <strong>{candidate.earliest_available_date}</strong> — {candidate.earliest_available_proof}
             </p>
           )}
-          <p className="text-[10px] text-gray-300">
-            skill: {friendlyConfidence(candidate.skill_confidence)} · competency: {friendlyConfidence(candidate.competency_confidence)}
-          </p>
         </div>
       )}
     </div>

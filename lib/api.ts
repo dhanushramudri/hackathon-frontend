@@ -95,6 +95,43 @@ export type CandidateBucket = "eligible" | "trainable" | "gap" | "not_assessed";
 
 export type MatchTier = "skill_match" | "same_grade_fallback" | "adjacent_level_fallback" | null;
 
+export type ExperienceConfidence = "observed" | "related_only" | "no_history" | "no_match" | "no_requirement";
+
+// All 5 ranking parameters are independently selectable in Advanced Filters --
+// mirrors scoring.BASE_WEIGHTS on the backend. skill/competency/availability
+// default true, the other two default false.
+export interface IncludeParams {
+  skill: boolean;
+  competency: boolean;
+  availability: boolean;
+  category_match: boolean;
+  project_count: boolean;
+}
+
+export const DEFAULT_INCLUDE_PARAMS: IncludeParams = {
+  skill: true,
+  competency: true,
+  availability: true,
+  category_match: false,
+  project_count: false,
+};
+
+export interface EmployeeProjectHistoryRow {
+  project_code: string;
+  client_id: string | null;
+  proposition_coe: string[];
+  tech_coe: string[];
+  status: string;
+  type_of_project: string;
+  start_date: string | null;
+  end_date: string | null;
+}
+
+export interface ExperienceCategory {
+  category: string;
+  count: number;
+}
+
 export interface RecommendationCandidate {
   employee_id: string;
   job_name: string;
@@ -117,6 +154,14 @@ export interface RecommendationCandidate {
   earliest_available_proof?: string | null;
   on_leave_now?: boolean;
   in_free_pool?: boolean;
+  // Track-record / experience layer -- see app/engines/experience_engine.py
+  total_projects: number;
+  distinct_clients: number;
+  relevant_project_count: number;
+  relevant_project_ratio: number;
+  experience_confidence: ExperienceConfidence;
+  top_categories: ExperienceCategory[];
+  project_count_score: number;
 }
 
 export interface FallbackCandidates {
@@ -151,6 +196,10 @@ export interface RecommendationResult {
   semantic_only_match_count?: number;
   fallback_candidates?: FallbackCandidates | null;
   best_fit_if_delayed?: RecommendationCandidate[];
+  // Everyone scored who isn't in `candidates` above -- same engine, same fields,
+  // no gating/cap. Powers the "Other options to consider" section.
+  other_options?: RecommendationCandidate[];
+  other_options_window_days?: number;
   deal_composition: DealCompositionRow[];
   pipeline_row?: {
     row_index: number;
@@ -1211,6 +1260,10 @@ export const api = {
   buddyAsk: (message: string, history: { role: "user" | "assistant"; content: string }[] = []) =>
     postJSON<BuddyAnswer>("/buddy/ask", { message, history }),
   employeeProfile: (employeeId: string) => getJSON<EmployeeProfile>(`/employees/${encodeURIComponent(employeeId)}/profile`),
+  employeeProjectHistory: (employeeId: string, category?: string) =>
+    getJSON<EmployeeProjectHistoryRow[]>(
+      `/employees/${encodeURIComponent(employeeId)}/project-history${category ? `?category=${encodeURIComponent(category)}` : ""}`
+    ),
   employeeHeadcountSummary: () => getJSON<EmployeeHeadcountSummary>("/employees/headcount-summary"),
   overtimeRiskSummary: () => getJSON<OvertimeRiskSummary>("/employees/overtime-risk-summary"),
   employeesList: () => getJSON<EmployeeListRow[]>("/employees"),
@@ -1222,8 +1275,16 @@ export const api = {
     getJSON<AllocationTimesheet>(`/allocations/timesheet?employee_id=${encodeURIComponent(employeeId)}&project_id=${encodeURIComponent(projectId)}`),
   roleMixTemplates: () => getJSON<RoleMixTemplate[]>("/role-mix/templates"),
   roleMixCategories: () => getJSON<DocxCategoryRoleMix[]>("/role-mix/categories"),
-  recommendationsForPipelineRow: (rowIndex: number, topN: number = 15) =>
-    getJSON<RecommendationResult>(`/recommendations/pipeline-row/${rowIndex}?top_n=${topN}`),
+  recommendationsForPipelineRow: (
+    rowIndex: number, topN: number = 15, include: IncludeParams = DEFAULT_INCLUDE_PARAMS,
+    includeBelowCapacity: boolean = false
+  ) =>
+    getJSON<RecommendationResult>(
+      `/recommendations/pipeline-row/${rowIndex}?top_n=${topN}` +
+        `&include_skill=${include.skill}&include_competency=${include.competency}&include_availability=${include.availability}` +
+        `&include_category_match=${include.category_match}&include_project_count=${include.project_count}` +
+        `&include_below_capacity=${includeBelowCapacity}`
+    ),
   recommendationsCoverageSummary: () => getJSON<CoverageSummary>("/recommendations/coverage-summary"),
   semanticMatch: (rowIndex: number) =>
     postJSON<SemanticMatchResult>(`/recommendations/pipeline-row/${rowIndex}/semantic-match`, {}),
@@ -1232,8 +1293,12 @@ export const api = {
       `/recommendations/search?skillset_text=${encodeURIComponent(skillsetText)}&likely_start_date=${likelyStartDate}&requested_pct=${requestedPct}`
     ),
   listDeals: () => getJSON<DealSummary[]>("/recommendations/deals"),
-  projectTeamRecommendation: (rowIndices: number[], topN: number = 15) =>
-    postJSON<ProjectTeamRecommendation>("/recommendations/project-team", { row_indices: rowIndices, top_n: topN }),
+  projectTeamRecommendation: (rowIndices: number[], topN: number = 15, include: IncludeParams = DEFAULT_INCLUDE_PARAMS) =>
+    postJSON<ProjectTeamRecommendation>("/recommendations/project-team", {
+      row_indices: rowIndices, top_n: topN,
+      include_skill: include.skill, include_competency: include.competency, include_availability: include.availability,
+      include_category_match: include.category_match, include_project_count: include.project_count,
+    }),
   pipelineForecast: () => getJSON<PipelineDemandRow[]>("/pipeline/forecast"),
   healthProjects: () => getJSON<HealthProject[]>("/health-monitor/projects"),
   projectRoster: (projectCode: string) => getJSON<ProjectRoster>(`/health-monitor/projects/${encodeURIComponent(projectCode)}/roster`),
