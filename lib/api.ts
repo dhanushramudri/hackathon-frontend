@@ -17,6 +17,26 @@ async function postJSON<T>(path: string, body: unknown): Promise<T> {
   return res.json();
 }
 
+export interface AvailabilityProjectRow {
+  project_id: string;
+  type_of_project: string | null;
+  allocation_by_percentage: number;
+  resourcing_status: string;
+}
+
+export interface AvailabilityRow {
+  employee_id: string;
+  job_name: string | null;
+  department_name: string | null;
+  location: string | null;
+  total_allocated_pct: number;
+  client_allocated_pct: number;
+  available_pct: number;
+  is_fully_free: boolean;
+  as_of_date: string;
+   current_projects: AvailabilityProjectRow[];
+}
+
 export interface AllocationRow {
   employee_id: string;
   job_name: string | null;
@@ -296,6 +316,25 @@ export interface HealthProject {
   wsr_data_available: boolean;
   wsr_worst_signal: string | null;
   wsr_latest_signal: string | null;
+  devops_data_available: boolean;
+  devops_extension_risk: boolean;
+  devops_open_tickets: number;
+  devops_blocked_tickets: number;
+  devops_in_progress_tickets: number;
+  devops_tickets_past_project_end: number;
+  devops_remaining_effort_hours: number;
+  devops_completed_work_hours: number;
+  devops_original_estimate_hours: number;
+  devops_effort_completion_pct: number | null;
+  devops_to_do_tickets: number;
+  devops_within_risk_window: boolean;
+  devops_working_days_in_window: number;
+  devops_team_capacity_hours: number;
+  devops_team_capacity_hours_after_leave: number;
+  devops_capacity_surplus_hours: number | null;
+  devops_is_overdue: boolean;
+  devops_tickets_missing_remaining_estimate: number;
+  devops_tickets_with_no_effort_data: number;
 }
 
 export interface RosterEntry {
@@ -446,6 +485,66 @@ export interface WsrProof {
   reports: WsrReportRow[];
 }
 
+
+export interface DevopsTicketRow {
+  id: number | null;
+  title: string | null;
+  work_item_type: string | null;
+  state: string;
+  is_blocked: boolean;
+  is_in_progress: boolean;
+  assigned_to: string | null;
+  start_date: string | null;
+  due_date: string | null;
+  is_past_project_end: boolean;
+  original_estimate_hours: number | null;
+  remaining_hours: number | null;
+  completed_hours: number | null;
+  is_effort_inconsistent: boolean;
+  sprint_name: string;
+  effective_remaining_hours: number | null;
+}
+
+export interface SprintBreakdownRow {
+  iteration_path: string;
+  sprint_name: string;
+  ticket_count: number;
+  blocked_count: number;
+  in_progress_count: number;
+  to_do_count: number;
+  remaining_hours: number;
+  tickets_with_no_effort_data: number;
+  sprint_start_date: string | null;
+  sprint_end_date: string | null;
+  latest_due_date: string | null;
+  has_open_work: boolean;
+}
+
+export interface DevopsExtensionRiskProof {
+  fired: boolean;
+  data_available: boolean;
+  window_days: number;
+  open_ticket_count: number;
+  blocked_ticket_count: number;
+  in_progress_ticket_count: number;
+  to_do_ticket_count: number;
+  tickets_due_past_project_end: number;
+  remaining_effort_hours: number;
+  completed_work_hours: number;
+  original_estimate_hours: number;
+  effort_completion_pct: number | null;
+  within_risk_window: boolean;
+  working_days_in_window: number;
+  team_capacity_hours: number;
+  team_capacity_hours_after_leave: number;
+  capacity_surplus_hours: number | null;
+  is_overdue: boolean;
+  tickets_missing_remaining_estimate: number;
+  tickets_with_no_effort_data: number;
+  sprint_breakdown: SprintBreakdownRow[];
+  tickets: DevopsTicketRow[];
+  
+}
 export interface ProjectHealthDetail {
   project_code: string;
   client_id: string | null;
@@ -463,6 +562,7 @@ export interface ProjectHealthDetail {
   overtime_risk: OvertimeRiskProof;
   effort_spike: EffortSpikeProof;
   wsr: WsrProof;
+  devops: DevopsExtensionRiskProof;
   allocations_roster: RosterEntry[];
 }
 
@@ -1116,6 +1216,8 @@ export const api = {
   employeesList: () => getJSON<EmployeeListRow[]>("/employees"),
   employeeDesignations: () => getJSON<string[]>("/employees/designations"),
   allocations: () => getJSON<AllocationRow[]>("/allocations/current"),
+  availability: (asOfDate?: string) =>
+    getJSON<AvailabilityRow[]>(`/allocations/availability${asOfDate ? `?as_of_date=${asOfDate}` : ""}`),
   allocationTimesheet: (employeeId: string, projectId: string) =>
     getJSON<AllocationTimesheet>(`/allocations/timesheet?employee_id=${encodeURIComponent(employeeId)}&project_id=${encodeURIComponent(projectId)}`),
   roleMixTemplates: () => getJSON<RoleMixTemplate[]>("/role-mix/templates"),

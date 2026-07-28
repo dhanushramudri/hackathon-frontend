@@ -3,7 +3,7 @@
 import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { HeartPulse, ChevronDown, SlidersHorizontal, UserCheck } from "lucide-react";
-import { api, type ProjectHealthDetail, type ReliefCandidate, type WsrReportRow, type SentimentSummary } from "@/lib/api";
+import { api, type ProjectHealthDetail, type ReliefCandidate, type WsrReportRow, type SentimentSummary, type DevopsTicketRow } from "@/lib/api";
 import { Modal } from "@/components/shared/Modal";
 import { Badge } from "@/components/shared/Badge";
 import { ErrorState } from "@/components/shared/EmptyState";
@@ -13,7 +13,7 @@ import { FiredBadge } from "@/components/shared/FiredBadge";
 import { EmployeeProfileModal, type ProfileTab, type SkillMatchContext } from "@/components/shared/EmployeeProfileModal";
 import { cn, formatUsd } from "@/lib/utils";
 
-type DetailTab = "overview" | "allocations" | "staffing" | "overtime" | "relief" | "wsr";
+type DetailTab = "overview" | "allocations" | "staffing" | "overtime" | "relief" | "wsr" | "devops";
 
 interface ProjectHealthDetailModalProps {
   projectCode: string;
@@ -27,6 +27,7 @@ const BASE_TABS: { key: DetailTab; label: string }[] = [
   { key: "staffing", label: "Staffing & Cost" },
   { key: "overtime", label: "Overtime & Effort" },
   { key: "wsr", label: "WSR Reports" },
+  { key: "devops", label: "DevOps" },
 ];
 
 export function ProjectHealthDetailModal({ projectCode, onClose, initialTab }: ProjectHealthDetailModalProps) {
@@ -73,6 +74,7 @@ export function ProjectHealthDetailModal({ projectCode, onClose, initialTab }: P
             {tab === "overtime" && <OvertimeTab d={detail.data} />}
             {tab === "relief" && <ReliefStaffingSection projectCode={detail.data.project_code} />}
             {tab === "wsr" && <WsrTab d={detail.data} projectCode={projectCode} />}
+            {tab === "devops" && <DevopsTab d={detail.data} />}
           </>
         ) : null}
       </div>
@@ -173,6 +175,30 @@ function OverviewTab({ d }: { d: ProjectHealthDetail }) {
           ? `Now: ${ragSequence(recentReports)} — when reporting started: ${ragSequence(baselineReports)}. Still worse than where it began, even if that fall happened before the recent-trend window above.`
           : `not enough real WSR history (need ${d.wsr.long_term_min_reports_required}+ reports)`,
     },
+   {
+  key: "devops_extension_risk",
+  label: "DevOps extension risk",
+  fired: d.devops?.fired ?? false,
+  detail: !d.devops
+    ? "DevOps signal not yet available for this project's detail view"
+    : !d.devops.data_available
+    ? "DevOps board not configured for this project"
+    : d.devops.open_ticket_count === 0
+    ? "No open work items found on the board"
+    : (() => {
+        const dv = d.devops;
+        if (dv.is_overdue) {
+          return `Project end (${d.project_end_date ?? "?"}) has passed with ${dv.open_ticket_count} open ticket(s), ${dv.remaining_effort_hours}h remaining — see DevOps tab.`;
+        }
+        if (dv.within_risk_window) {
+          const shortfall = dv.capacity_surplus_hours ?? 0;
+          return shortfall >= 0
+            ? `${dv.working_days_in_window} working day(s) left, ${shortfall}h capacity surplus over ${dv.remaining_effort_hours}h remaining — see DevOps tab.`
+            : `${dv.working_days_in_window} working day(s) left, ${Math.abs(shortfall)}h capacity shortfall against ${dv.remaining_effort_hours}h remaining — see DevOps tab.`;
+        }
+        return `${dv.open_ticket_count} open ticket(s), ${dv.remaining_effort_hours}h remaining — outside the ${dv.window_days}-day risk window — see DevOps tab.`;
+      })(),
+},
   ];
 
   return (
@@ -823,6 +849,369 @@ function WsrTab({ d, projectCode }: { d: ProjectHealthDetail; projectCode: strin
         </table>
         </div>
         {rows.length === 0 && <p className="text-xs text-gray-400 italic text-center py-4">No WSR reports match this filter.</p>}
+      </div>
+    </div>
+  );
+}
+
+type SprintSortKey = "sprint_name" | "sprint_start_date" | "sprint_end_date" | "ticket_count" | "blocked_count" | "in_progress_count" | "to_do_count" | "remaining_hours";
+
+function SortableTh({
+  label,
+  sortKey,
+  activeSort,
+  activeDir,
+  onSort,
+}: {
+  label: string;
+  sortKey: string;
+  activeSort: string;
+  activeDir: "asc" | "desc";
+  onSort: (key: string) => void;
+}) {
+  const isActive = activeSort === sortKey;
+  return (
+    <th
+      onClick={() => onSort(sortKey)}
+      title={isActive ? `Sorted ${activeDir}ending — click to reverse` : `Sort by ${label}`}
+      className={cn(
+        "text-left font-semibold px-2.5 py-1.5 whitespace-nowrap cursor-pointer select-none transition-colors",
+        isActive
+          ? "text-primary underline underline-offset-2 decoration-primary/40"
+          : "text-gray-500 hover:text-gray-800"
+      )}
+    >
+      {label}
+    </th>
+  );
+}
+
+type DevopsFilter = "all" | "blocked" | "in_progress" | "past_due" | "unestimated";
+type TicketSortKey = "id" | "title" | "state" | "assigned_to" | "start_date" | "due_date" | "remaining_hours" | "completed_hours" | "original_estimate_hours";
+
+
+function DevopsTab({ d }: { d: ProjectHealthDetail }) {
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState<DevopsFilter>("all");
+  const [proofSprint, setProofSprint] = useState<string | null>(null);
+
+  const devops = d.devops;
+
+  const [sprintSort, setSprintSort] = useState<SprintSortKey>("sprint_end_date");
+  const [sprintSortDir, setSprintSortDir] = useState<"asc" | "desc">("desc");
+
+  const handleSprintSort = (key: string) => {
+    if (key === sprintSort) {
+      setSprintSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSprintSort(key as SprintSortKey);
+      setSprintSortDir("desc");
+    }
+  };
+
+  const sortedSprints = [...devops.sprint_breakdown].sort((a, b) => {
+    const av = a[sprintSort] ?? "";
+    const bv = b[sprintSort] ?? "";
+    const cmp = typeof av === "number" && typeof bv === "number" ? av - bv : String(av).localeCompare(String(bv));
+    return sprintSortDir === "asc" ? cmp : -cmp;
+  });
+
+
+   const [ticketSort, setTicketSort] = useState<TicketSortKey>("id");
+  const [ticketSortDir, setTicketSortDir] = useState<"asc" | "desc">("desc");
+  const handleTicketSort = (key: string) => {
+    if (key === ticketSort) {
+      setTicketSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setTicketSort(key as TicketSortKey);
+      setTicketSortDir(key === "title" || key === "assigned_to" || key === "state" ? "asc" : "desc");
+    }
+  };
+
+
+  if (!devops.data_available) {
+    return <p className="text-sm text-gray-400 italic">DevOps board not configured for this project.</p>;
+  }
+  if (devops.open_ticket_count === 0) {
+    return <p className="text-sm text-gray-400 italic">No open work items found on the board for this project.</p>;
+  }
+
+  let rows = devops.tickets ?? [];
+  const q = search.trim().toLowerCase();
+  if (q) {
+    rows = rows.filter(
+      (t) =>
+        (t.title ?? "").toLowerCase().includes(q) ||
+        (t.assigned_to ?? "").toLowerCase().includes(q) ||
+        String(t.id ?? "").includes(q)
+    );
+  }
+  if (filter === "blocked") rows = rows.filter((t) => t.is_blocked);
+  else if (filter === "in_progress") rows = rows.filter((t) => t.is_in_progress);
+  else if (filter === "past_due") rows = rows.filter((t) => t.is_past_project_end);
+  else if (filter === "unestimated")
+    rows = rows.filter(
+      (t) => !(t.remaining_hours != null && t.remaining_hours > 0) && (t.original_estimate_hours == null || t.original_estimate_hours === 0)
+    );
+
+  rows = [...rows].sort((a, b) => {
+    const av = a[ticketSort];
+    const bv = b[ticketSort];
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    const cmp = typeof av === "number" && typeof bv === "number" ? av - bv : String(av).localeCompare(String(bv));
+    return ticketSortDir === "asc" ? cmp : -cmp;
+  });
+
+  return (
+    <div className="space-y-4">
+
+
+      {/* ── Risk summary — single panel, clear hierarchy ── */}
+      <div
+        className={cn(
+          "rounded-xl border p-4",
+          devops.fired ? "border-red-200 bg-red-50" : "border-emerald-200 bg-emerald-50"
+        )}
+      >
+        <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+          <FiredBadge fired={devops.fired} />
+          <span className="text-[11px] text-gray-500">
+            {devops.open_ticket_count} open · {devops.in_progress_ticket_count} in progress ·{" "}
+            {devops.to_do_ticket_count} to do
+            {devops.blocked_ticket_count > 0 && ` · ${devops.blocked_ticket_count} blocked`}
+            {devops.tickets_due_past_project_end > 0 && ` · ${devops.tickets_due_past_project_end} due past end`}
+          </span>
+        </div>
+
+        {devops.is_overdue ? (
+          <p className="text-sm text-gray-700">
+            Project end date <strong>{d.project_end_date ?? "?"}</strong> has passed —{" "}
+            <span className="text-red-700 font-semibold">{devops.remaining_effort_hours}h</span> of work is
+            still open. This is the pattern that leads to a late extension request.
+          </p>
+        ) : devops.within_risk_window ? (
+          <>
+            <p className="text-2xl font-semibold text-gray-800">
+              {(devops.capacity_surplus_hours ?? 0) >= 0 ? (
+                <span className="text-emerald-700">{devops.capacity_surplus_hours}h surplus</span>
+              ) : (
+                <span className="text-red-700">{Math.abs(devops.capacity_surplus_hours ?? 0)}h shortfall</span>
+              )}
+            </p>
+            <p className="text-xs text-gray-500 mt-1">
+              {devops.working_days_in_window} working day(s) left → {devops.team_capacity_hours_after_leave}h team
+              capacity{" "}
+              {devops.team_capacity_hours_after_leave !== devops.team_capacity_hours &&
+                `(${devops.team_capacity_hours}h before planned leave) `}
+              vs. {devops.remaining_effort_hours}h of remaining work.
+            </p>
+          </>
+        ) : (
+          <p className="text-sm text-gray-600">
+            {devops.remaining_effort_hours}h remaining across {devops.open_ticket_count} open ticket(s) — outside
+            the {devops.window_days}-day risk window, so capacity hasn&apos;t been evaluated yet.
+          </p>
+        )}
+
+        <div className="flex items-center gap-4 mt-3 pt-3 border-t border-black/5 text-[11px] text-gray-500">
+          <span>{devops.completed_work_hours}h completed</span>
+          <span>{devops.original_estimate_hours}h originally estimated</span>
+          {devops.effort_completion_pct != null && <span>{devops.effort_completion_pct}% tracked-work complete</span>}
+        </div>
+
+        {(devops.tickets_missing_remaining_estimate > 0 || devops.tickets_with_no_effort_data > 0) && (
+          <p className="text-[11px] text-amber-700 mt-2">
+            {devops.tickets_with_no_effort_data > 0
+              ? `${devops.tickets_with_no_effort_data} ticket(s) have no effort data at all — the ${devops.remaining_effort_hours}h figure is a floor, not the real total.`
+              : `${devops.tickets_missing_remaining_estimate} ticket(s) used their original estimate in place of a missing remaining-work value.`}
+          </p>
+        )}
+      </div>
+
+        {devops.sprint_breakdown.length > 0 && (
+        <div className="rounded-xl border border-[hsl(var(--primary)/0.3)] overflow-hidden">
+          <div className="px-3 py-2 border-b border-gray-100 bg-gray-50">
+            <p className="text-xs font-semibold text-gray-700">Sprint breakdown</p>
+            {devops.sprint_breakdown[0].has_open_work && (devops.is_overdue || devops.within_risk_window) && (
+              <p className="text-[11px] text-red-600 mt-0.5">
+                {devops.sprint_breakdown[0].sprint_name} still has open work — may need a new sprint to close this out.
+              </p>
+            )}
+             {(() => {
+              const unknownCount = devops.sprint_breakdown.filter(
+                (s) => s.remaining_hours === 0 && s.tickets_with_no_effort_data > 0
+              ).length;
+              return unknownCount > 0 ? (
+                <p className="text-[11px] text-amber-600 mt-0.5">
+                  {unknownCount} of {devops.sprint_breakdown.length} sprints have no reliable remaining-hours data — treat their totals as unknown, not zero.
+                </p>
+              ) : null;
+            })()}
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-[11px]">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-200">
+                   <SortableTh label="Sprint" sortKey="sprint_name" activeSort={sprintSort} activeDir={sprintSortDir} onSort={handleSprintSort} />
+                  <SortableTh label="Start" sortKey="sprint_start_date" activeSort={sprintSort} activeDir={sprintSortDir} onSort={handleSprintSort} />
+                  <SortableTh label="End" sortKey="sprint_end_date" activeSort={sprintSort} activeDir={sprintSortDir} onSort={handleSprintSort} />
+                  <SortableTh label="Open" sortKey="ticket_count" activeSort={sprintSort} activeDir={sprintSortDir} onSort={handleSprintSort} />
+                  <SortableTh label="Blocked" sortKey="blocked_count" activeSort={sprintSort} activeDir={sprintSortDir} onSort={handleSprintSort} />
+                  <SortableTh label="In progress" sortKey="in_progress_count" activeSort={sprintSort} activeDir={sprintSortDir} onSort={handleSprintSort} />
+                  <SortableTh label="To do" sortKey="to_do_count" activeSort={sprintSort} activeDir={sprintSortDir} onSort={handleSprintSort} />
+                  <SortableTh label="Remaining" sortKey="remaining_hours" activeSort={sprintSort} activeDir={sprintSortDir} onSort={handleSprintSort} />
+                </tr>
+              </thead>
+              <tbody>
+                {sortedSprints.map((s) => (
+                  <tr key={s.iteration_path} className="border-b border-gray-50 last:border-0">
+                    <td className="px-2.5 py-1.5 font-medium text-gray-700 whitespace-nowrap">{s.sprint_name}</td>
+                    <td className="px-2.5 py-1.5 text-gray-500 whitespace-nowrap">{s.sprint_start_date ?? "-"}</td>
+                    <td className="px-2.5 py-1.5 text-gray-500 whitespace-nowrap">{s.sprint_end_date ?? "-"}</td>
+
+                    <td className="px-2.5 py-1.5 text-gray-500 whitespace-nowrap">{s.ticket_count}</td>
+                    <td className="px-2.5 py-1.5 whitespace-nowrap">{s.blocked_count > 0 ? <Badge variant="red">{s.blocked_count}</Badge> : "-"}</td>
+                    <td className="px-2.5 py-1.5 text-gray-500 whitespace-nowrap">{s.in_progress_count}</td>
+                    <td className="px-2.5 py-1.5 text-gray-500 whitespace-nowrap">{s.to_do_count}</td>
+                    <td
+                      className="px-2.5 py-1.5 text-gray-500 whitespace-nowrap cursor-pointer hover:underline hover:text-primary"
+                      onClick={() => setProofSprint(s.sprint_name)}
+                      title="Click to see per-ticket breakdown"
+                    >
+                      {s.remaining_hours > 0
+                        ? `${s.remaining_hours}h`
+                        : s.tickets_with_no_effort_data > 0
+                        ? <span className="text-amber-600" title={`${s.tickets_with_no_effort_data} ticket(s) with no effort data logged`}>unknown</span>
+                        : "0h"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+      
+      <TableControls
+        search={{ value: search, onChange: setSearch, placeholder: "Search title, assignee, or ID…" }}
+        filters={[
+          {
+            value: filter,
+            onChange: (v) => setFilter(v as DevopsFilter),
+            options: [
+              ["all", "All tickets"],
+              ["blocked", "Blocked only"],
+              ["in_progress", "In progress only"],
+              ["past_due", "Due past project end"],
+              ["unestimated", "No effort data logged"],
+            ],
+          },
+        ]}
+      />
+
+      <div className="rounded-xl border border-[hsl(var(--primary)/0.3)] overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-[11px]">
+            <thead>
+              <tr className="bg-gray-50 border-b border-gray-200">
+                 <SortableTh label="ID" sortKey="id" activeSort={ticketSort} activeDir={ticketSortDir} onSort={handleTicketSort} />
+    <SortableTh label="Title" sortKey="title" activeSort={ticketSort} activeDir={ticketSortDir} onSort={handleTicketSort} />
+    <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5 whitespace-nowrap">Type</th>
+    <SortableTh label="State" sortKey="state" activeSort={ticketSort} activeDir={ticketSortDir} onSort={handleTicketSort} />
+    <SortableTh label="Assigned to" sortKey="assigned_to" activeSort={ticketSort} activeDir={ticketSortDir} onSort={handleTicketSort} />
+    <SortableTh label="Start" sortKey="start_date" activeSort={ticketSort} activeDir={ticketSortDir} onSort={handleTicketSort} />
+    <SortableTh label="Due" sortKey="due_date" activeSort={ticketSort} activeDir={ticketSortDir} onSort={handleTicketSort} />
+   <SortableTh label="Remaining" sortKey="remaining_hours" activeSort={ticketSort} activeDir={ticketSortDir} onSort={handleTicketSort} />
+    <SortableTh label="Completed" sortKey="completed_hours" activeSort={ticketSort} activeDir={ticketSortDir} onSort={handleTicketSort} />
+    <SortableTh label="Estimate" sortKey="original_estimate_hours" activeSort={ticketSort} activeDir={ticketSortDir} onSort={handleTicketSort} />
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((t) => (
+                <tr key={t.id} className="border-b border-gray-50 last:border-0">
+                  <td className="px-2.5 py-1.5 text-gray-500 whitespace-nowrap">{t.id}</td>
+                  <td className="px-2.5 py-1.5 text-gray-700 font-medium max-w-xs truncate" title={t.title ?? undefined}>
+                    {t.title ?? "-"}
+                  </td>
+                  <td className="px-2.5 py-1.5 text-gray-500 whitespace-nowrap">{t.work_item_type ?? "-"}</td>
+                  <td className="px-2.5 py-1.5 whitespace-nowrap">
+                    <span className="flex items-center gap-1">
+                      {t.state}
+                      {t.is_blocked && <Badge variant="red">blocked</Badge>}
+                      {t.is_past_project_end && <Badge variant="amber">past end</Badge>}
+                      {/* {t.is_effort_inconsistent && <Badge variant="amber">stalled?</Badge>} */}
+                    </span>
+                  </td>
+                  <td className="px-2.5 py-1.5 text-gray-500 whitespace-nowrap">{t.assigned_to ?? "-"}</td>
+                  <td className="px-2.5 py-1.5 text-gray-500 whitespace-nowrap">{t.start_date ?? "-"}</td>
+                  <td className="px-2.5 py-1.5 text-gray-500 whitespace-nowrap">{t.due_date ?? "-"}</td>
+                  <td className="px-2.5 py-1.5 text-gray-500 whitespace-nowrap">
+                    {t.remaining_hours != null && t.remaining_hours > 0 ? (
+                      t.remaining_hours
+                    ) : t.original_estimate_hours == null || t.original_estimate_hours === 0 ? (
+                      <span className="text-amber-600" title="No estimate or remaining-work logged">unestimated</span>
+                    ) : (
+                      t.remaining_hours ?? "-"
+                    )}
+                  </td>
+                  <td className="px-2.5 py-1.5 text-gray-500 whitespace-nowrap">{t.completed_hours ?? "-"}</td>
+                  <td className="px-2.5 py-1.5 text-gray-500 whitespace-nowrap">{t.original_estimate_hours ?? "-"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {rows.length === 0 && <p className="text-xs text-gray-400 italic text-center py-4">No tickets match the current filters.</p>}
+        {proofSprint && (() => {
+  const proofRows = (devops.tickets ?? []).filter((t) => t.sprint_name === proofSprint);
+  const total = proofRows.reduce((sum, t) => sum + (t.effective_remaining_hours ?? 0), 0);
+  return (
+    <Modal title={`${proofSprint} — Remaining Hours Proof`} onClose={() => setProofSprint(null)} widthClassName="max-w-3xl">
+      <div className="p-5 space-y-3 text-xs">
+        <p className="text-gray-500">
+          Every open ticket in {proofSprint}. Tickets with a "?" have no RemainingWork or OriginalEstimate
+          logged in DevOps at all, so their true remaining effort is unknown — they contribute 0h to the total below.
+        </p>
+        <div className="rounded-xl border border-[hsl(var(--primary)/0.3)] overflow-hidden">
+          <table className="w-full text-[11px]">
+            <thead>
+              <tr className="bg-gray-50 border-b border-gray-200">
+                <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5">ID</th>
+                <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5">Title</th>
+                <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5">State</th>
+                <th className="text-right font-semibold text-gray-500 px-2.5 py-1.5">Remaining</th>
+              </tr>
+            </thead>
+            <tbody>
+              {proofRows.map((t) => (
+                <tr key={t.id} className="border-b border-gray-50 last:border-0">
+                  <td className="px-2.5 py-1.5 text-gray-500">{t.id}</td>
+                  <td className="px-2.5 py-1.5 text-gray-700 font-medium max-w-xs truncate">{t.title ?? "-"}</td>
+                  <td className="px-2.5 py-1.5 text-gray-500">{t.state}</td>
+                  <td className="px-2.5 py-1.5 text-right font-medium">
+                    {t.effective_remaining_hours != null ? (
+                      `${t.effective_remaining_hours}h`
+                    ) : (
+                      <span className="text-amber-600" title="No RemainingWork or OriginalEstimate logged">?</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr className="border-t border-gray-200">
+                <td colSpan={3} className="px-2.5 py-1.5 text-right font-semibold text-gray-700">Total</td>
+                <td className="px-2.5 py-1.5 text-right font-semibold text-gray-900">{Math.round(total * 10) / 10}h</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+    </Modal>
+  );
+})()}
       </div>
     </div>
   );

@@ -23,6 +23,7 @@ function convertRevenue(monthly: number, period: RevenuePeriod): number {
   if (period === "week") return (monthly / 30) * 7;
   return monthly;
 }
+
 type HealthSort =
   | "risk_desc"
   | "overrun_desc"
@@ -34,19 +35,35 @@ type HealthSort =
   | "project_asc"
   | "client_asc";
 
-const ROOT_CAUSES: { value: string; label: string }[] = Object.entries(ROOT_CAUSE_LABEL).map(([value, label]) => ({ value, label }));
+const ROOT_CAUSES: { value: string; label: string }[] = Object.entries(ROOT_CAUSE_LABEL).map(
+  ([value, label]) => ({ value, label })
+);
 
 const SORT_OPTIONS: { value: HealthSort; label: string }[] = [
-  { value: "risk_desc", label: "Sort: highest risk first" },
-  { value: "overrun_desc", label: "Sort: most overrun days" },
-  { value: "unbilled_desc", label: "Sort: highest $ at risk" },
-  { value: "churn_desc", label: "Sort: highest churn" },
+  { value: "risk_desc",      label: "Sort: highest risk first" },
+  { value: "overrun_desc",   label: "Sort: most overrun days" },
+  { value: "unbilled_desc",  label: "Sort: highest $ at risk" },
+  { value: "churn_desc",     label: "Sort: highest churn" },
   { value: "headcount_desc", label: "Sort: largest team" },
-  { value: "headcount_asc", label: "Sort: smallest team" },
-  { value: "rampdown_asc", label: "Sort: ending soonest" },
-  { value: "project_asc", label: "Sort: project A–Z" },
-  { value: "client_asc", label: "Sort: client A–Z" },
+  { value: "headcount_asc",  label: "Sort: smallest team" },
+  { value: "rampdown_asc",   label: "Sort: ending soonest" },
+  { value: "project_asc",    label: "Sort: project A–Z" },
+  { value: "client_asc",     label: "Sort: client A–Z" },
 ];
+
+// ── TABLE COLUMNS (single source of truth so header count == cell count) ──
+const TABLE_COLUMNS = [
+  "Project",
+  "Client",
+  "Type",
+  "Team (actual/expected)",
+  "Risk",
+  "Root Causes",
+  "Unbilled $/mo",
+  "Real WSR (latest)",
+  "DevOps board",
+  "Ramp-down?",
+] as const;
 
 interface HealthFilterOptions {
   search: string;
@@ -58,6 +75,7 @@ interface HealthFilterOptions {
   understaffedOnly: boolean;
   rampDownOnly: boolean;
   hasUnbilledValueOnly: boolean;
+  devopsRiskOnly: boolean; // ← NEW
   sort: HealthSort;
 }
 
@@ -74,50 +92,98 @@ function filterAndSortHealth(rows: HealthProject[], opts: HealthFilterOptions): 
         (p.tech_coe ?? "").toLowerCase().includes(q)
     );
   }
-  if (opts.riskFilter !== "all") result = result.filter((p) => p.risk_band === opts.riskFilter);
+  if (opts.riskFilter !== "all")      result = result.filter((p) => p.risk_band === opts.riskFilter);
   if (opts.rootCauseFilter !== "all") result = result.filter((p) => p.root_causes.includes(opts.rootCauseFilter));
-  if (opts.typeFilter !== "all") result = result.filter((p) => p.type_of_project === opts.typeFilter);
+  if (opts.typeFilter !== "all")      result = result.filter((p) => p.type_of_project === opts.typeFilter);
   if (opts.coeFilter !== "all") {
-    result = result.filter((p) => (opts.coeFilter === "" ? p.coe === null : p.coe === opts.coeFilter));
+    result = result.filter((p) =>
+      opts.coeFilter === "" ? p.coe === null : p.coe === opts.coeFilter
+    );
   }
-  if (opts.wsrFilter === "no_report") result = result.filter((p) => !p.wsr_data_available);
+  if (opts.wsrFilter === "no_report")   result = result.filter((p) => !p.wsr_data_available);
   else if (opts.wsrFilter === "has_report") result = result.filter((p) => p.wsr_data_available);
-  else if (opts.wsrFilter !== "all") result = result.filter((p) => p.wsr_latest_signal === opts.wsrFilter);
-  if (opts.understaffedOnly) result = result.filter((p) => p.is_understaffed);
-  if (opts.rampDownOnly) result = result.filter((p) => p.is_ramp_down_candidate);
+  else if (opts.wsrFilter !== "all")    result = result.filter((p) => p.wsr_latest_signal === opts.wsrFilter);
+  if (opts.understaffedOnly)    result = result.filter((p) => p.is_understaffed);
+  if (opts.rampDownOnly)        result = result.filter((p) => p.is_ramp_down_candidate);
   if (opts.hasUnbilledValueOnly) result = result.filter((p) => p.monthly_unbilled_value_usd > 0);
+  if (opts.devopsRiskOnly)      result = result.filter((p) => p.devops_extension_risk); // ← NEW
 
   const sorted = [...result];
   switch (opts.sort) {
-    case "risk_desc":
-      sorted.sort((a, b) => b.risk_score - a.risk_score);
-      break;
-    case "overrun_desc":
-      sorted.sort((a, b) => (b.overrun_days ?? -Infinity) - (a.overrun_days ?? -Infinity));
-      break;
-    case "unbilled_desc":
-      sorted.sort((a, b) => b.monthly_unbilled_value_usd - a.monthly_unbilled_value_usd);
-      break;
-    case "churn_desc":
-      sorted.sort((a, b) => (b.churn_per_month ?? -Infinity) - (a.churn_per_month ?? -Infinity));
-      break;
-    case "headcount_desc":
-      sorted.sort((a, b) => b.n_employees - a.n_employees);
-      break;
-    case "headcount_asc":
-      sorted.sort((a, b) => a.n_employees - b.n_employees);
-      break;
-    case "rampdown_asc":
-      sorted.sort((a, b) => (a.days_to_ramp_down ?? Infinity) - (b.days_to_ramp_down ?? Infinity));
-      break;
-    case "project_asc":
-      sorted.sort((a, b) => a.project_code.localeCompare(b.project_code));
-      break;
-    case "client_asc":
-      sorted.sort((a, b) => (a.client_id ?? "").localeCompare(b.client_id ?? ""));
-      break;
+    case "risk_desc":      sorted.sort((a, b) => b.risk_score - a.risk_score); break;
+    case "overrun_desc":   sorted.sort((a, b) => (b.overrun_days ?? -Infinity) - (a.overrun_days ?? -Infinity)); break;
+    case "unbilled_desc":  sorted.sort((a, b) => b.monthly_unbilled_value_usd - a.monthly_unbilled_value_usd); break;
+    case "churn_desc":     sorted.sort((a, b) => (b.churn_per_month ?? -Infinity) - (a.churn_per_month ?? -Infinity)); break;
+    case "headcount_desc": sorted.sort((a, b) => b.n_employees - a.n_employees); break;
+    case "headcount_asc":  sorted.sort((a, b) => a.n_employees - b.n_employees); break;
+    case "rampdown_asc":   sorted.sort((a, b) => (a.days_to_ramp_down ?? Infinity) - (b.days_to_ramp_down ?? Infinity)); break;
+    case "project_asc":    sorted.sort((a, b) => a.project_code.localeCompare(b.project_code)); break;
+    case "client_asc":     sorted.sort((a, b) => (a.client_id ?? "").localeCompare(b.client_id ?? "")); break;
   }
   return sorted;
+}
+
+// ── Inline DevOps cell — what the resource manager sees in each row ────────
+function DevopsBoardCell({ p, onOpenProject }: { p: HealthProject; onOpenProject: (code: string, tab?: string) => void }) {
+  if (!p.devops_data_available) {
+    return <span className="text-gray-300 text-[11px]">—</span>;
+  }
+
+  if (p.devops_open_tickets === 0) {
+    return <span className="text-emerald-500 text-[11px]">all closed</span>;
+  }
+
+  // Build a compact one-line summary for the RM
+  const parts: string[] = [];
+  if (p.devops_blocked_tickets > 0)       parts.push(`${p.devops_blocked_tickets} blocked`);
+  if (p.devops_in_progress_tickets > 0)   parts.push(`${p.devops_in_progress_tickets} in progress`);
+  if (p.devops_tickets_past_project_end > 0) parts.push(`${p.devops_tickets_past_project_end} past end`);
+
+  const tooltip = [
+    `${p.devops_open_tickets} open ticket(s)`,
+    p.devops_remaining_effort_hours > 0 ? `${p.devops_remaining_effort_hours}h remaining` : null,
+    p.devops_effort_completion_pct != null ? `${p.devops_effort_completion_pct}% effort done` : null,
+    p.devops_is_overdue ? "project end date passed" : null,
+    p.devops_within_risk_window
+      ? `${p.devops_working_days_in_window} working day(s) left`
+      : null,
+    p.devops_capacity_surplus_hours != null
+      ? p.devops_capacity_surplus_hours >= 0
+        ? `${p.devops_capacity_surplus_hours}h capacity surplus`
+        : `${Math.abs(p.devops_capacity_surplus_hours)}h capacity shortfall`
+      : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  return (
+    <button
+      onClick={() => onOpenProject(p.project_code, "devops")}
+      title={tooltip}
+      className="text-left"
+    >
+      {p.devops_extension_risk ? (
+        <span className="inline-flex flex-col gap-0.5">
+          <span className="text-[11px] text-amber-700 font-medium">
+            {p.devops_is_overdue
+              ? `overdue · ${p.devops_remaining_effort_hours}h left`
+              : p.devops_capacity_surplus_hours != null && p.devops_capacity_surplus_hours < 0
+              ? `${Math.abs(p.devops_capacity_surplus_hours)}h shortfall`
+              : parts.join(" · ") || `${p.devops_open_tickets} open`}
+          </span>
+          {p.devops_remaining_effort_hours > 0 && !p.devops_is_overdue && (
+            <span className="text-[10px] text-gray-400">
+              {p.devops_remaining_effort_hours}h remaining
+            </span>
+          )}
+        </span>
+      ) : (
+        <span className="text-[11px] text-gray-500">
+          {p.devops_open_tickets} open · on track
+        </span>
+      )}
+    </button>
+  );
 }
 
 export default function HealthPage() {
@@ -129,41 +195,45 @@ export default function HealthPage() {
 }
 
 function HealthPageInner() {
-  const projects = useQuery({ queryKey: ["health-projects"], queryFn: api.healthProjects });
+  const projects     = useQuery({ queryKey: ["health-projects"],       queryFn: api.healthProjects });
   const overtimeRisk = useQuery({ queryKey: ["overtime-risk-summary"], queryFn: api.overtimeRiskSummary });
-  const [selectedProject, setSelectedProject] = useState<string | null>(null);
+
+  const [selectedProject, setSelectedProject]         = useState<string | null>(null);
+  const [selectedProjectTab, setSelectedProjectTab]   = useState<string | undefined>(undefined);
   const [unbilledProofProject, setUnbilledProofProject] = useState<{ code: string; client: string | null } | null>(null);
   const [overtimeRiskModalOpen, setOvertimeRiskModalOpen] = useState(false);
-  const [selectedEmployee, setSelectedEmployee] = useState<string | null>(null);
+  const [selectedEmployee, setSelectedEmployee]       = useState<string | null>(null);
   const searchParams = useSearchParams();
 
-  const [search, setSearch] = useState("");
-  const [riskFilter, setRiskFilter] = useState<RiskFilter>("all");
-  const [rootCauseFilter, setRootCauseFilter] = useState("all");
-  const [typeFilter, setTypeFilter] = useState("all");
-  const [coeFilter, setCoeFilter] = useState("all");
-  const [wsrFilter, setWsrFilter] = useState<WsrFilter>("all");
-  const [understaffedOnly, setUnderstaffedOnly] = useState(false);
-  const [rampDownOnly, setRampDownOnly] = useState(false);
+  const [search,             setSearch]             = useState("");
+  const [riskFilter,         setRiskFilter]         = useState<RiskFilter>("all");
+  const [rootCauseFilter,    setRootCauseFilter]    = useState("all");
+  const [typeFilter,         setTypeFilter]         = useState("all");
+  const [coeFilter,          setCoeFilter]          = useState("all");
+  const [wsrFilter,          setWsrFilter]          = useState<WsrFilter>("all");
+  const [understaffedOnly,   setUnderstaffedOnly]   = useState(false);
+  const [rampDownOnly,       setRampDownOnly]       = useState(false);
   const [hasUnbilledValueOnly, setHasUnbilledValueOnly] = useState(false);
+  const [devopsRiskOnly,     setDevopsRiskOnly]     = useState(false); // ← NEW
   const [revenueBreakdownOpen, setRevenueBreakdownOpen] = useState(false);
-  const [revenuePeriod, setRevenuePeriod] = useState<RevenuePeriod>("month");
-  const [sort, setSort] = useState<HealthSort>("risk_desc");
+  const [revenuePeriod,      setRevenuePeriod]      = useState<RevenuePeriod>("month");
+  const [sort,               setSort]               = useState<HealthSort>("risk_desc");
 
   useEffect(() => {
     const risk = searchParams.get("risk");
     if (risk === "high" || risk === "medium" || risk === "low") setRiskFilter(risk);
     if (searchParams.get("understaffed") === "true") setUnderstaffedOnly(true);
-    if (searchParams.get("wsr") === "has_report") setWsrFilter("has_report");
+    if (searchParams.get("wsr") === "has_report")    setWsrFilter("has_report");
+    if (searchParams.get("devops") === "true")       setDevopsRiskOnly(true); // ← NEW: deep-link support
     if (searchParams.get("revenue") === "true") {
       setHasUnbilledValueOnly(true);
       setRevenueBreakdownOpen(true);
     }
   }, []);
 
-  const toggleRiskFilter = (band: "high" | "medium" | "low") => {
+  const toggleRiskFilter = (band: "high" | "medium" | "low") =>
     setRiskFilter((current) => (current === band ? "all" : band));
-  };
+
   const toggleRevenue = () => {
     setHasUnbilledValueOnly((v) => {
       const next = !v;
@@ -172,23 +242,31 @@ function HealthPageInner() {
     });
   };
 
+  // Open a project's detail modal, optionally jumping straight to a tab
+  const openProject = (code: string, tab?: string) => {
+    setSelectedProject(code);
+    setSelectedProjectTab(tab);
+  };
+
   if (projects.isLoading) {
     return (
       <div className="p-4 sm:p-6 max-w-6xl mx-auto space-y-4">
         <StatCardGridSkeleton count={3} className="grid grid-cols-1 sm:grid-cols-3 gap-4" />
-        <StatCardGridSkeleton count={3} className="grid grid-cols-1 sm:grid-cols-3 gap-4" />
-        <TableSkeleton columns={9} rows={10} />
+        <StatCardGridSkeleton count={4} className="grid grid-cols-2 lg:grid-cols-4 gap-4" />
+        <TableSkeleton columns={TABLE_COLUMNS.length} rows={10} />
       </div>
     );
   }
   if (projects.error) return <ErrorState message="Could not load health data." />;
 
-  const data = projects.data ?? [];
+  const data  = projects.data ?? [];
   const types = Array.from(new Set(data.map((p) => p.type_of_project))).sort();
-  const coes = Array.from(new Set(data.map((p) => p.coe).filter((v): v is string => Boolean(v)))).sort();
+  const coes  = Array.from(new Set(data.map((p) => p.coe).filter((v): v is string => Boolean(v)))).sort();
 
   const filtered = filterAndSortHealth(data, {
-    search, riskFilter, rootCauseFilter, typeFilter, coeFilter, wsrFilter, understaffedOnly, rampDownOnly, hasUnbilledValueOnly, sort,
+    search, riskFilter, rootCauseFilter, typeFilter, coeFilter,
+    wsrFilter, understaffedOnly, rampDownOnly, hasUnbilledValueOnly,
+    devopsRiskOnly, sort,
   });
 
   const hasActiveFilters =
@@ -200,7 +278,8 @@ function HealthPageInner() {
     wsrFilter !== "all" ||
     understaffedOnly ||
     rampDownOnly ||
-    hasUnbilledValueOnly;
+    hasUnbilledValueOnly ||
+    devopsRiskOnly; // ← NEW
 
   const clearFilters = () => {
     setSearch("");
@@ -212,46 +291,34 @@ function HealthPageInner() {
     setUnderstaffedOnly(false);
     setRampDownOnly(false);
     setHasUnbilledValueOnly(false);
+    setDevopsRiskOnly(false); // ← NEW
     setRevenueBreakdownOpen(false);
   };
 
   const counts = {
-    high: data.filter((p) => p.risk_band === "high").length,
+    high:   data.filter((p) => p.risk_band === "high").length,
     medium: data.filter((p) => p.risk_band === "medium").length,
-    low: data.filter((p) => p.risk_band === "low").length,
+    low:    data.filter((p) => p.risk_band === "low").length,
   };
-  const understaffedCount = data.filter((p) => p.is_understaffed).length;
+  const understaffedCount  = data.filter((p) => p.is_understaffed).length;
+  const devopsRiskCount    = data.filter((p) => p.devops_extension_risk).length; // ← NEW
   const totalUnbilledValue = data.reduce((sum, p) => sum + p.monthly_unbilled_value_usd, 0);
-  const unbilledProjects = [...data]
+  const unbilledProjects   = [...data]
     .filter((p) => p.monthly_unbilled_value_usd > 0)
     .sort((a, b) => b.monthly_unbilled_value_usd - a.monthly_unbilled_value_usd);
 
   return (
     <div className="p-4 sm:p-6 max-w-6xl mx-auto space-y-4">
+
+      {/* ── Row 1: Risk band stat cards ── */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <StatCard
-          label="High Risk"
-          value={counts.high}
-          color="red"
-          onClick={() => toggleRiskFilter("high")}
-          active={riskFilter === "high"}
-        />
-        <StatCard
-          label="Medium Risk"
-          value={counts.medium}
-          color="amber"
-          onClick={() => toggleRiskFilter("medium")}
-          active={riskFilter === "medium"}
-        />
-        <StatCard
-          label="Low Risk"
-          value={counts.low}
-          color="green"
-          onClick={() => toggleRiskFilter("low")}
-          active={riskFilter === "low"}
-        />
+        <StatCard label="High Risk"   value={counts.high}   color="red"   onClick={() => toggleRiskFilter("high")}   active={riskFilter === "high"} />
+        <StatCard label="Medium Risk" value={counts.medium} color="amber" onClick={() => toggleRiskFilter("medium")} active={riskFilter === "medium"} />
+        <StatCard label="Low Risk"    value={counts.low}    color="green" onClick={() => toggleRiskFilter("low")}    active={riskFilter === "low"} />
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+
+      {/* ── Row 2: Operational stat cards (4-wide on large screens) ── */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           label="Understaffed"
           value={understaffedCount}
@@ -280,8 +347,18 @@ function HealthPageInner() {
           onClick={() => setOvertimeRiskModalOpen(true)}
           active={overtimeRiskModalOpen}
         />
+        {/* ← NEW: DevOps extension risk stat card */}
+        <StatCard
+          label="DevOps Extension Risk"
+          value={devopsRiskCount}
+          sub="open / blocked tickets near end date"
+          color={devopsRiskCount > 0 ? "amber" : "default"}
+          onClick={() => setDevopsRiskOnly((v) => !v)}
+          active={devopsRiskOnly}
+        />
       </div>
 
+      {/* ── Revenue breakdown panel ── */}
       {revenueBreakdownOpen && (
         <div className="rounded-xl border border-red-200 bg-red-50/40 p-3.5 space-y-2">
           <p className="text-[11px] text-gray-500">
@@ -289,46 +366,49 @@ function HealthPageInner() {
           </p>
           <div className="rounded-lg border border-[hsl(var(--primary)/0.3)] bg-white overflow-hidden">
             <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead className="bg-secondary text-secondary-foreground">
-                <tr>
-                  <th className="text-left font-medium px-3 py-1.5 whitespace-nowrap">Project</th>
-                  <th className="text-left font-medium px-3 py-1.5 whitespace-nowrap">Client</th>
-                  <th className="text-right font-medium px-3 py-1.5 whitespace-nowrap">$ at risk / {revenuePeriod}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {unbilledProjects.map((p) => (
-                  <tr key={p.project_code} className="border-b border-gray-50 last:border-0 hover:bg-gray-50/50">
-                    <td className="px-3 py-1.5 whitespace-nowrap">
-                      <button onClick={() => setSelectedProject(p.project_code)} className="font-medium text-primary hover:underline">
-                        {p.project_code}
-                      </button>
-                    </td>
-                    <td className="px-3 py-1.5 text-gray-500 whitespace-nowrap">{p.client_id ?? "-"}</td>
-                    <td className="px-3 py-1.5 text-right whitespace-nowrap">
-                      <button
-                        onClick={() => setUnbilledProofProject({ code: p.project_code, client: p.client_id })}
-                        className="text-gray-700 font-medium hover:underline hover:text-primary"
-                        title="Click to see exactly which allocations this figure comes from"
-                      >
-                        {formatUsd(convertRevenue(p.monthly_unbilled_value_usd, revenuePeriod))}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-                {unbilledProjects.length === 0 && (
+              <table className="w-full text-xs">
+                <thead className="bg-secondary text-secondary-foreground">
                   <tr>
-                    <td colSpan={3} className="text-center text-xs text-gray-400 italic py-4">No projects currently have unbilled value at risk.</td>
+                    <th className="text-left font-medium px-3 py-1.5 whitespace-nowrap">Project</th>
+                    <th className="text-left font-medium px-3 py-1.5 whitespace-nowrap">Client</th>
+                    <th className="text-right font-medium px-3 py-1.5 whitespace-nowrap">$ at risk / {revenuePeriod}</th>
                   </tr>
-                )}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {unbilledProjects.map((p) => (
+                    <tr key={p.project_code} className="border-b border-gray-50 last:border-0 hover:bg-gray-50/50">
+                      <td className="px-3 py-1.5 whitespace-nowrap">
+                        <button onClick={() => openProject(p.project_code)} className="font-medium text-primary hover:underline">
+                          {p.project_code}
+                        </button>
+                      </td>
+                      <td className="px-3 py-1.5 text-gray-500 whitespace-nowrap">{p.client_id ?? "-"}</td>
+                      <td className="px-3 py-1.5 text-right whitespace-nowrap">
+                        <button
+                          onClick={() => setUnbilledProofProject({ code: p.project_code, client: p.client_id })}
+                          className="text-gray-700 font-medium hover:underline hover:text-primary"
+                          title="Click to see exactly which allocations this figure comes from"
+                        >
+                          {formatUsd(convertRevenue(p.monthly_unbilled_value_usd, revenuePeriod))}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {unbilledProjects.length === 0 && (
+                    <tr>
+                      <td colSpan={3} className="text-center text-xs text-gray-400 italic py-4">
+                        No projects currently have unbilled value at risk.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
       )}
 
+      {/* ── Filter panel ── */}
       <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-2.5">
         <div className="flex items-center gap-2">
           <p className="text-xs font-semibold text-gray-700">
@@ -358,6 +438,7 @@ function HealthPageInner() {
         />
 
         <div className="flex items-center gap-1.5 flex-wrap">
+          {/* Risk pill tabs */}
           <div className="flex items-center bg-gray-100 rounded-full p-0.5 text-xs font-medium">
             {(["all", "high", "medium", "low"] as RiskFilter[]).map((f) => (
               <button
@@ -372,30 +453,49 @@ function HealthPageInner() {
               </button>
             ))}
           </div>
+
+          {/* Dropdown filters */}
           <select
             value={rootCauseFilter}
             onChange={(e) => setRootCauseFilter(e.target.value)}
-            className="text-[11px] px-1.5 py-1 rounded-lg border border-gray-200 bg-white text-gray-600"
+            className={cn(
+              "text-[11px] px-1.5 py-1 rounded-lg border bg-white transition-colors",
+              rootCauseFilter !== "all"
+                ? "border-primary/50 text-primary font-semibold bg-primary/5"
+                : "border-gray-200 text-gray-600"
+            )}
           >
             <option value="all">All root causes</option>
             {ROOT_CAUSES.map((c) => (
               <option key={c.value} value={c.value}>{c.label}</option>
             ))}
           </select>
+
           <select
             value={typeFilter}
             onChange={(e) => setTypeFilter(e.target.value)}
-            className="text-[11px] px-1.5 py-1 rounded-lg border border-gray-200 bg-white text-gray-600"
+            className={cn(
+              "text-[11px] px-1.5 py-1 rounded-lg border bg-white transition-colors",
+              typeFilter !== "all"
+                ? "border-primary/50 text-primary font-semibold bg-primary/5"
+                : "border-gray-200 text-gray-600"
+            )}
           >
             <option value="all">All project types</option>
             {types.map((t) => (
               <option key={t} value={t}>{t}</option>
             ))}
           </select>
+
           <select
             value={coeFilter}
             onChange={(e) => setCoeFilter(e.target.value)}
-            className="text-[11px] px-1.5 py-1 rounded-lg border border-gray-200 bg-white text-gray-600"
+            className={cn(
+              "text-[11px] px-1.5 py-1 rounded-lg border bg-white transition-colors",
+              coeFilter !== "all"
+                ? "border-primary/50 text-primary font-semibold bg-primary/5"
+                : "border-gray-200 text-gray-600"
+            )}
           >
             <option value="all">All CoEs</option>
             {coes.map((c) => (
@@ -403,10 +503,16 @@ function HealthPageInner() {
             ))}
             <option value="">Not determined</option>
           </select>
+
           <select
             value={wsrFilter}
             onChange={(e) => setWsrFilter(e.target.value as WsrFilter)}
-            className="text-[11px] px-1.5 py-1 rounded-lg border border-gray-200 bg-white text-gray-600"
+            className={cn(
+              "text-[11px] px-1.5 py-1 rounded-lg border bg-white transition-colors",
+              wsrFilter !== "all"
+                ? "border-primary/50 text-primary font-semibold bg-primary/5"
+                : "border-gray-200 text-gray-600"
+            )}
           >
             <option value="all">All WSR</option>
             <option value="RED">Latest WSR: RED</option>
@@ -414,95 +520,175 @@ function HealthPageInner() {
             <option value="GREEN">Latest WSR: GREEN</option>
             <option value="no_report">No WSR report</option>
           </select>
+
+          {/* Toggle buttons */}
           <button
             onClick={() => setUnderstaffedOnly((v) => !v)}
             className={cn(
-              "text-[11px] px-2 py-1 rounded-lg border whitespace-nowrap transition",
-              understaffedOnly ? "bg-amber-50 border-amber-200 text-amber-700" : "border-gray-200 text-gray-500"
+              "text-[11px] px-2 py-1 rounded-lg border whitespace-nowrap transition-colors",
+              understaffedOnly
+                ? "bg-amber-50 border-amber-300 text-amber-700 font-semibold"
+                : "border-gray-200 text-gray-500 hover:border-gray-300"
             )}
           >
             Understaffed only
           </button>
+
           <button
             onClick={() => setRampDownOnly((v) => !v)}
             className={cn(
-              "text-[11px] px-2 py-1 rounded-lg border whitespace-nowrap transition",
-              rampDownOnly ? "bg-amber-50 border-amber-200 text-amber-700" : "border-gray-200 text-gray-500"
+              "text-[11px] px-2 py-1 rounded-lg border whitespace-nowrap transition-colors",
+              rampDownOnly
+                ? "bg-amber-50 border-amber-300 text-amber-700 font-semibold"
+                : "border-gray-200 text-gray-500 hover:border-gray-300"
             )}
           >
             Ramp-down only
           </button>
+
+          {/* ← NEW: DevOps risk toggle */}
+          <button
+            onClick={() => setDevopsRiskOnly((v) => !v)}
+            className={cn(
+              "text-[11px] px-2 py-1 rounded-lg border whitespace-nowrap transition-colors",
+              devopsRiskOnly
+                ? "bg-primary/10 border-primary/40 text-primary font-semibold"
+                : "border-gray-200 text-gray-500 hover:border-gray-300"
+            )}
+          >
+            DevOps risk only
+            {devopsRiskCount > 0 && (
+              <span
+                className={cn(
+                  "ml-1 inline-flex items-center justify-center rounded-full px-1 text-[9px] font-bold leading-none",
+                  devopsRiskOnly ? "bg-primary text-white" : "bg-gray-200 text-gray-600"
+                )}
+              >
+                {devopsRiskCount}
+              </span>
+            )}
+          </button>
         </div>
       </div>
 
+      {/* ── Main project table ── */}
       <div className="rounded-xl border border-[hsl(var(--primary)/0.3)] bg-white overflow-hidden">
         <div className="overflow-x-auto">
-        <table className="w-full text-xs data-table">
-          <thead className="bg-secondary text-secondary-foreground">
-            <tr>
-              {["Project", "Client", "Type", "Team (actual/expected)", "Risk", "Root Causes", "Unbilled $/mo", "Real WSR (latest)", "Ramp-down?"].map((h) => (
-                <th key={h} className="text-left font-medium px-3 py-2 whitespace-nowrap">{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((p) => (
-              <tr key={p.project_code} className="border-b border-gray-50 last:border-0 hover:bg-gray-50/50">
-                <td className="px-3 py-2 whitespace-nowrap">
-                  <button
-                    onClick={() => setSelectedProject(p.project_code)}
-                    className="font-medium text-primary hover:underline"
-                    title="View full proof & allocation detail"
-                  >
-                    {p.project_code}
-                  </button>
-                </td>
-                <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{p.client_id ?? "-"}</td>
-                <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{p.type_of_project}</td>
-                <td className="px-3 py-2 text-gray-500 whitespace-nowrap">
-                  {p.n_employees} / {p.expected_headcount ?? "?"}
-                  {p.is_understaffed && <Badge variant="amber">understaffed</Badge>}
-                </td>
-                <td className="px-3 py-2 whitespace-nowrap"><Badge variant={p.risk_band}>{p.risk_band}</Badge></td>
-                <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{p.root_causes.map(rootCauseLabel).join(", ") || "-"}</td>
-                <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{p.monthly_unbilled_value_usd > 0 ? formatUsd(p.monthly_unbilled_value_usd) : "-"}</td>
-                <td className="px-3 py-2 whitespace-nowrap">
-                  <div className="flex items-center gap-1.5">
-                    {p.wsr_latest_signal ? (
-                      <span title={`Most recent real WSR report. Worst ever recorded for this project: ${p.wsr_worst_signal ?? "n/a"}.`}>
-                        <Badge variant={p.wsr_latest_signal}>{p.wsr_latest_signal}</Badge>
-                      </span>
-                    ) : (
-                      <span className="text-gray-300">no report</span>
-                    )}
-                    {p.wsr_trend && (
-                      <span
-                        title={`WSR trend: ${p.wsr_trend}`}
-                        className={cn(
-                          "text-xs font-semibold",
-                          p.wsr_trend === "deteriorating" ? "text-red-500" : p.wsr_trend === "improving" ? "text-emerald-500" : "text-gray-300"
-                        )}
-                      >
-                        {p.wsr_trend === "deteriorating" ? "↓" : p.wsr_trend === "improving" ? "↑" : "→"}
-                      </span>
-                    )}
-                  </div>
-                </td>
-                <td className="px-3 py-2 whitespace-nowrap">{p.is_ramp_down_candidate && <Badge variant="amber">{p.days_to_ramp_down}d</Badge>}</td>
-              </tr>
-            ))}
-            {filtered.length === 0 && (
+          <table className="w-full text-xs data-table">
+            <thead className="bg-secondary text-secondary-foreground">
               <tr>
-                <td colSpan={9} className="text-center text-xs text-gray-400 italic py-6">No projects match the current filters.</td>
+                {TABLE_COLUMNS.map((h) => (
+                  <th key={h} className="text-left font-medium px-3 py-2 whitespace-nowrap">{h}</th>
+                ))}
               </tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {filtered.map((p) => (
+                <tr key={p.project_code} className="border-b border-gray-50 last:border-0 hover:bg-gray-50/50">
+
+                  {/* Project */}
+                  <td className="px-3 py-2 whitespace-nowrap">
+                    <button
+                      onClick={() => openProject(p.project_code)}
+                      className="font-medium text-primary hover:underline"
+                      title="View full proof & allocation detail"
+                    >
+                      {p.project_code}
+                    </button>
+                  </td>
+
+                  {/* Client */}
+                  <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{p.client_id ?? "-"}</td>
+
+                  {/* Type */}
+                  <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{p.type_of_project}</td>
+
+                  {/* Team */}
+                  <td className="px-3 py-2 text-gray-500 whitespace-nowrap">
+                    {p.n_employees} / {p.expected_headcount ?? "?"}
+                    {p.is_understaffed && <Badge variant="amber">understaffed</Badge>}
+                  </td>
+
+                  {/* Risk */}
+                  <td className="px-3 py-2 whitespace-nowrap">
+                    <Badge variant={p.risk_band}>{p.risk_band}</Badge>
+                  </td>
+
+                  {/* Root causes */}
+                  <td className="px-3 py-2 text-gray-500 whitespace-nowrap">
+                    {p.root_causes.map(rootCauseLabel).join(", ") || "-"}
+                  </td>
+
+                  {/* Unbilled $/mo */}
+                  <td className="px-3 py-2 text-gray-500 whitespace-nowrap">
+                    {p.monthly_unbilled_value_usd > 0
+                      ? formatUsd(p.monthly_unbilled_value_usd)
+                      : "-"}
+                  </td>
+
+                  {/* Real WSR (latest) */}
+                  <td className="px-3 py-2 whitespace-nowrap">
+                    <div className="flex items-center gap-1.5">
+                      {p.wsr_latest_signal ? (
+                        <span title={`Most recent real WSR report. Worst ever: ${p.wsr_worst_signal ?? "n/a"}.`}>
+                          <Badge variant={p.wsr_latest_signal}>{p.wsr_latest_signal}</Badge>
+                        </span>
+                      ) : (
+                        <span className="text-gray-300">no report</span>
+                      )}
+                      {p.wsr_trend && (
+                        <span
+                          title={`WSR trend: ${p.wsr_trend}`}
+                          className={cn(
+                            "text-xs font-semibold",
+                            p.wsr_trend === "deteriorating"
+                              ? "text-red-500"
+                              : p.wsr_trend === "improving"
+                              ? "text-emerald-500"
+                              : "text-gray-300"
+                          )}
+                        >
+                          {p.wsr_trend === "deteriorating" ? "↓" : p.wsr_trend === "improving" ? "↑" : "→"}
+                        </span>
+                      )}
+                    </div>
+                  </td>
+
+                  {/* ← NEW: DevOps board cell */}
+                  <td className="px-3 py-2 whitespace-nowrap">
+                    <DevopsBoardCell p={p} onOpenProject={openProject} />
+                  </td>
+
+                  {/* Ramp-down */}
+                  <td className="px-3 py-2 whitespace-nowrap">
+                    {p.is_ramp_down_candidate && (
+                      <Badge variant="amber">{p.days_to_ramp_down}d</Badge>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {filtered.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={TABLE_COLUMNS.length} // ← was hardcoded 9, now always in sync
+                    className="text-center text-xs text-gray-400 italic py-6"
+                  >
+                    No projects match the current filters.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
 
+      {/* ── Modals ── */}
       {selectedProject && (
-        <ProjectHealthDetailModal projectCode={selectedProject} onClose={() => setSelectedProject(null)} />
+        <ProjectHealthDetailModal
+          projectCode={selectedProject}
+          initialTab={selectedProjectTab as any}
+          onClose={() => { setSelectedProject(null); setSelectedProjectTab(undefined); }}
+        />
       )}
       {unbilledProofProject && (
         <UnbilledValueProofModal
@@ -521,17 +707,19 @@ function HealthPageInner() {
         />
       )}
       {selectedEmployee && (
-        <EmployeeProfileModal employeeId={selectedEmployee} initialTab="overtime" onClose={() => setSelectedEmployee(null)} />
+        <EmployeeProfileModal
+          employeeId={selectedEmployee}
+          initialTab="overtime"
+          onClose={() => setSelectedEmployee(null)}
+        />
       )}
     </div>
   );
 }
 
+// ── OvertimeRiskModal ──────────────────────────────────────────────────────
 function OvertimeRiskModal({
-  summary,
-  isLoading,
-  onOpenEmployee,
-  onClose,
+  summary, isLoading, onOpenEmployee, onClose,
 }: {
   summary: OvertimeRiskSummary | undefined;
   isLoading: boolean;
@@ -539,54 +727,48 @@ function OvertimeRiskModal({
   onClose: () => void;
 }) {
   return (
-    <Modal title="Sustained Overtime Risk -- Proof" onClose={onClose} widthClassName="max-w-lg">
+    <Modal title="Sustained Overtime Risk — Proof" onClose={onClose} widthClassName="max-w-lg">
       <div className="p-5 space-y-3 text-xs">
         {isLoading ? (
           <LoadingState label="Loading overtime risk…" />
         ) : !summary ? (
           <ErrorState message="Could not load overtime risk." />
+        ) : summary.employees.length === 0 ? (
+          <p className="text-gray-400 italic">No employees currently meet this threshold.</p>
         ) : (
-          <>
-            {summary.employees.length === 0 ? (
-              <p className="text-gray-400 italic">No employees currently meet this threshold.</p>
-            ) : (
-              <table className="w-full text-[11px]">
-                <thead>
-                  <tr className="text-gray-400 border-b border-gray-200">
-                    <th className="text-left font-medium py-1.5">Employee</th>
-                    <th className="text-left font-medium py-1.5">Designation</th>
-                    <th className="text-right font-medium py-1.5">Days over {summary.daily_hours_threshold}h</th>
-                    <th className="text-right font-medium py-1.5">Max hours/day</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {summary.employees.map((e) => (
-                    <tr key={e.employee_id} className="border-b border-gray-50 last:border-0">
-                      <td className="py-1.5">
-                        <button onClick={() => onOpenEmployee(e.employee_id)} className="font-medium text-primary hover:underline">
-                          {e.employee_id}
-                        </button>
-                      </td>
-                      <td className="py-1.5 text-gray-600 whitespace-nowrap">{e.job_name ?? "-"}</td>
-                      <td className="py-1.5 text-right text-gray-700">{e.overtime_days_recent}</td>
-                      <td className="py-1.5 text-right text-gray-700 font-medium">{e.max_daily_hours_recent}h</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </>
+          <table className="w-full text-[11px]">
+            <thead>
+              <tr className="text-gray-400 border-b border-gray-200">
+                <th className="text-left font-medium py-1.5">Employee</th>
+                <th className="text-left font-medium py-1.5">Designation</th>
+                <th className="text-right font-medium py-1.5">Days over {summary.daily_hours_threshold}h</th>
+                <th className="text-right font-medium py-1.5">Max hours/day</th>
+              </tr>
+            </thead>
+            <tbody>
+              {summary.employees.map((e) => (
+                <tr key={e.employee_id} className="border-b border-gray-50 last:border-0">
+                  <td className="py-1.5">
+                    <button onClick={() => onOpenEmployee(e.employee_id)} className="font-medium text-primary hover:underline">
+                      {e.employee_id}
+                    </button>
+                  </td>
+                  <td className="py-1.5 text-gray-600 whitespace-nowrap">{e.job_name ?? "-"}</td>
+                  <td className="py-1.5 text-right text-gray-700">{e.overtime_days_recent}</td>
+                  <td className="py-1.5 text-right text-gray-700 font-medium">{e.max_daily_hours_recent}h</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         )}
       </div>
     </Modal>
   );
 }
 
+// ── UnbilledValueProofModal ────────────────────────────────────────────────
 function UnbilledValueProofModal({
-  projectCode,
-  client,
-  period,
-  onClose,
+  projectCode, client, period, onClose,
 }: {
   projectCode: string;
   client: string | null;
@@ -599,78 +781,77 @@ function UnbilledValueProofModal({
   });
 
   return (
-    <Modal title={`${projectCode}${client ? ` — ${client}` : ""} — Unbilled Value Proof`} onClose={onClose} widthClassName="max-w-2xl">
+    <Modal
+      title={`${projectCode}${client ? ` — ${client}` : ""} — Unbilled Value Proof`}
+      onClose={onClose}
+      widthClassName="max-w-2xl"
+    >
       <div className="p-5 space-y-3 text-xs">
         {detail.isLoading ? (
           <LoadingState label="Loading allocation proof…" />
         ) : detail.error || !detail.data ? (
           <ErrorState message="Could not load this project's allocation detail." />
-        ) : (
-          (() => {
-            const proof = detail.data.shadow_heavy;
-            const rows = proof.qualifying_allocations;
-            return (
-              <>
-                <p className="text-gray-500">
-                  Every currently-active SHADOW/UNBILLED allocation on this project, each converted from its real
-                  monthly $ figure (allocation % × Rate Card hourly rate × 160 standard monthly hours) to{" "}
-                  <strong>per {period}</strong>. These rows are exactly what sums to the {formatUsd(convertRevenue(proof.monthly_unbilled_value_usd, period))}/{period} shown in the table.
-                </p>
-                {rows.length === 0 ? (
-                  <p className="text-gray-400 italic">No currently-active shadow/unbilled allocations on this project.</p>
-                ) : (
-                  <table className="w-full text-[11px]">
-                    <thead>
-                      <tr className="text-gray-400 border-b border-gray-200">
-                        <th className="text-left font-medium py-1.5">Employee</th>
-                        <th className="text-left font-medium py-1.5">Designation</th>
-                        <th className="text-left font-medium py-1.5">Status</th>
-                        <th className="text-right font-medium py-1.5">Alloc %</th>
-                        <th className="text-right font-medium py-1.5">Rate/hr</th>
-                        <th className="text-right font-medium py-1.5">$/{period}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {rows.map((r, i) => (
-                        <tr key={i} className="border-b border-gray-50 last:border-0">
-                          <td className="py-1.5 font-medium text-gray-700 whitespace-nowrap">{r.employee_id}</td>
-                          <td className="py-1.5 text-gray-600 whitespace-nowrap">{r.job_name ?? "-"}</td>
-                          <td className="py-1.5 text-gray-500 whitespace-nowrap">{r.resourcing_status}</td>
-                          <td className="py-1.5 text-right text-gray-700">{r.allocation_by_percentage}%</td>
-                          <td className="py-1.5 text-right text-gray-500">
-                            {r.hourly_rate_usd != null ? `$${r.hourly_rate_usd}` : "-"}
-                          </td>
-                          <td className="py-1.5 text-right text-gray-700 font-medium">
-                            {formatUsd(convertRevenue(r.monthly_unbilled_value_usd, period))}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                    <tfoot>
-                      <tr className="border-t border-gray-200">
-                        <td colSpan={5} className="py-1.5 text-right font-semibold text-gray-700">Total</td>
-                        <td className="py-1.5 text-right font-semibold text-gray-900">
-                          {formatUsd(rows.reduce((sum, r) => sum + convertRevenue(r.monthly_unbilled_value_usd, period), 0))}
+        ) : (() => {
+          const proof = detail.data.shadow_heavy;
+          const rows  = proof.qualifying_allocations;
+          return (
+            <>
+              <p className="text-gray-500">
+                Every currently-active SHADOW/UNBILLED allocation on this project, converted to{" "}
+                <strong>per {period}</strong> (allocation % × Rate Card hourly rate × 160 standard monthly hours).
+                These rows exactly sum to the {formatUsd(convertRevenue(proof.monthly_unbilled_value_usd, period))}/{period} shown in the table.
+              </p>
+              {rows.length === 0 ? (
+                <p className="text-gray-400 italic">No currently-active shadow/unbilled allocations on this project.</p>
+              ) : (
+                <table className="w-full text-[11px]">
+                  <thead>
+                    <tr className="text-gray-400 border-b border-gray-200">
+                      <th className="text-left font-medium py-1.5">Employee</th>
+                      <th className="text-left font-medium py-1.5">Designation</th>
+                      <th className="text-left font-medium py-1.5">Status</th>
+                      <th className="text-right font-medium py-1.5">Alloc %</th>
+                      <th className="text-right font-medium py-1.5">Rate/hr</th>
+                      <th className="text-right font-medium py-1.5">$/{period}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((r, i) => (
+                      <tr key={i} className="border-b border-gray-50 last:border-0">
+                        <td className="py-1.5 font-medium text-gray-700 whitespace-nowrap">{r.employee_id}</td>
+                        <td className="py-1.5 text-gray-600 whitespace-nowrap">{r.job_name ?? "-"}</td>
+                        <td className="py-1.5 text-gray-500 whitespace-nowrap">{r.resourcing_status}</td>
+                        <td className="py-1.5 text-right text-gray-700">{r.allocation_by_percentage}%</td>
+                        <td className="py-1.5 text-right text-gray-500">
+                          {r.hourly_rate_usd != null ? `$${r.hourly_rate_usd}` : "-"}
+                        </td>
+                        <td className="py-1.5 text-right text-gray-700 font-medium">
+                          {formatUsd(convertRevenue(r.monthly_unbilled_value_usd, period))}
                         </td>
                       </tr>
-                    </tfoot>
-                  </table>
-                )}
-              </>
-            );
-          })()
-        )}
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t border-gray-200">
+                      <td colSpan={5} className="py-1.5 text-right font-semibold text-gray-700">Total</td>
+                      <td className="py-1.5 text-right font-semibold text-gray-900">
+                        {formatUsd(rows.reduce((sum, r) => sum + convertRevenue(r.monthly_unbilled_value_usd, period), 0))}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              )}
+            </>
+          );
+        })()}
       </div>
     </Modal>
   );
 }
 
+// ── RevenueRiskCard ────────────────────────────────────────────────────────
 function RevenueRiskCard({
-  totalMonthly,
-  period,
-  onPeriodChange,
-  active,
-  onToggle,
+  totalMonthly, period, onPeriodChange, active, onToggle,
 }: {
   totalMonthly: number;
   period: RevenuePeriod;
@@ -702,7 +883,9 @@ function RevenueRiskCard({
             onClick={() => onPeriodChange(p)}
             className={cn(
               "text-[10px] px-1.5 py-0.5 rounded-full border capitalize transition",
-              p === period ? "bg-white border-red-300 text-red-700 font-medium" : "border-transparent text-gray-400 hover:text-gray-600"
+              p === period
+                ? "bg-white border-red-300 text-red-700 font-medium"
+                : "border-transparent text-gray-400 hover:text-gray-600"
             )}
           >
             {p}

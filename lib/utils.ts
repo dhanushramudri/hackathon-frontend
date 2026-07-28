@@ -22,6 +22,7 @@ export const ROOT_CAUSE_LABEL: Record<string, string> = {
   wsr_deteriorating: "WSR getting worse",
   wsr_critical: "WSR stuck at red/amber",
   wsr_long_term_decline: "WSR fell and hasn't recovered",
+  devops_extension_risk: "DevOps extension risk",
 };
 export function rootCauseLabel(value: string): string {
   return ROOT_CAUSE_LABEL[value] ?? value.replace(/_/g, " ");
