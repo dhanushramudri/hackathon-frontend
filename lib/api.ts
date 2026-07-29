@@ -891,6 +891,16 @@ export interface ForecastBreakdownRow {
   redeploy_candidates: RedeployCandidate[];
   adjacent_level_candidates: RedeployCandidate[];
   adjacent_fill_count: number;
+  // Cross-role tier: same org-wide skill/competency/availability search the
+  // main Recommendations page uses, unrestricted by designation -- catches
+  // "no Solutions Enabler free, but a Senior Software Engineer's actual
+  // skills fit" cases that title-ladder adjacency above can't. `eligible`
+  // bucket candidates count toward cross_role_fill_count; `trainable` bucket
+  // candidates are a real skill gap, surfaced as upskill candidates, and
+  // never assumed to fill a seat automatically.
+  cross_role_candidates: RecommendationCandidate[];
+  cross_role_fill_count: number;
+  training_candidates: RecommendationCandidate[];
   shortfall: number;
   shortfall_value_usd: number;
   full_role_monthly_value_usd: number;
@@ -934,6 +944,33 @@ export interface NewProjectForecastResult {
 export interface CoeOption {
   coe: string;
   sample_size: number;
+}
+
+export interface RevenueBenchmark {
+  avg_revenue_per_project: number;
+  avg_revenue_per_fte_month: number;
+  sample_size: number;
+}
+
+export interface ProjectMixRow {
+  coe: string;
+  weight_pct: number;
+  target_share_usd: number;
+  project_count: number;
+  avg_revenue_per_project: number;
+  projected_revenue_usd: number;
+  sample_size: number;
+}
+
+export interface RevenueTargetForecastResult {
+  target_revenue_usd: number;
+  priority_coes: string[];
+  project_mix: ProjectMixRow[];
+  total_projected_revenue_usd: number;
+  revenue_gap_usd: number;
+  pct_of_target_covered: number | null;
+  forecast: NewProjectForecastResult | null;
+  error?: string;
 }
 
 export interface RoleMixPreview {
@@ -1466,6 +1503,29 @@ export const api = {
     ),
   roleMixPreview: (coes: string[], typeOfProject: string | null) =>
     postJSON<RoleMixPreview>("/forecast/role-mix-preview", { coes, type_of_project: typeOfProject }),
+  revenueBenchmarks: () => getJSON<Record<string, RevenueBenchmark>>("/forecast/revenue-benchmarks"),
+  revenueTargetForecast: (opts: {
+    targetRevenueUsd: number;
+    priorityCoes?: string[] | null;
+    startDate?: string | null;
+    durationWeeks?: number | null;
+    typeOfProject?: string | null;
+    include?: IncludeParams;
+  }) => {
+    const include = opts.include ?? DEFAULT_INCLUDE_PARAMS;
+    return postJSON<RevenueTargetForecastResult>("/forecast/revenue-target", {
+      target_revenue_usd: opts.targetRevenueUsd,
+      priority_coes: opts.priorityCoes ?? null,
+      start_date: opts.startDate ?? null,
+      duration_weeks: opts.durationWeeks ?? null,
+      type_of_project: opts.typeOfProject ?? null,
+      include_skill: include.skill,
+      include_competency: include.competency,
+      include_availability: include.availability,
+      include_category_match: include.category_match,
+      include_project_count: include.project_count,
+    });
+  },
   roleMixCoes: () => getJSON<CoeOption[]>("/role-mix/coes"),
   roleMixCoeSkills: (coes: string[]) =>
     getJSON<CoeSkillsResult>(`/role-mix/coe-skills?coes=${encodeURIComponent(coes.join(","))}`),

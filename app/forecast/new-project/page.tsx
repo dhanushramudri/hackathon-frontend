@@ -246,7 +246,329 @@ function roleMixSourceLabel(spec: SpecState): string {
   return formatRoleMixSource(spec.roleMixSource, spec.roleMixSampleSize, scope);
 }
 
+type ForecastMode = "spec" | "revenue";
+
+// "0 to hero": instead of "do we have resources for this spec", start from a
+// revenue target and work backwards -- how many projects of each CoE (weighted
+// toward the CoEs we're strongest/most proven in, Data Engineering first by
+// default) does that require, and does the same redeploy -> adjacent-title ->
+// cross-role skill match -> train -> hire pipeline used everywhere else in
+// Forecast actually cover it. Revenue figures are synthetic (see
+// app/engines/revenue_engine.py) -- there's no real revenue column in the
+// source data, so this is a defensible, consistently-ranked estimate for
+// driving the reverse math, not a claim of historical billing fact.
+function RevenueTargetSection({
+  onOpenProfile,
+}: {
+  onOpenProfile: (sel: { employeeId: string; skillMatchContext?: SkillMatchContext }) => void;
+}) {
+  const coeOptions = useQuery({ queryKey: ["role-mix-coes"], queryFn: api.roleMixCoes });
+  const benchmarks = useQuery({ queryKey: ["revenue-benchmarks"], queryFn: api.revenueBenchmarks });
+
+  const [targetRevenue, setTargetRevenue] = useState("1000000");
+  const [priorityCoes, setPriorityCoes] = useState<string[]>([]);
+  const [startDate, setStartDate] = useState("");
+  const [durationWeeks, setDurationWeeks] = useState("");
+  const [typeOfProject, setTypeOfProject] = useState("");
+  const [includeParams, setIncludeParams] = useState<IncludeParams>(DEFAULT_INCLUDE_PARAMS);
+  const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  const toggleExpanded = (rowKey: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(rowKey)) next.delete(rowKey);
+      else next.add(rowKey);
+      return next;
+    });
+
+  const togglePriorityCoe = (coe: string) =>
+    setPriorityCoes((prev) => (prev.includes(coe) ? prev.filter((c) => c !== coe) : [...prev, coe]));
+
+  const revenue = useMutation({
+    mutationFn: () =>
+      api.revenueTargetForecast({
+        targetRevenueUsd: Number(targetRevenue) || 0,
+        priorityCoes: priorityCoes.length > 0 ? priorityCoes : null,
+        startDate: startDate || null,
+        durationWeeks: durationWeeks ? Number(durationWeeks) : null,
+        typeOfProject: typeOfProject || null,
+        include: includeParams,
+      }),
+  });
+
+  const dataKnownCoes = new Set(Object.keys(benchmarks.data ?? {}));
+  const forecast = revenue.data?.forecast;
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
+        <div className="flex items-center gap-3 flex-wrap">
+          <div>
+            <label className="text-[11px] text-gray-400 block mb-0.5">Target revenue (USD)</label>
+            <input
+              type="number"
+              min={0}
+              value={targetRevenue}
+              onChange={(e) => setTargetRevenue(e.target.value)}
+              className="w-40 px-2.5 py-1.5 rounded-lg border border-gray-200 text-sm outline-none"
+            />
+          </div>
+          <div>
+            <label className="text-[11px] text-gray-400 block mb-0.5">Start date (optional)</label>
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              className="px-2.5 py-1.5 rounded-lg border border-gray-200 text-xs outline-none"
+            />
+          </div>
+          <div>
+            <label className="text-[11px] text-gray-400 block mb-0.5">Duration (weeks)</label>
+            <input
+              type="number"
+              min={1}
+              value={durationWeeks}
+              onChange={(e) => setDurationWeeks(e.target.value)}
+              className="w-24 px-2.5 py-1.5 rounded-lg border border-gray-200 text-xs outline-none"
+            />
+          </div>
+          <div>
+            <label className="text-[11px] text-gray-400 block mb-0.5">Project type (optional)</label>
+            <select
+              value={typeOfProject}
+              onChange={(e) => setTypeOfProject(e.target.value)}
+              className="px-2.5 py-1.5 rounded-lg border border-gray-200 text-xs outline-none bg-white"
+            >
+              <option value="">Any</option>
+              {TYPE_OPTIONS.map((t) => (
+                <option key={t} value={t}>{t}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <p className="text-[11px] text-gray-400 mb-1">
+            Priority CoEs -- click in the order you want them prioritized (unclicked defaults to Data Engineering first, then the rest by revenue strength)
+          </p>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {(coeOptions.data ?? []).map((c) => {
+              const rank = priorityCoes.indexOf(c.coe);
+              const selected = rank !== -1;
+              return (
+                <button
+                  key={c.coe}
+                  onClick={() => togglePriorityCoe(c.coe)}
+                  disabled={!dataKnownCoes.has(c.coe) && benchmarks.data != null}
+                  title={!dataKnownCoes.has(c.coe) && benchmarks.data != null ? "No historical revenue benchmark for this CoE yet" : undefined}
+                  className={cn(
+                    "text-[11px] px-2.5 py-1 rounded-full border transition disabled:opacity-30 disabled:cursor-not-allowed",
+                    selected ? "bg-primary text-white border-primary" : "bg-white text-gray-600 border-gray-200 hover:border-primary hover:text-primary"
+                  )}
+                >
+                  {selected && <span className="font-bold mr-1">{rank + 1}.</span>}
+                  {c.coe}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between">
+          <AdvancedFiltersButton
+            open={advancedFiltersOpen}
+            include={includeParams}
+            defaults={DEFAULT_INCLUDE_PARAMS}
+            onClick={() => setAdvancedFiltersOpen((v) => !v)}
+          />
+          <button
+            onClick={() => revenue.mutate()}
+            disabled={revenue.isPending || !targetRevenue || Number(targetRevenue) <= 0}
+            className="px-4 py-2 rounded-lg text-xs font-medium text-white disabled:opacity-50"
+            style={{ backgroundColor: "hsl(var(--primary))" }}
+          >
+            {revenue.isPending ? "Computing…" : "Run Revenue-Target Forecast"}
+          </button>
+        </div>
+        {advancedFiltersOpen && (
+          <AdvancedFiltersPanel include={includeParams} onApply={setIncludeParams} />
+        )}
+      </div>
+
+      {revenue.isPending && !revenue.data && (
+        <div className="space-y-3">
+          <Skeleton className="h-12 w-full rounded-xl" />
+          <TableSkeleton columns={6} rows={5} />
+        </div>
+      )}
+
+      {revenue.data?.error && <ErrorState message={revenue.data.error} />}
+
+      {revenue.data && !revenue.data.error && (
+        <div className="space-y-3">
+          <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-1">
+            <p className="text-xs text-gray-700">
+              Target <strong>{formatUsd(revenue.data.target_revenue_usd)}</strong> -- recommended mix projects to{" "}
+              <strong>{formatUsd(revenue.data.total_projected_revenue_usd)}</strong>
+              {revenue.data.pct_of_target_covered != null && ` (${revenue.data.pct_of_target_covered}% of target)`}.
+              {revenue.data.revenue_gap_usd > 0 && (
+                <span className="text-amber-600"> Gap of {formatUsd(revenue.data.revenue_gap_usd)} left uncovered by this mix.</span>
+              )}
+            </p>
+            {forecast && forecast.pct_achievable_with_current_headcount != null && (
+              <p className="text-xs text-gray-700">
+                Of the resources this mix needs, <strong>{forecast.pct_achievable_with_current_headcount}%</strong> is achievable with
+                current headcount (redeploy + adjacent title + cross-role skill match + training candidates) before any hiring.
+                {forecast.total_shortfall_headcount > 0 && (
+                  <span className="text-red-600"> Real shortfall: {forecast.total_shortfall_headcount} heads.</span>
+                )}
+              </p>
+            )}
+          </div>
+
+          <div className="rounded-xl border border-[hsl(var(--primary)/0.3)] bg-white overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs data-table">
+                <thead className="bg-secondary text-secondary-foreground">
+                  <tr>
+                    {["CoE", "Priority weight", "Projects", "Avg revenue/project", "Projected revenue", "Sample size"].map((h) => (
+                      <th key={h} className="text-left font-medium px-3 py-2 whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {revenue.data.project_mix.map((m) => (
+                    <tr key={m.coe} className="border-b border-gray-50 last:border-0">
+                      <td className="px-3 py-2 font-medium text-gray-700">{m.coe}</td>
+                      <td className="px-3 py-2 text-gray-500">{m.weight_pct}%</td>
+                      <td className="px-3 py-2 text-gray-700 font-semibold">{m.project_count}</td>
+                      <td className="px-3 py-2 text-gray-500">{formatUsd(m.avg_revenue_per_project)}</td>
+                      <td className="px-3 py-2 text-gray-700">{formatUsd(m.projected_revenue_usd)}</td>
+                      <td className="px-3 py-2 text-gray-400">{m.sample_size} past projects</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {forecast && forecast.breakdown.length > 0 && (
+            <div className="rounded-xl border border-[hsl(var(--primary)/0.3)] bg-white overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs data-table">
+                  <thead className="bg-secondary text-secondary-foreground">
+                    <tr>
+                      {["", "Designation", "Needed", "Covers", "Shortfall", "Signal"].map((h) => (
+                        <th key={h} className="text-left font-medium px-3 py-2 whitespace-nowrap">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {forecast.breakdown.map((b) => {
+                      const rowKey = `${b.designation}__${b.start_date}`;
+                      const isOpen = expanded.has(rowKey);
+                      const hasDetail =
+                        b.redeploy_candidates.length > 0 || b.adjacent_level_candidates.length > 0 ||
+                        b.cross_role_candidates.length > 0 || b.training_candidates.length > 0;
+                      return (
+                        <Fragment key={rowKey}>
+                          <tr className="border-b border-gray-50 last:border-0 hover:bg-gray-50/50">
+                            <td className="px-3 py-2">
+                              {hasDetail && (
+                                <button onClick={() => toggleExpanded(rowKey)} className="text-gray-400 hover:text-gray-600">
+                                  {isOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                                </button>
+                              )}
+                            </td>
+                            <td className="px-3 py-2 font-medium text-gray-700">{b.designation}</td>
+                            <td className="px-3 py-2 text-gray-500">{b.needed_headcount}</td>
+                            <td className="px-3 py-2 text-gray-700 font-semibold">
+                              {b.qualifying_for_redeploy + b.adjacent_fill_count + b.cross_role_fill_count}
+                              {b.training_candidates.length > 0 && (
+                                <span className="block text-[10px] text-purple-600 font-normal">
+                                  +{b.training_candidates.length} trainable
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-3 py-2 text-gray-500">{b.shortfall}</td>
+                            <td className="px-3 py-2">{b.hire_signal ? <Badge variant="red">hire</Badge> : <Badge variant="green">covered</Badge>}</td>
+                          </tr>
+                          {isOpen && (
+                            <tr className="bg-gray-50/50 border-b border-gray-50">
+                              <td colSpan={6} className="px-3 py-2.5 space-y-3">
+                                <CandidateListSection
+                                  title="Who could free up for this role"
+                                  candidates={b.redeploy_candidates}
+                                  onOpen={onOpenProfile}
+                                  onShowAll={() => {}}
+                                  emptyText="No real spare capacity at this exact level."
+                                />
+                                <CandidateListSection
+                                  title="Flexible fit -- one level away"
+                                  candidates={b.adjacent_level_candidates}
+                                  onOpen={onOpenProfile}
+                                  onShowAll={() => {}}
+                                  showQualifies
+                                />
+                                {b.cross_role_candidates.length > 0 && (
+                                  <div>
+                                    <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 mb-1.5">
+                                      Cross-role match -- different title, real skill overlap
+                                    </p>
+                                    <div className="flex flex-col gap-1">
+                                      {b.cross_role_candidates.slice(0, INLINE_CANDIDATE_LIMIT).map((c) => (
+                                        <div key={c.employee_id} className="flex items-center gap-2 text-[11px]">
+                                          <button onClick={() => onOpenProfile({ employeeId: c.employee_id })} className="font-medium text-primary hover:underline">
+                                            {c.employee_id}
+                                          </button>
+                                          <HoldDot onHold={c.on_hold} holdProjects={c.hold_projects} />
+                                          <span className="text-gray-500">{c.job_name}</span>
+                                          <span className="ml-auto font-semibold text-gray-500">skill match {Math.round(c.skill_score * 100)}%</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                                {b.training_candidates.length > 0 && (
+                                  <div>
+                                    <p className="text-[10px] font-semibold uppercase tracking-wide text-purple-500 mb-1.5">
+                                      Real skill gap -- could fill with training instead of hiring
+                                    </p>
+                                    <div className="flex flex-col gap-1">
+                                      {b.training_candidates.map((c) => (
+                                        <div key={c.employee_id} className="flex items-center gap-2 text-[11px] flex-wrap">
+                                          <button onClick={() => onOpenProfile({ employeeId: c.employee_id })} className="font-medium text-primary hover:underline">
+                                            {c.employee_id}
+                                          </button>
+                                          <span className="text-gray-500">{c.job_name}</span>
+                                          {c.missing_skills.length > 0 && (
+                                            <span className="text-purple-600">needs: {c.missing_skills.slice(0, 4).join(", ")}</span>
+                                          )}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function NewProjectForecastPage() {
+  const [mode, setMode] = useState<ForecastMode>("spec");
   const coeOptions = useQuery({ queryKey: ["role-mix-coes"], queryFn: api.roleMixCoes });
   const categories = useQuery({ queryKey: ["role-mix-categories"], queryFn: api.roleMixCategories });
   const designations = useQuery({ queryKey: ["employee-designations"], queryFn: api.employeeDesignations });
@@ -450,6 +772,33 @@ export default function NewProjectForecastPage() {
 
   return (
     <div className="p-4 sm:p-6 max-w-4xl mx-auto space-y-5">
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => setMode("spec")}
+          className={cn(
+            "text-xs font-medium px-3 py-1.5 rounded-lg border transition",
+            mode === "spec" ? "bg-primary text-white border-primary" : "bg-white text-gray-600 border-gray-200 hover:border-primary hover:text-primary"
+          )}
+        >
+          By Project Spec
+        </button>
+        <button
+          onClick={() => setMode("revenue")}
+          className={cn(
+            "text-xs font-medium px-3 py-1.5 rounded-lg border transition",
+            mode === "revenue" ? "bg-primary text-white border-primary" : "bg-white text-gray-600 border-gray-200 hover:border-primary hover:text-primary"
+          )}
+        >
+          By Revenue Target
+        </button>
+      </div>
+
+      {mode === "revenue" && (
+        <RevenueTargetSection onOpenProfile={(sel) => setSelectedEmployee(sel)} />
+      )}
+
+      {mode === "spec" && (
+      <>
       <div className="space-y-4">
         <p className="text-xs text-gray-500">What if these new projects started on a given date?</p>
         <datalist id="known-designations">
@@ -805,7 +1154,7 @@ export default function NewProjectForecastPage() {
                     <Fragment key={rowKey}>
                       <tr className="border-b border-gray-50 last:border-0 hover:bg-gray-50/50">
                         <td className="px-3 py-2">
-                          {(b.redeploy_candidates.length > 0 || b.adjacent_level_candidates.length > 0 || b.recommended_start_date) && (
+                          {(b.redeploy_candidates.length > 0 || b.adjacent_level_candidates.length > 0 || b.cross_role_candidates.length > 0 || b.training_candidates.length > 0 || b.recommended_start_date) && (
                             <button onClick={() => toggleExpanded(rowKey)} className="text-gray-400 hover:text-gray-600">
                               {isOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                             </button>
@@ -820,12 +1169,16 @@ export default function NewProjectForecastPage() {
                         <td className="px-3 py-2">
                           <span
                             className="text-gray-800 font-semibold"
-                            title="The number that actually covers this role -- skill-matched, plus anyone one level away who flexes in. This is what Shortfall is calculated against."
+                            title="The number that actually covers this role -- skill-matched, plus anyone one level away or from a different track who flexes in. This is what Shortfall is calculated against."
                           >
-                            {b.qualifying_for_redeploy + b.adjacent_fill_count} qualify
+                            {b.qualifying_for_redeploy + b.adjacent_fill_count + b.cross_role_fill_count} qualify
                           </span>
-                          {b.adjacent_fill_count > 0 && (
-                            <span className="text-gray-400"> ({b.qualifying_for_redeploy} on-skill <span className="text-emerald-600">+{b.adjacent_fill_count} flexible fit</span>)</span>
+                          {(b.adjacent_fill_count > 0 || b.cross_role_fill_count > 0) && (
+                            <span className="text-gray-400">
+                              {" "}({b.qualifying_for_redeploy} on-skill
+                              {b.adjacent_fill_count > 0 && <span className="text-emerald-600"> +{b.adjacent_fill_count} flexible fit</span>}
+                              {b.cross_role_fill_count > 0 && <span className="text-blue-600"> +{b.cross_role_fill_count} cross-role match</span>})
+                            </span>
                           )}
                           {b.qualifying_for_redeploy < b.available_for_redeploy && (
                             <span
@@ -833,6 +1186,11 @@ export default function NewProjectForecastPage() {
                               title="Holds the title but doesn't meet the requested skillset, so doesn't count toward covering this role"
                             >
                               {b.available_for_redeploy} hold this title in total
+                            </span>
+                          )}
+                          {b.training_candidates.length > 0 && (
+                            <span className="block text-[10px] text-purple-600 mt-0.5">
+                              {b.training_candidates.length} more could fill this with training
                             </span>
                           )}
                         </td>
@@ -868,6 +1226,53 @@ export default function NewProjectForecastPage() {
                               }
                               showQualifies
                             />
+
+                            {b.cross_role_candidates.length > 0 && (
+                              <div>
+                                <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 mb-1.5">
+                                  Cross-role match -- different title, real skill overlap
+                                  {b.cross_role_fill_count > 0 && ` (${b.cross_role_fill_count} counted toward the need above)`}
+                                </p>
+                                <div className="flex flex-col gap-1">
+                                  {b.cross_role_candidates.slice(0, INLINE_CANDIDATE_LIMIT).map((c, idx) => (
+                                    <div key={c.employee_id} className="flex items-center gap-2 text-[11px]">
+                                      <button onClick={() => setSelectedEmployee({ employeeId: c.employee_id })} className="font-medium text-primary hover:underline">
+                                        {c.employee_id}
+                                      </button>
+                                      <HoldDot onHold={c.on_hold} holdProjects={c.hold_projects} />
+                                      <span className="text-gray-500">{c.job_name}</span>
+                                      {idx < b.cross_role_fill_count && <Badge variant="green">counted</Badge>}
+                                      <span className="ml-auto font-semibold text-gray-500">skill match {Math.round(c.skill_score * 100)}%</span>
+                                    </div>
+                                  ))}
+                                  {b.cross_role_candidates.length > INLINE_CANDIDATE_LIMIT && (
+                                    <p className="text-[10px] text-gray-400">+{b.cross_role_candidates.length - INLINE_CANDIDATE_LIMIT} more</p>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+
+                            {b.training_candidates.length > 0 && (
+                              <div>
+                                <p className="text-[10px] font-semibold uppercase tracking-wide text-purple-500 mb-1.5">
+                                  Real skill gap -- could fill this role with training instead of hiring
+                                </p>
+                                <div className="flex flex-col gap-1">
+                                  {b.training_candidates.map((c) => (
+                                    <div key={c.employee_id} className="flex items-center gap-2 text-[11px] flex-wrap">
+                                      <button onClick={() => setSelectedEmployee({ employeeId: c.employee_id })} className="font-medium text-primary hover:underline">
+                                        {c.employee_id}
+                                      </button>
+                                      <span className="text-gray-500">{c.job_name}</span>
+                                      <span className="text-gray-400">skill match {Math.round(c.skill_score * 100)}%</span>
+                                      {c.missing_skills.length > 0 && (
+                                        <span className="text-purple-600">needs: {c.missing_skills.slice(0, 4).join(", ")}</span>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
 
                             {b.recommended_start_date && (
                               <div className="rounded-lg border border-amber-200 bg-amber-50 p-2.5">
@@ -934,6 +1339,8 @@ export default function NewProjectForecastPage() {
             </div>
           )}
         </div>
+      )}
+      </>
       )}
 
       {selectedEmployee && (
