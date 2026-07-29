@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { HeartPulse, ChevronDown, SlidersHorizontal, UserCheck } from "lucide-react";
 import {
   api,
@@ -17,6 +17,7 @@ import { AdvancedFiltersButton, AdvancedFiltersPanel } from "@/components/shared
 import { FiredBadge } from "@/components/shared/FiredBadge";
 import { HoldChip } from "@/components/shared/HoldFlag";
 import { EmployeeProfileModal, type ProfileTab, type SkillMatchContext } from "@/components/shared/EmployeeProfileModal";
+import { AssignModal } from "@/components/shared/AssignModal";
 import { cn, formatUsd } from "@/lib/utils";
 
 type DetailTab = "overview" | "allocations" | "staffing" | "overtime" | "relief" | "wsr" | "devops";
@@ -1359,10 +1360,17 @@ function RequiredSkillSourceNote({ source, coe }: { source: string; coe: string 
 function ReliefStaffingSection({ projectCode }: { projectCode: string }) {
   const [includeParams, setIncludeParams] = useState<IncludeParams>(DEFAULT_INCLUDE_PARAMS);
   const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
+  const queryClient = useQueryClient();
   const relief = useQuery({
     queryKey: ["relief-staffing", projectCode, includeParams],
     queryFn: () => api.reliefStaffingCandidates(projectCode, includeParams),
   });
+  const [assignTarget, setAssignTarget] = useState<{ employeeId: string; allocationPct: number } | null>(null);
+  const handleAssigned = () => {
+    queryClient.invalidateQueries({ queryKey: ["relief-staffing", projectCode] });
+    queryClient.invalidateQueries({ queryKey: ["allocations"] });
+    queryClient.invalidateQueries({ queryKey: ["free-pool"] });
+  };
   const roleMixCoes = useQuery({ queryKey: ["role-mix-coes"], queryFn: api.roleMixCoes });
 
   const [search, setSearch] = useState("");
@@ -1503,7 +1511,10 @@ function ReliefStaffingSection({ projectCode }: { projectCode: string }) {
 
           <div className="space-y-2">
             {filterAndSortRelief(relief.data.candidates, { search, signal, designation, coe, reason, minSkill, minCompetency, minAvailable, sort }).map((c) => (
-              <ReliefCandidateCard key={c.employee_id} c={c} onOpenProfile={handleOpenProfile} includeParams={includeParams} />
+              <ReliefCandidateCard
+                key={c.employee_id} c={c} onOpenProfile={handleOpenProfile} includeParams={includeParams}
+                onAssign={() => setAssignTarget({ employeeId: c.employee_id, allocationPct: c.idle_capacity_pct })}
+              />
             ))}
             {filterAndSortRelief(relief.data.candidates, { search, signal, designation, coe, reason, minSkill, minCompetency, minAvailable, sort }).length === 0 && (
               <p className="text-xs text-gray-400 italic text-center py-3">No candidates match the current filters.</p>
@@ -1511,9 +1522,22 @@ function ReliefStaffingSection({ projectCode }: { projectCode: string }) {
           </div>
 
           {relief.data.available_soon_candidates.length > 0 && (
-            <AvailableSoonAccordion candidates={relief.data.available_soon_candidates} onOpenProfile={handleOpenProfile} includeParams={includeParams} />
+            <AvailableSoonAccordion
+              candidates={relief.data.available_soon_candidates} onOpenProfile={handleOpenProfile} includeParams={includeParams}
+              onAssign={(employeeId, allocationPct) => setAssignTarget({ employeeId, allocationPct })}
+            />
           )}
         </>
+      )}
+
+      {assignTarget && (
+        <AssignModal
+          employeeId={assignTarget.employeeId}
+          projectId={projectCode}
+          defaultAllocationPct={assignTarget.allocationPct}
+          onClose={() => setAssignTarget(null)}
+          onAssigned={handleAssigned}
+        />
       )}
 
       {openProfile && (
@@ -1554,12 +1578,13 @@ function Metric({
 }
 
 function ReliefCandidateCard({
-  c, onOpenProfile, availableSoon, includeParams,
+  c, onOpenProfile, availableSoon, includeParams, onAssign,
 }: {
   c: ReliefCandidate;
   onOpenProfile: (employeeId: string, tab: ProfileTab, skillMatchContext?: SkillMatchContext) => void;
   availableSoon?: boolean;
   includeParams: IncludeParams;
+  onAssign: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   return (
@@ -1601,6 +1626,12 @@ function ReliefCandidateCard({
             </Badge>
           )}
           <Badge variant={c.skill_bucket}>{Math.round(c.composite_score * 100)}% {availableSoon ? "potential fit" : "fit"}</Badge>
+          <button
+            onClick={(e) => { e.stopPropagation(); onAssign(); }}
+            className="text-[11px] px-2 py-1 rounded-lg bg-primary text-white hover:opacity-90 whitespace-nowrap flex-shrink-0"
+          >
+            Assign
+          </button>
           <ChevronDown className={cn("w-3.5 h-3.5 text-gray-400 transition-transform flex-shrink-0", expanded && "rotate-180")} />
         </div>
       </div>
@@ -1682,11 +1713,12 @@ function ReliefCandidateCard({
 }
 
 function AvailableSoonAccordion({
-  candidates, onOpenProfile, includeParams,
+  candidates, onOpenProfile, includeParams, onAssign,
 }: {
   candidates: ReliefCandidate[];
   onOpenProfile: (employeeId: string, tab: ProfileTab, skillMatchContext?: SkillMatchContext) => void;
   includeParams: IncludeParams;
+  onAssign: (employeeId: string, allocationPct: number) => void;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -1705,7 +1737,10 @@ function AvailableSoonAccordion({
       {open && (
         <div className="space-y-2 mt-2.5">
           {candidates.map((c) => (
-            <ReliefCandidateCard key={c.employee_id} c={c} onOpenProfile={onOpenProfile} availableSoon includeParams={includeParams} />
+            <ReliefCandidateCard
+              key={c.employee_id} c={c} onOpenProfile={onOpenProfile} availableSoon includeParams={includeParams}
+              onAssign={() => onAssign(c.employee_id, c.idle_capacity_pct)}
+            />
           ))}
         </div>
       )}

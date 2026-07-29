@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, type ReactNode } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import {
   CheckCircle2, ChevronDown, ChevronUp, Sparkles, XCircle,
@@ -23,6 +23,7 @@ import { AdvancedFiltersButton, AdvancedFiltersPanel } from "@/components/shared
 import { FiredBadge } from "@/components/shared/FiredBadge";
 import { HoldDot, HoldChip } from "@/components/shared/HoldFlag";
 import { TimesheetProofModal } from "@/components/shared/TimesheetProofModal";
+import { AssignModal } from "@/components/shared/AssignModal";
 import { cn } from "@/lib/utils";
 
 export type ProfileTab =
@@ -179,10 +180,16 @@ function ReplacementTab({
   const [nearCapacityTolerancePct, setNearCapacityTolerancePct] = useState(25);
   const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
 
+  const queryClient = useQueryClient();
   const { data, isLoading, isError } = useQuery<BackfillResult>({
     queryKey: ["backfill", employeeId, projectId, includeParams, includeBelowCapacity, nearCapacityTolerancePct],
     queryFn: () => api.backfillCandidates(employeeId, projectId, 15, includeParams, includeBelowCapacity, nearCapacityTolerancePct),
   });
+  const [assignEmployeeId, setAssignEmployeeId] = useState<string | null>(null);
+  const handleAssigned = () => {
+    queryClient.invalidateQueries({ queryKey: ["backfill", employeeId, projectId] });
+    queryClient.invalidateQueries({ queryKey: ["allocations"] });
+  };
 
   const allCandidates = data?.candidates ?? [];
 
@@ -411,9 +418,17 @@ function ReplacementTab({
                               </div>
                             </td>
                             <td className="px-2.5 py-1.5 whitespace-nowrap">
-                              {isExpanded
-                                ? <ChevronUp className="w-3.5 h-3.5 text-gray-400" />
-                                : <ChevronDown className="w-3.5 h-3.5 text-gray-300" />}
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); setAssignEmployeeId(c.employee_id); }}
+                                  className="text-[11px] px-2 py-1 rounded-lg bg-primary text-white hover:opacity-90 whitespace-nowrap"
+                                >
+                                  Assign
+                                </button>
+                                {isExpanded
+                                  ? <ChevronUp className="w-3.5 h-3.5 text-gray-400" />
+                                  : <ChevronDown className="w-3.5 h-3.5 text-gray-300" />}
+                              </div>
                             </td>
                           </tr>
                           {isExpanded && (
@@ -499,6 +514,16 @@ function ReplacementTab({
           employeeId={openProfile}
           initialTab="overview"
           onClose={() => setOpenProfile(null)}
+        />
+      )}
+
+      {assignEmployeeId && (
+        <AssignModal
+          employeeId={assignEmployeeId}
+          projectId={projectId}
+          defaultAllocationPct={allocPct}
+          onClose={() => setAssignEmployeeId(null)}
+          onAssigned={handleAssigned}
         />
       )}
     </div>

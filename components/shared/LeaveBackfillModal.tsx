@@ -1,10 +1,12 @@
 "use client";
 
+import { useState } from "react";
 import { Award } from "lucide-react";
 import type { IncludeParams, LeaveImpact, RedeployCandidate } from "@/lib/api";
 import { Modal } from "@/components/shared/Modal";
 import { Badge } from "@/components/shared/Badge";
 import { HoldChip } from "@/components/shared/HoldFlag";
+import { AssignModal } from "@/components/shared/AssignModal";
 
 const REASON_VARIANT: Record<string, string> = { ending_soon: "amber", fully_free: "green", under_utilized: "under_utilized" };
 
@@ -26,11 +28,13 @@ function CandidateCard({
   rank,
   onSelectEmployee,
   includeParams,
+  onAssign,
 }: {
   candidate: RedeployCandidate;
   rank: number;
   onSelectEmployee: (id: string) => void;
   includeParams: IncludeParams;
+  onAssign: () => void;
 }) {
   const matched = candidate.matched_skills ?? [];
   const missing = candidate.missing_skills ?? [];
@@ -63,6 +67,9 @@ function CandidateCard({
             </Badge>
           )}
           <HoldChip onHold={candidate.on_hold} holdProjects={candidate.hold_projects} />
+          <button onClick={onAssign} className="text-[11px] px-2 py-1 rounded-lg bg-primary text-white hover:opacity-90 whitespace-nowrap">
+            Assign
+          </button>
         </div>
       </div>
 
@@ -121,12 +128,15 @@ export function LeaveBackfillModal({
   onClose,
   onSelectEmployee,
   includeParams,
+  onAssigned,
 }: {
   impact: LeaveImpact;
   onClose: () => void;
   onSelectEmployee: (id: string) => void;
   includeParams: IncludeParams;
+  onAssigned?: () => void;
 }) {
+  const [assignEmployeeId, setAssignEmployeeId] = useState<string | null>(null);
   return (
     <Modal
       title={`Backfill for ${impact.employee_id}${impact.job_name ? ` (${impact.job_name})` : ""}`}
@@ -157,11 +167,24 @@ export function LeaveBackfillModal({
         ) : (
           <div className="space-y-2.5">
             {impact.backfill_candidates.map((c, i) => (
-              <CandidateCard key={c.employee_id} candidate={c} rank={i} onSelectEmployee={onSelectEmployee} includeParams={includeParams} />
+              <CandidateCard
+                key={c.employee_id} candidate={c} rank={i} onSelectEmployee={onSelectEmployee} includeParams={includeParams}
+                onAssign={() => setAssignEmployeeId(c.employee_id)}
+              />
             ))}
           </div>
         )}
       </div>
+
+      {assignEmployeeId && (
+        <AssignModal
+          employeeId={assignEmployeeId}
+          projectId={impact.project_id}
+          defaultAllocationPct={impact.allocation_by_percentage}
+          onClose={() => setAssignEmployeeId(null)}
+          onAssigned={() => { setAssignEmployeeId(null); onAssigned?.(); }}
+        />
+      )}
     </Modal>
   );
 }

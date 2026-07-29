@@ -1355,6 +1355,18 @@ export interface AllocationTimesheet extends AllocationRow {
   daily_hours: { date: string; hours: number | null; expected_hours: number; utilization_pct: number | null; is_missing: boolean }[];
 }
 
+export interface AssignAllocationResult {
+  project_rolebased_user_id: string;
+  project_id: string;
+  employee_id: string;
+  resourcing_status: string;
+  allocated_start_date: string;
+  allocated_end_date: string;
+  is_allocation_active: number;
+  allocation_by_percentage: number;
+  is_active_version: number;
+}
+
 export interface ProjectInfo {
   project_code: string;
   client_id: string | null;
@@ -1448,6 +1460,24 @@ export const api = {
     getJSON<AvailabilityRow[]>(`/allocations/availability${asOfDate ? `?as_of_date=${asOfDate}` : ""}`),
   allocationTimesheet: (employeeId: string, projectId: string) =>
     getJSON<AllocationTimesheet>(`/allocations/timesheet?employee_id=${encodeURIComponent(employeeId)}&project_id=${encodeURIComponent(projectId)}`),
+  assignAllocation: async (body: {
+    employeeId: string; projectId: string; allocationPct: number;
+    startDate: string; endDate: string; resourcingStatus?: string;
+  }): Promise<AssignAllocationResult> => {
+    const res = await fetch(`${BASE}/allocations/assign`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        employee_id: body.employeeId, project_id: body.projectId, allocation_pct: body.allocationPct,
+        start_date: body.startDate, end_date: body.endDate, resourcing_status: body.resourcingStatus ?? "BILLABLE",
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => null);
+      throw new Error(err?.detail || `Assign failed: ${res.status}`);
+    }
+    return res.json();
+  },
   roleMixTemplates: () => getJSON<RoleMixTemplate[]>("/role-mix/templates"),
   roleMixCategories: () => getJSON<DocxCategoryRoleMix[]>("/role-mix/categories"),
   recommendationsForPipelineRow: (

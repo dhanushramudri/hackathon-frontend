@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 import { AlertTriangle, Users } from "lucide-react";
 import { api, DEFAULT_INCLUDE_PARAMS, type IncludeParams, type LeaveImpact } from "@/lib/api";
@@ -104,10 +104,15 @@ function LeavePageInner() {
   const [nearCapacityTolerancePct, setNearCapacityTolerancePct] = useState(25);
   const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
 
+  const queryClient = useQueryClient();
   const { data, isLoading, error } = useQuery({
     queryKey: ["leave-impact", includeParams, includeBelowCapacity, nearCapacityTolerancePct],
     queryFn: () => api.leaveImpact(includeParams, includeBelowCapacity, nearCapacityTolerancePct),
   });
+  const handleAssigned = () => {
+    queryClient.invalidateQueries({ queryKey: ["leave-impact"] });
+    queryClient.invalidateQueries({ queryKey: ["allocations"] });
+  };
   const healthProjects = useQuery({ queryKey: ["health-projects"], queryFn: api.healthProjects });
   const searchParams = useSearchParams();
 
@@ -341,7 +346,7 @@ function LeavePageInner() {
       {backfillTarget && (() => {
         const liveImpact = data.find((i) => i.employee_id === backfillTarget.employeeId && i.project_id === backfillTarget.projectId);
         return liveImpact ? (
-          <LeaveBackfillModal impact={liveImpact} onClose={() => setBackfillTarget(null)} onSelectEmployee={setSelectedEmployee} includeParams={includeParams} />
+          <LeaveBackfillModal impact={liveImpact} onClose={() => setBackfillTarget(null)} onSelectEmployee={setSelectedEmployee} includeParams={includeParams} onAssigned={handleAssigned} />
         ) : null;
       })()}
     </div>
