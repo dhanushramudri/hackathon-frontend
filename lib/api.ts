@@ -106,6 +106,8 @@ export interface IncludeParams {
   availability: boolean;
   category_match: boolean;
   project_count: boolean;
+  cost_efficiency: boolean;
+  coe_affinity: boolean;
 }
 
 export const DEFAULT_INCLUDE_PARAMS: IncludeParams = {
@@ -114,6 +116,8 @@ export const DEFAULT_INCLUDE_PARAMS: IncludeParams = {
   availability: true,
   category_match: false,
   project_count: false,
+  cost_efficiency: false,
+  coe_affinity: true,
 };
 
 export interface EmployeeProjectHistoryRow {
@@ -136,6 +140,8 @@ export interface RecommendationCandidate {
   employee_id: string;
   job_name: string;
   coe: string | null;
+  coe_preferred?: boolean;
+  coe_affinity_rank?: number;
   composite_score: number;
   bucket: CandidateBucket;
   staffing_signal: StaffingSignal;
@@ -149,6 +155,7 @@ export interface RecommendationCandidate {
   competency_confidence: string;
   available_pct: number;
   meets_requested_capacity: boolean;
+  hourly_rate_usd: number | null;
   match_tier?: MatchTier;
   earliest_available_date?: string | null;
   earliest_available_proof?: string | null;
@@ -179,7 +186,13 @@ export interface DealCompositionRow {
 }
 
 export interface RecommendationResult {
-  request: { skillset_text: string; required_phrases: string[]; likely_start_date: string; requested_pct: number };
+  request: {
+    skillset_text: string;
+    required_phrases: string[];
+    likely_start_date: string;
+    requested_pct: number;
+    near_capacity_tolerance_pct?: number;
+  };
   candidates: RecommendationCandidate[];
   hire_vs_redeploy_flag: boolean;
   top_candidate_signal: StaffingSignal;
@@ -360,6 +373,9 @@ export interface HealthProject {
   risk_score: number;
   risk_band: "high" | "medium" | "low";
   root_causes: string[];
+  root_cause_categories: Record<string, string[]>;
+  is_extension_risk: boolean;
+  is_escalation_risk: boolean;
   is_ramp_down_candidate: boolean;
   days_to_ramp_down: number | null;
   wsr_data_available: boolean;
@@ -384,6 +400,15 @@ export interface HealthProject {
   devops_is_overdue: boolean;
   devops_tickets_missing_remaining_estimate: number;
   devops_tickets_with_no_effort_data: number;
+  extension_unbilled_value_usd: number;
+  team_daily_extension_cost_usd: number;
+  projected_extension_days: number | null;
+  projected_extension_weeks: number | null;
+  predicted_extension_start_date: string | null;
+  predicted_extension_end_date: string | null;
+  projected_extension_duration_label: string | null;
+  projected_extension_confidence: "none" | "low" | "medium";
+  predicted_extension_revenue_loss_usd: number;
 }
 
 export interface RosterEntry {
@@ -586,6 +611,7 @@ export interface DevopsExtensionRiskProof {
   working_days_in_window: number;
   team_capacity_hours: number;
   team_capacity_hours_after_leave: number;
+  team_daily_capacity_hours: number;
   capacity_surplus_hours: number | null;
   is_overdue: boolean;
   tickets_missing_remaining_estimate: number;
@@ -593,6 +619,19 @@ export interface DevopsExtensionRiskProof {
   sprint_breakdown: SprintBreakdownRow[];
   tickets: DevopsTicketRow[];
   
+}
+
+export interface ExtensionEstimate {
+  committed_overrun_days: number;
+  committed_overrun_source: string;
+  projected_additional_days: number | null;
+  projected_additional_weeks: number | null;
+  projected_additional_days_confidence: "none" | "low" | "medium";
+  projected_basis: string | null;
+  predicted_extension_start_date: string | null;
+  predicted_extension_end_date: string | null;
+  projected_extension_duration_label: string | null;
+  note: string;
 }
 export interface ProjectHealthDetail {
   project_code: string;
@@ -613,6 +652,42 @@ export interface ProjectHealthDetail {
   wsr: WsrProof;
   devops: DevopsExtensionRiskProof;
   allocations_roster: RosterEntry[];
+  root_cause_categories: Record<string, string[]>;
+  is_extension_risk: boolean;
+  is_escalation_risk: boolean;
+  extension_estimate: ExtensionEstimate;
+   extension_revenue: {
+    fired: boolean;
+    daily_hours_basis: number;
+    extension_unbilled_value_usd: number;
+    team_daily_extension_cost_usd: number;
+    projected_extension_days: number | null;
+    projected_extension_weeks: number | null;
+    projected_extension_confidence: "none" | "low" | "medium";
+    predicted_extension_start_date: string | null;
+    predicted_extension_end_date: string | null;
+    projected_extension_duration_label: string | null;
+    predicted_extension_revenue_loss_usd: number;
+    note: string;
+    predicted_breakdown: {
+      employee_id: string;
+      job_name: string | null;
+      resourcing_status: string;
+      allocation_by_percentage: number;
+      hourly_rate_usd: number | null;
+      predicted_additional_usd: number;
+    }[];
+    qualifying_allocations: {
+      employee_id: string;
+      job_name: string | null;
+      resourcing_status: string;
+      allocation_by_percentage: number;
+      hourly_rate_usd: number | null;
+      overrun_working_days: number;
+      extension_unbilled_value_usd: number;
+      allocated_end_date: string | null;
+    }[];
+  };
 }
 
 export interface FreePoolCandidate {
@@ -1277,13 +1352,16 @@ export const api = {
   roleMixCategories: () => getJSON<DocxCategoryRoleMix[]>("/role-mix/categories"),
   recommendationsForPipelineRow: (
     rowIndex: number, topN: number = 15, include: IncludeParams = DEFAULT_INCLUDE_PARAMS,
-    includeBelowCapacity: boolean = false
+    includeBelowCapacity: boolean = false, nearCapacityTolerancePct: number = 25
   ) =>
     getJSON<RecommendationResult>(
       `/recommendations/pipeline-row/${rowIndex}?top_n=${topN}` +
         `&include_skill=${include.skill}&include_competency=${include.competency}&include_availability=${include.availability}` +
         `&include_category_match=${include.category_match}&include_project_count=${include.project_count}` +
-        `&include_below_capacity=${includeBelowCapacity}`
+        `&include_coe_affinity=${include.coe_affinity}` +
+        `&include_cost_efficiency=${include.cost_efficiency}` +
+        `&include_below_capacity=${includeBelowCapacity}` +
+        `&near_capacity_tolerance_pct=${nearCapacityTolerancePct}`
     ),
   recommendationsCoverageSummary: () => getJSON<CoverageSummary>("/recommendations/coverage-summary"),
   semanticMatch: (rowIndex: number) =>
@@ -1297,7 +1375,8 @@ export const api = {
     postJSON<ProjectTeamRecommendation>("/recommendations/project-team", {
       row_indices: rowIndices, top_n: topN,
       include_skill: include.skill, include_competency: include.competency, include_availability: include.availability,
-      include_category_match: include.category_match, include_project_count: include.project_count,
+      include_category_match: include.category_match, include_project_count: include.project_count,include_coe_affinity: include.coe_affinity,
+      include_cost_efficiency: include.cost_efficiency,
     }),
   pipelineForecast: () => getJSON<PipelineDemandRow[]>("/pipeline/forecast"),
   healthProjects: () => getJSON<HealthProject[]>("/health-monitor/projects"),

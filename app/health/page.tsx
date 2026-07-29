@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
-import { Flame } from "lucide-react";
+import { Users, DollarSign, Clock, AlertTriangle, ChevronRight } from "lucide-react";
 import { api, type HealthProject, type OvertimeRiskSummary } from "@/lib/api";
 import { Badge } from "@/components/shared/Badge";
 import { StatCard } from "@/components/shared/StatCard";
@@ -77,6 +77,8 @@ interface HealthFilterOptions {
   hasUnbilledValueOnly: boolean;
   devopsRiskOnly: boolean; // ← NEW
   sort: HealthSort;
+  extensionRiskOnly: boolean;
+  escalationRiskOnly: boolean;
 }
 
 function filterAndSortHealth(rows: HealthProject[], opts: HealthFilterOptions): HealthProject[] {
@@ -107,6 +109,8 @@ function filterAndSortHealth(rows: HealthProject[], opts: HealthFilterOptions): 
   if (opts.rampDownOnly)        result = result.filter((p) => p.is_ramp_down_candidate);
   if (opts.hasUnbilledValueOnly) result = result.filter((p) => p.monthly_unbilled_value_usd > 0);
   if (opts.devopsRiskOnly)      result = result.filter((p) => p.devops_extension_risk); // ← NEW
+  if (opts.extensionRiskOnly)   result = result.filter((p) => p.is_extension_risk);
+  if (opts.escalationRiskOnly)  result = result.filter((p) => p.is_escalation_risk);
 
   const sorted = [...result];
   switch (opts.sort) {
@@ -194,6 +198,49 @@ export default function HealthPage() {
   );
 }
 
+// ── MetricCard — shared visual language for the stat row ───────────────────
+function MetricCard({
+  icon: Icon, label, value, sub, active, onClick, tone = "amber",
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  value: number;
+  sub: string;
+  active: boolean;
+  onClick: () => void;
+  tone?: "amber" | "red";
+}) {
+  const hasSignal = value > 0;
+  const palette = tone === "red"
+    ? { chip: "bg-red-50 text-red-600", value: "text-red-700", ring: "ring-red-200 border-red-200 bg-red-50/40", bar: "bg-red-500" }
+    : { chip: "bg-amber-50 text-amber-600", value: "text-amber-700", ring: "ring-amber-200 border-amber-200 bg-amber-50/40", bar: "bg-amber-500" };
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "group relative text-left rounded-2xl border bg-white p-4 transition-all duration-200",
+        "hover:shadow-md hover:-translate-y-0.5 hover:border-gray-300",
+        active ? cn("ring-2", palette.ring) : "border-gray-200"
+      )}
+    >
+      {hasSignal && <span className={cn("absolute left-0 top-4 bottom-4 w-1 rounded-full", palette.bar)} />}
+      <div className="flex items-center justify-between mb-3">
+        <span className={cn("inline-flex h-8 w-8 items-center justify-center rounded-lg", hasSignal ? palette.chip : "bg-gray-100 text-gray-400")}>
+          <Icon className="h-4 w-4" />
+        </span>
+        <ChevronRight className={cn("h-4 w-4 text-gray-300 transition-transform", active && "rotate-90 text-gray-400")} />
+      </div>
+      <p className={cn("text-[28px] leading-none font-bold tracking-tight", hasSignal ? palette.value : "text-gray-900")}>
+        {value}
+      </p>
+      <p className="mt-1.5 text-[11px] font-medium uppercase tracking-wide text-gray-400">{label}</p>
+      <p className="mt-0.5 text-[11px] text-gray-500 leading-snug">{sub}</p>
+    </button>
+  );
+}
+
 function HealthPageInner() {
   const projects     = useQuery({ queryKey: ["health-projects"],       queryFn: api.healthProjects });
   const overtimeRisk = useQuery({ queryKey: ["overtime-risk-summary"], queryFn: api.overtimeRiskSummary });
@@ -217,7 +264,12 @@ function HealthPageInner() {
   const [devopsRiskOnly,     setDevopsRiskOnly]     = useState(false); // ← NEW
   const [revenueBreakdownOpen, setRevenueBreakdownOpen] = useState(false);
   const [revenuePeriod,      setRevenuePeriod]      = useState<RevenuePeriod>("month");
+   const [revenueBreakdownTab, setRevenueBreakdownTab] = useState<"unbillable" | "extension">("unbillable");
+  const [extensionProofProject, setExtensionProofProject] = useState<{ code: string; client: string | null } | null>(null);
   const [sort,               setSort]               = useState<HealthSort>("risk_desc");
+
+  const [extensionRiskOnly, setExtensionRiskOnly] = useState(false);
+const [escalationRiskOnly, setEscalationRiskOnly] = useState(false);
 
   useEffect(() => {
     const risk = searchParams.get("risk");
@@ -238,8 +290,18 @@ function HealthPageInner() {
     setHasUnbilledValueOnly((v) => {
       const next = !v;
       setRevenueBreakdownOpen(next);
+      if (next) setRevenueBreakdownTab("unbillable");
       return next;
     });
+  };
+
+  const toggleExtensionBreakdown = () => {
+    if (revenueBreakdownOpen && revenueBreakdownTab === "extension") {
+      setRevenueBreakdownOpen(false);
+    } else {
+      setRevenueBreakdownTab("extension");
+      setRevenueBreakdownOpen(true);
+    }
   };
 
   // Open a project's detail modal, optionally jumping straight to a tab
@@ -266,7 +328,7 @@ function HealthPageInner() {
   const filtered = filterAndSortHealth(data, {
     search, riskFilter, rootCauseFilter, typeFilter, coeFilter,
     wsrFilter, understaffedOnly, rampDownOnly, hasUnbilledValueOnly,
-    devopsRiskOnly, sort,
+    devopsRiskOnly, extensionRiskOnly, escalationRiskOnly, sort,
   });
 
   const hasActiveFilters =
@@ -279,7 +341,9 @@ function HealthPageInner() {
     understaffedOnly ||
     rampDownOnly ||
     hasUnbilledValueOnly ||
-    devopsRiskOnly; // ← NEW
+    devopsRiskOnly ||
+    extensionRiskOnly ||
+    escalationRiskOnly;
 
   const clearFilters = () => {
     setSearch("");
@@ -293,6 +357,8 @@ function HealthPageInner() {
     setHasUnbilledValueOnly(false);
     setDevopsRiskOnly(false); // ← NEW
     setRevenueBreakdownOpen(false);
+    setExtensionRiskOnly(false);
+    setEscalationRiskOnly(false);
   };
 
   const counts = {
@@ -302,109 +368,214 @@ function HealthPageInner() {
   };
   const understaffedCount  = data.filter((p) => p.is_understaffed).length;
   const devopsRiskCount    = data.filter((p) => p.devops_extension_risk).length; // ← NEW
+  const extensionRiskCount = data.filter((p) => p.is_extension_risk).length;
+  const escalationRiskCount = data.filter((p) => p.is_escalation_risk).length;
   const totalUnbilledValue = data.reduce((sum, p) => sum + p.monthly_unbilled_value_usd, 0);
-  const unbilledProjects   = [...data]
+  const unbilledProjects = [...data]
     .filter((p) => p.monthly_unbilled_value_usd > 0)
     .sort((a, b) => b.monthly_unbilled_value_usd - a.monthly_unbilled_value_usd);
+
+  const totalExtensionAccrued   = data.reduce((sum, p) => sum + (p.extension_unbilled_value_usd ?? 0), 0);
+  
+  const totalExtensionPredicted = data.reduce((sum, p) => sum + (p.predicted_extension_revenue_loss_usd ?? 0), 0);
+  const extensionProjects = [...data]
+    .filter((p) => (p.extension_unbilled_value_usd ?? 0) > 0 || (p.predicted_extension_revenue_loss_usd ?? 0) > 0)
+    .sort((a, b) =>
+      ((b.extension_unbilled_value_usd ?? 0) + (b.predicted_extension_revenue_loss_usd ?? 0)) -
+      ((a.extension_unbilled_value_usd ?? 0) + (a.predicted_extension_revenue_loss_usd ?? 0))
+    );
+
 
   return (
     <div className="p-4 sm:p-6 max-w-6xl mx-auto space-y-4">
 
-      {/* ── Row 1: Risk band stat cards ── */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <StatCard label="High Risk"   value={counts.high}   color="red"   onClick={() => toggleRiskFilter("high")}   active={riskFilter === "high"} />
-        <StatCard label="Medium Risk" value={counts.medium} color="amber" onClick={() => toggleRiskFilter("medium")} active={riskFilter === "medium"} />
-        <StatCard label="Low Risk"    value={counts.low}    color="green" onClick={() => toggleRiskFilter("low")}    active={riskFilter === "low"} />
-      </div>
+      {/* ── Row 1: Consolidated risk overview ── */}
+      <RiskOverviewCard counts={counts} riskFilter={riskFilter} onSelect={toggleRiskFilter} />
 
-      {/* ── Row 2: Operational stat cards (4-wide on large screens) ── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard
+        <MetricCard
+          icon={Users}
           label="Understaffed"
           value={understaffedCount}
           sub="below 75% of expected headcount"
-          color={understaffedCount > 0 ? "amber" : "default"}
-          onClick={() => setUnderstaffedOnly((v) => !v)}
+          tone="amber"
           active={understaffedOnly}
+          onClick={() => setUnderstaffedOnly((v) => !v)}
         />
         <RevenueRiskCard
           totalMonthly={totalUnbilledValue}
+          totalExtensionAccrued={totalExtensionAccrued}
+          totalExtensionPredicted={totalExtensionPredicted}
           period={revenuePeriod}
           onPeriodChange={setRevenuePeriod}
-          active={hasUnbilledValueOnly}
-          onToggle={toggleRevenue}
+          activeTab={revenueBreakdownOpen ? revenueBreakdownTab : null}
+          onSelectUnbillable={toggleRevenue}
+          onSelectExtension={toggleExtensionBreakdown}
         />
-        <StatCard
-          label="Sustained Overtime Risk"
-          value={overtimeRisk.data?.employees_at_risk ?? "-"}
-          sub={
-            overtimeRisk.data
-              ? `${overtimeRisk.data.threshold_days}+ days over ${overtimeRisk.data.daily_hours_threshold}h in the last ${overtimeRisk.data.window_days}d`
-              : undefined
-          }
-          color={(overtimeRisk.data?.employees_at_risk ?? 0) > 0 ? "red" : "default"}
-          icon={<Flame className="w-4 h-4" />}
-          onClick={() => setOvertimeRiskModalOpen(true)}
-          active={overtimeRiskModalOpen}
+        <MetricCard
+          icon={Clock}
+          label="Extension Risk"
+          value={extensionRiskCount}
+          sub="overrunning, or DevOps work won't finish in time"
+          tone="amber"
+          active={extensionRiskOnly}
+          onClick={() => setExtensionRiskOnly((v) => !v)}
         />
-        {/* ← NEW: DevOps extension risk stat card */}
-        <StatCard
-          label="DevOps Extension Risk"
-          value={devopsRiskCount}
-          sub="open / blocked tickets near end date"
-          color={devopsRiskCount > 0 ? "amber" : "default"}
-          onClick={() => setDevopsRiskOnly((v) => !v)}
-          active={devopsRiskOnly}
+        <MetricCard
+          icon={AlertTriangle}
+          label="Escalation Risk"
+          value={escalationRiskCount}
+          sub="WSR stuck/worsening, or a recent effort spike"
+          tone="red"
+          active={escalationRiskOnly}
+          onClick={() => setEscalationRiskOnly((v) => !v)}
         />
       </div>
 
-      {/* ── Revenue breakdown panel ── */}
+{/* ── Revenue breakdown panel ── */}
       {revenueBreakdownOpen && (
-        <div className="rounded-xl border border-red-200 bg-red-50/40 p-3.5 space-y-2">
-          <p className="text-[11px] text-gray-500">
-            Projected unbilled value for the selected period (allocation % × hourly rate × 160 monthly hours).
-          </p>
-          <div className="rounded-lg border border-[hsl(var(--primary)/0.3)] bg-white overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead className="bg-secondary text-secondary-foreground">
-                  <tr>
-                    <th className="text-left font-medium px-3 py-1.5 whitespace-nowrap">Project</th>
-                    <th className="text-left font-medium px-3 py-1.5 whitespace-nowrap">Client</th>
-                    <th className="text-right font-medium px-3 py-1.5 whitespace-nowrap">$ at risk / {revenuePeriod}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {unbilledProjects.map((p) => (
-                    <tr key={p.project_code} className="border-b border-gray-50 last:border-0 hover:bg-gray-50/50">
-                      <td className="px-3 py-1.5 whitespace-nowrap">
-                        <button onClick={() => openProject(p.project_code)} className="font-medium text-primary hover:underline">
-                          {p.project_code}
-                        </button>
-                      </td>
-                      <td className="px-3 py-1.5 text-gray-500 whitespace-nowrap">{p.client_id ?? "-"}</td>
-                      <td className="px-3 py-1.5 text-right whitespace-nowrap">
-                        <button
-                          onClick={() => setUnbilledProofProject({ code: p.project_code, client: p.client_id })}
-                          className="text-gray-700 font-medium hover:underline hover:text-primary"
-                          title="Click to see exactly which allocations this figure comes from"
-                        >
-                          {formatUsd(convertRevenue(p.monthly_unbilled_value_usd, revenuePeriod))}
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                  {unbilledProjects.length === 0 && (
-                    <tr>
-                      <td colSpan={3} className="text-center text-xs text-gray-400 italic py-4">
-                        No projects currently have unbilled value at risk.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+        <div className="rounded-xl border border-red-200 bg-red-50/40 p-3.5 space-y-2.5">
+          <div className="flex items-center gap-1 bg-white/70 rounded-lg p-0.5 w-fit border border-red-200">
+            <button
+              onClick={() => setRevenueBreakdownTab("unbillable")}
+              className={cn(
+                "text-[11px] px-2.5 py-1 rounded-md font-medium transition",
+                revenueBreakdownTab === "unbillable" ? "bg-red-600 text-white" : "text-red-700 hover:bg-red-100"
+              )}
+            >
+              Unbillable work
+            </button>
+            <button
+              onClick={() => setRevenueBreakdownTab("extension")}
+              className={cn(
+                "text-[11px] px-2.5 py-1 rounded-md font-medium transition",
+                revenueBreakdownTab === "extension" ? "bg-red-600 text-white" : "text-red-700 hover:bg-red-100"
+              )}
+            >
+              Extension overrun
+            </button>
           </div>
+
+          {revenueBreakdownTab === "unbillable" ? (
+            <>
+              <p className="text-[11px] text-gray-500">
+                Projected unbilled value for the selected period (allocation % × hourly rate × 160 monthly hours), for people currently marked SHADOW/UNBILLED.
+              </p>
+              <div className="rounded-lg border border-[hsl(var(--primary)/0.3)] bg-white overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead className="bg-secondary text-secondary-foreground">
+                      <tr>
+                        <th className="text-left font-medium px-3 py-1.5 whitespace-nowrap">Project</th>
+                        <th className="text-left font-medium px-3 py-1.5 whitespace-nowrap">Client</th>
+                        <th className="text-right font-medium px-3 py-1.5 whitespace-nowrap">$ at risk / {revenuePeriod}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {unbilledProjects.map((p) => (
+                        <tr key={p.project_code} className="border-b border-gray-50 last:border-0 hover:bg-gray-50/50">
+                          <td className="px-3 py-1.5 whitespace-nowrap">
+                            <button onClick={() => openProject(p.project_code)} className="font-medium text-primary hover:underline">
+                              {p.project_code}
+                            </button>
+                          </td>
+                          <td className="px-3 py-1.5 text-gray-500 whitespace-nowrap">{p.client_id ?? "-"}</td>
+                          <td className="px-3 py-1.5 text-right whitespace-nowrap">
+                            <button
+                              onClick={() => setUnbilledProofProject({ code: p.project_code, client: p.client_id })}
+                              className="text-gray-700 font-medium hover:underline hover:text-primary"
+                              title="Click to see exactly which allocations this figure comes from"
+                            >
+                              {formatUsd(convertRevenue(p.monthly_unbilled_value_usd, revenuePeriod))}
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                      {unbilledProjects.length === 0 && (
+                        <tr>
+                          <td colSpan={3} className="text-center text-xs text-gray-400 italic py-4">
+                            No projects currently have unbilled value at risk.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="text-[11px] text-gray-500">
+                <strong>Accrued</strong> = working days (Mon–Fri) already booked past the project&apos;s end date × 8h/day × allocation % × rate card — already happened, not an estimate.{" "}
+                <strong>Predicted</strong> = the DevOps-capacity day forecast (same as each project&apos;s Overview tab) × the current team&apos;s $/working-day if they keep going. Day/week/month toggle above doesn&apos;t apply — these are working-day totals.
+              </p>
+              <div className="rounded-lg border border-[hsl(var(--primary)/0.3)] bg-white overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead className="bg-secondary text-secondary-foreground">
+                      <tr>
+                        <th className="text-left font-medium px-3 py-1.5 whitespace-nowrap">Project</th>
+                        <th className="text-left font-medium px-3 py-1.5 whitespace-nowrap">Client</th>
+                        <th className="text-left font-medium px-3 py-1.5 whitespace-nowrap">Predicted window</th>
+                        <th className="text-right font-medium px-3 py-1.5 whitespace-nowrap">Time</th>
+                        <th className="text-right font-medium px-3 py-1.5 whitespace-nowrap">Accrued $</th>
+                        <th className="text-right font-medium px-3 py-1.5 whitespace-nowrap">Predicted $ (more)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {extensionProjects.map((p) => (
+                        <tr key={p.project_code} className="border-b border-gray-50 last:border-0 hover:bg-gray-50/50">
+  <td className="px-3 py-1.5 whitespace-nowrap">
+    <button onClick={() => openProject(p.project_code)} className="font-medium text-primary hover:underline">
+      {p.project_code}
+    </button>
+  </td>
+  <td className="px-3 py-1.5 text-gray-500 whitespace-nowrap">{p.client_id ?? "-"}</td>
+  <td className="px-3 py-1.5 text-gray-500 whitespace-nowrap">
+    {p.predicted_extension_start_date && p.predicted_extension_end_date
+      ? `${p.predicted_extension_start_date} → ${p.predicted_extension_end_date}`
+      : "-"}
+  </td>
+  <td className="px-3 py-1.5 text-right text-gray-500 whitespace-nowrap">
+    {p.projected_extension_duration_label ?? "-"}
+  </td>
+  <td className="px-3 py-1.5 text-right whitespace-nowrap">
+    <button
+      onClick={() => setExtensionProofProject({ code: p.project_code, client: p.client_id })}
+      className="text-gray-700 font-medium hover:underline hover:text-primary"
+      title="Click to see exactly which allocations this figure comes from"
+    >
+      {formatUsd(p.extension_unbilled_value_usd ?? 0)}
+    </button>
+  </td>
+  <td className="px-3 py-1.5 text-right whitespace-nowrap">
+    {(p.predicted_extension_revenue_loss_usd ?? 0) > 0 ? (
+      <button
+        onClick={() => setExtensionProofProject({ code: p.project_code, client: p.client_id })}
+        className="text-amber-700 font-medium hover:underline"
+        title={`${p.projected_extension_duration_label ?? `${p.projected_extension_days}d`} · ${p.projected_extension_confidence} confidence — click to see breakdown`}
+      >
+        {formatUsd(p.predicted_extension_revenue_loss_usd ?? 0)}
+      </button>
+    ) : (
+      <span className="text-gray-300">-</span>
+    )}
+  </td>
+</tr>
+                      ))}
+                      {extensionProjects.length === 0 && (
+                        <tr>
+                          <td colSpan={6} className="text-center text-xs text-gray-400 italic py-4">
+                            No projects currently show extension-related revenue loss.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       )}
 
@@ -568,6 +739,46 @@ function HealthPageInner() {
               </span>
             )}
           </button>
+
+          <button
+  onClick={() => setExtensionRiskOnly((v) => !v)}
+  className={cn(
+    "text-[11px] px-2 py-1 rounded-lg border whitespace-nowrap transition-colors",
+    extensionRiskOnly
+      ? "bg-amber-50 border-amber-300 text-amber-700 font-semibold"
+      : "border-gray-200 text-gray-500 hover:border-gray-300"
+  )}
+>
+  Extension risk only
+  {extensionRiskCount > 0 && (
+    <span className={cn(
+      "ml-1 inline-flex items-center justify-center rounded-full px-1 text-[9px] font-bold leading-none",
+      extensionRiskOnly ? "bg-amber-500 text-white" : "bg-gray-200 text-gray-600"
+    )}>
+      {extensionRiskCount}
+    </span>
+  )}
+</button>
+
+<button
+  onClick={() => setEscalationRiskOnly((v) => !v)}
+  className={cn(
+    "text-[11px] px-2 py-1 rounded-lg border whitespace-nowrap transition-colors",
+    escalationRiskOnly
+      ? "bg-red-50 border-red-300 text-red-700 font-semibold"
+      : "border-gray-200 text-gray-500 hover:border-gray-300"
+  )}
+>
+  Escalation only
+  {escalationRiskCount > 0 && (
+    <span className={cn(
+      "ml-1 inline-flex items-center justify-center rounded-full px-1 text-[9px] font-bold leading-none",
+      escalationRiskOnly ? "bg-red-500 text-white" : "bg-gray-200 text-gray-600"
+    )}>
+      {escalationRiskCount}
+    </span>
+  )}
+</button>
         </div>
       </div>
 
@@ -616,7 +827,11 @@ function HealthPageInner() {
 
                   {/* Root causes */}
                   <td className="px-3 py-2 text-gray-500 whitespace-nowrap">
-                    {p.root_causes.map(rootCauseLabel).join(", ") || "-"}
+                    <div className="flex items-center gap-1 flex-wrap">
+                      {p.is_extension_risk && <Badge variant="amber">extension</Badge>}
+                      {p.is_escalation_risk && <Badge variant="red">escalation</Badge>}
+                      <span>{p.root_causes.map(rootCauseLabel).join(", ") || (!p.is_extension_risk && !p.is_escalation_risk ? "-" : "")}</span>
+                    </div>
                   </td>
 
                   {/* Unbilled $/mo */}
@@ -696,6 +911,13 @@ function HealthPageInner() {
           client={unbilledProofProject.client}
           period={revenuePeriod}
           onClose={() => setUnbilledProofProject(null)}
+        />
+      )}
+      {extensionProofProject && (
+        <ExtensionRevenueProofModal
+          projectCode={extensionProofProject.code}
+          client={extensionProofProject.client}
+          onClose={() => setExtensionProofProject(null)}
         />
       )}
       {overtimeRiskModalOpen && (
@@ -849,49 +1071,301 @@ function UnbilledValueProofModal({
   );
 }
 
-// ── RevenueRiskCard ────────────────────────────────────────────────────────
-function RevenueRiskCard({
-  totalMonthly, period, onPeriodChange, active, onToggle,
+// ── ExtensionRevenueProofModal ─────────────────────────────────────────────
+function ExtensionRevenueProofModal({
+  projectCode, client, onClose,
 }: {
-  totalMonthly: number;
-  period: RevenuePeriod;
-  onPeriodChange: (p: RevenuePeriod) => void;
-  active: boolean;
-  onToggle: () => void;
+  projectCode: string;
+  client: string | null;
+  onClose: () => void;
 }) {
-  const value = convertRevenue(totalMonthly, period);
+  const detail = useQuery({
+    queryKey: ["health-project-detail", projectCode],
+    queryFn: () => api.healthProjectDetail(projectCode),
+  });
+
+
   return (
-    <div
-      className={cn(
-        "rounded-xl border p-4",
-        totalMonthly > 0 ? "bg-red-50 border-red-200 text-red-900" : "bg-white border-gray-200 text-gray-900",
-        active && "ring-2 ring-red-300"
-      )}
+    <Modal
+      title={`${projectCode}${client ? ` — ${client}` : ""} — Extension Overrun Revenue Proof`}
+      onClose={onClose}
+      widthClassName="max-w-2xl"
     >
-      <button type="button" onClick={onToggle} className="w-full text-left group">
-        <p className="text-xs font-medium text-gray-500 mb-1">Unbilled Value at Risk</p>
-        <p className="text-2xl font-bold leading-tight">{formatUsd(value)}</p>
-        <p className="text-xs text-gray-400 mt-0.5">
-          rate card, per {period}
-          {active && " · click to hide breakdown"}
-        </p>
-      </button>
-      <div className="flex items-center gap-1 mt-2">
-        {(["day", "week", "month"] as RevenuePeriod[]).map((p) => (
+      <div className="p-5 space-y-3 text-xs">
+        {detail.isLoading ? (
+          <LoadingState label="Loading allocation proof…" />
+        ) : detail.error || !detail.data ? (
+          <ErrorState message="Could not load this project's allocation detail." />
+        ) : (() => {
+          const proof = detail.data.extension_revenue;
+          const rows  = proof.qualifying_allocations;
+          const devops = detail.data.devops;
+          return (
+            <>
+              
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-lg border border-gray-200 p-2.5">
+                  <p className="text-[10px] text-gray-400 uppercase tracking-wide">Accrued so far</p>
+                  <p className="text-lg font-semibold text-gray-800">{formatUsd(proof.extension_unbilled_value_usd)}</p>
+                </div>
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-2.5">
+                  <p className="text-[10px] text-amber-600 uppercase tracking-wide">Predicted additional</p>
+                  <p className="text-lg font-semibold text-amber-800">{formatUsd(proof.predicted_extension_revenue_loss_usd)}</p>
+                  {proof.projected_extension_days != null && (
+                    <>
+                      <p className="text-[10px] text-amber-600 mt-0.5">
+                        {proof.projected_extension_duration_label ?? `${proof.projected_extension_days}d`} · {proof.projected_extension_confidence} confidence · {formatUsd(proof.team_daily_extension_cost_usd)}/working-day
+                      </p>
+                      {proof.predicted_extension_start_date && proof.predicted_extension_end_date && (
+                        <p className="text-[10px] text-amber-600">
+                          {proof.predicted_extension_start_date} → {proof.predicted_extension_end_date}
+                        </p>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {proof.projected_extension_days != null && devops?.data_available && (
+                <div className="rounded-lg border border-gray-200 bg-gray-50/60 p-3 text-[11px] space-y-1">
+                  <p className="font-medium text-gray-600">
+                    How {proof.projected_extension_duration_label ?? `${proof.projected_extension_days}d`} was calculated
+                  </p>
+                  <p className="text-gray-500">
+                    {devops.is_overdue
+                      ? "Project is overdue, so the full remaining DevOps effort counts: "
+                      : "Remaining DevOps effort minus team capacity left in the window: "}
+                    <strong>{devops.remaining_effort_hours}h</strong>
+                    {!devops.is_overdue && (
+                      <> − <strong>{devops.team_capacity_hours_after_leave}h</strong></>
+                    )}
+                    {" "}÷ <strong>{devops.team_daily_capacity_hours}h/day</strong> = <strong>{proof.projected_extension_duration_label ?? `${proof.projected_extension_days}d`}</strong>
+                  </p>
+                  <p className="text-gray-400">
+                    Confidence is <strong>{proof.projected_extension_confidence}</strong> because{" "}
+                    {devops.tickets_missing_remaining_estimate + devops.tickets_with_no_effort_data} of{" "}
+                    {devops.open_ticket_count} open tickets are missing effort estimates.
+                  </p>
+                </div>
+              )}
+
+              {rows.length === 0 ? (
+                <p className="text-gray-400 italic">No currently-active allocations running past this project's end date.</p>
+              ) : (
+                <table className="w-full text-[11px]">
+                  <thead>
+                    <tr className="text-gray-400 border-b border-gray-200">
+                      <th className="text-left font-medium py-1.5">Employee</th>
+                      <th className="text-left font-medium py-1.5">Designation</th>
+                      <th className="text-left font-medium py-1.5">Status</th>
+                      <th className="text-right font-medium py-1.5">Alloc %</th>
+                      <th className="text-right font-medium py-1.5">Rate/hr</th>
+                      <th className="text-right font-medium py-1.5">Working days over</th>
+                      <th className="text-right font-medium py-1.5">$ accrued</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((r, i) => (
+                      <tr key={i} className="border-b border-gray-50 last:border-0">
+                        <td className="py-1.5 font-medium text-gray-700 whitespace-nowrap">{r.employee_id}</td>
+                        <td className="py-1.5 text-gray-600 whitespace-nowrap">{r.job_name ?? "-"}</td>
+                        <td className="py-1.5 text-gray-500 whitespace-nowrap">{r.resourcing_status}</td>
+                        <td className="py-1.5 text-right text-gray-700">{r.allocation_by_percentage}%</td>
+                        <td className="py-1.5 text-right text-gray-500">
+                          {r.hourly_rate_usd != null ? `$${r.hourly_rate_usd}` : "-"}
+                        </td>
+                        <td className="py-1.5 text-right text-gray-500">{r.overrun_working_days}d</td>
+                        <td className="py-1.5 text-right text-gray-700 font-medium">
+                          {formatUsd(r.extension_unbilled_value_usd)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t border-gray-200">
+                      <td colSpan={6} className="py-1.5 text-right font-semibold text-gray-700">Total accrued</td>
+                      <td className="py-1.5 text-right font-semibold text-gray-900">
+                        {formatUsd(rows.reduce((sum, r) => sum + r.extension_unbilled_value_usd, 0))}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              )}
+
+              {proof.predicted_breakdown?.length > 0 && (
+                <>
+                  <p className="text-[11px] text-gray-500 font-medium mt-3">
+                    Predicted breakdown — if the project runs ~{proof.projected_extension_duration_label ?? `${proof.projected_extension_days}d`} longer
+                  </p>
+                  <table className="w-full text-[11px]">
+                    <thead>
+                      <tr className="text-gray-400 border-b border-gray-200">
+                        <th className="text-left font-medium py-1.5">Employee</th>
+                        <th className="text-left font-medium py-1.5">Designation</th>
+                        <th className="text-right font-medium py-1.5">Alloc %</th>
+                        <th className="text-right font-medium py-1.5">Rate/hr</th>
+                        <th className="text-right font-medium py-1.5">Predicted $</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {proof.predicted_breakdown.map((r, i) => (
+                        <tr key={i} className="border-b border-gray-50 last:border-0">
+                          <td className="py-1.5 font-medium text-gray-700 whitespace-nowrap">{r.employee_id}</td>
+                          <td className="py-1.5 text-gray-600 whitespace-nowrap">{r.job_name ?? "-"}</td>
+                          <td className="py-1.5 text-right text-gray-700">{r.allocation_by_percentage}%</td>
+                          <td className="py-1.5 text-right text-gray-500">
+                            {r.hourly_rate_usd != null ? `$${r.hourly_rate_usd}` : "-"}
+                          </td>
+                          <td className="py-1.5 text-right text-amber-700 font-medium">
+                            {formatUsd(r.predicted_additional_usd)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="border-t border-gray-200">
+                        <td colSpan={4} className="py-1.5 text-right font-semibold text-gray-700">Total predicted</td>
+                        <td className="py-1.5 text-right font-semibold text-amber-800">
+                          {formatUsd(proof.predicted_breakdown.reduce((sum, r) => sum + r.predicted_additional_usd, 0))}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </>
+              )}
+            </>
+          );
+        })()}
+      </div>
+    </Modal>
+  );
+}
+
+
+// ── RiskOverviewCard ────────────────────────────────────────────────────────
+function RiskOverviewCard({
+  counts, riskFilter, onSelect,
+}: {
+  counts: { high: number; medium: number; low: number };
+  riskFilter: RiskFilter;
+  onSelect: (band: "high" | "medium" | "low") => void;
+}) {
+  const total = counts.high + counts.medium + counts.low;
+  const segments: { key: "high" | "medium" | "low"; label: string; value: number; barClass: string; textClass: string; ringClass: string }[] = [
+    { key: "high",   label: "High",   value: counts.high,   barClass: "bg-red-500",    textClass: "text-red-700",     ringClass: "border-red-300 bg-red-50" },
+    { key: "medium", label: "Medium", value: counts.medium, barClass: "bg-amber-400",  textClass: "text-amber-700",   ringClass: "border-amber-300 bg-amber-50" },
+    { key: "low",    label: "Low",    value: counts.low,    barClass: "bg-emerald-400", textClass: "text-emerald-700", ringClass: "border-emerald-300 bg-emerald-50" },
+  ];
+
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-4">
+      <div className="flex items-center justify-between mb-2.5">
+        <p className="text-xs font-medium text-gray-500">Project Risk</p>
+        <p className="text-xs text-gray-400">{total} active project{total === 1 ? "" : "s"}</p>
+      </div>
+      <div className="flex h-2 rounded-full overflow-hidden bg-gray-100 mb-3">
+        {segments.map((s) => s.value > 0 && (
+          <div key={s.key} className={s.barClass} style={{ width: `${(s.value / total) * 100}%` }} />
+        ))}
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        {segments.map((s) => (
           <button
-            key={p}
-            onClick={() => onPeriodChange(p)}
+            key={s.key}
+            onClick={() => onSelect(s.key)}
             className={cn(
-              "text-[10px] px-1.5 py-0.5 rounded-full border capitalize transition",
-              p === period
-                ? "bg-white border-red-300 text-red-700 font-medium"
-                : "border-transparent text-gray-400 hover:text-gray-600"
+              "rounded-lg border px-2.5 py-1.5 text-left transition",
+              riskFilter === s.key ? s.ringClass : "border-gray-200 hover:border-gray-300"
             )}
           >
-            {p}
+            <p className={cn("text-lg font-bold leading-tight", riskFilter === s.key ? s.textClass : "text-gray-800")}>
+              {s.value}
+            </p>
+            <p className="text-[10px] text-gray-400">{s.label} risk</p>
           </button>
         ))}
       </div>
+    </div>
+  );
+}
+
+function RevenueRiskCard({
+  totalMonthly, totalExtensionAccrued, totalExtensionPredicted, period, onPeriodChange, activeTab, onSelectUnbillable, onSelectExtension,
+}: {
+  totalMonthly: number;
+  totalExtensionAccrued: number;
+  totalExtensionPredicted: number;
+  period: RevenuePeriod;
+  onPeriodChange: (p: RevenuePeriod) => void;
+  activeTab: "unbillable" | "extension" | null;
+  onSelectUnbillable: () => void;
+  onSelectExtension: () => void;
+}) {
+  const value = convertRevenue(totalMonthly, period);
+  const hasUnbillable = totalMonthly > 0;
+  const hasExtension = totalExtensionAccrued > 0 || totalExtensionPredicted > 0;
+
+  return (
+    <div className="rounded-2xl border border-gray-200 bg-white p-4 transition-all duration-200 hover:shadow-md hover:-translate-y-0.5 hover:border-gray-300">
+      <div className="flex items-center justify-between mb-3">
+        <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-red-50 text-red-600">
+          <DollarSign className="h-4 w-4" />
+        </span>
+        <div className="inline-flex items-center gap-0.5 rounded-full bg-gray-100 p-0.5">
+          {(["day", "week", "month"] as RevenuePeriod[]).map((p) => (
+            <button
+              key={p}
+              onClick={(e) => { e.stopPropagation(); onPeriodChange(p); }}
+              className={cn(
+                "text-[10px] px-2 py-0.5 rounded-full capitalize font-medium transition",
+                p === period ? "bg-white text-gray-900 shadow-sm" : "text-gray-400 hover:text-gray-600"
+              )}
+            >
+              {p}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={onSelectUnbillable}
+        className={cn(
+          "relative w-full text-left rounded-lg -mx-1 px-2 py-1.5 transition-colors",
+          activeTab === "unbillable" ? "bg-red-50/70" : "hover:bg-gray-50"
+        )}
+      >
+        {hasUnbillable && <span className="absolute left-0 top-1.5 bottom-1.5 w-1 rounded-full bg-red-500" />}
+        <p className={cn("pl-1.5 text-[26px] leading-none font-bold tracking-tight", hasUnbillable ? "text-red-700" : "text-gray-900")}>
+          {formatUsd(value)}
+        </p>
+        <p className="pl-1.5 mt-1 text-[11px] text-gray-500">
+          unbillable work · per {period}{activeTab === "unbillable" && " · click to hide"}
+        </p>
+      </button>
+
+      <div className="my-2.5 border-t border-gray-100" />
+
+      <button
+        type="button"
+        onClick={onSelectExtension}
+        className={cn(
+          "relative w-full text-left rounded-lg -mx-1 px-2 py-1.5 transition-colors",
+          activeTab === "extension" ? "bg-amber-50/70" : "hover:bg-gray-50"
+        )}
+      >
+        {hasExtension && <span className="absolute left-0 top-1.5 bottom-1.5 w-1 rounded-full bg-amber-500" />}
+        <div className="pl-1.5 flex items-baseline gap-1.5 flex-wrap">
+          <span className="text-base font-bold text-amber-700">{formatUsd(totalExtensionAccrued)}</span>
+          <span className="text-[11px] text-gray-400">accrued</span>
+          {totalExtensionPredicted > 0 && (
+            <span className="text-[11px] font-medium text-amber-600">+ {formatUsd(totalExtensionPredicted)} predicted</span>
+          )}
+        </div>
+        <p className="pl-1.5 mt-0.5 text-[11px] text-gray-500">
+          extension overrun{activeTab === "extension" && " · click to hide"}
+        </p>
+      </button>
     </div>
   );
 }

@@ -209,10 +209,47 @@ function OverviewTab({ d }: { d: ProjectHealthDetail }) {
         <Field label="Tech COE" value={d.tech_coe ?? "-"} />
         <Field label="Project window" value={`${d.project_start_date ?? "?"} → ${d.project_end_date ?? "?"}`} />
       </div>
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 flex-wrap">
         <Badge variant={d.risk_band}>{d.risk_band} risk</Badge>
         <span className="text-xs text-gray-400">{d.risk_score} of {rows.length} tracked root causes are flagged</span>
+        {d.is_extension_risk && <Badge variant="amber">extension risk</Badge>}
+        {d.is_escalation_risk && <Badge variant="red">escalation</Badge>}
       </div>
+
+      {d.is_extension_risk && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-1">
+          <p className="text-xs font-semibold text-amber-800">Extension outlook</p>
+          {d.extension_estimate.committed_overrun_days > 0 && (
+            <p className="text-xs text-gray-700">
+              Already booked <strong>{d.extension_estimate.committed_overrun_days} day(s)</strong> past the official end date
+              ({d.extension_estimate.committed_overrun_source}).
+            </p>
+          )}
+          {d.extension_estimate.projected_additional_days != null ? (
+            <p className="text-xs text-gray-700">
+              Estimated <strong>{d.extension_estimate.projected_additional_days} more day(s)</strong>
+              {" "}({d.extension_estimate.projected_additional_weeks}wk) beyond that, based on{" "}
+              {d.extension_estimate.projected_basis} —{" "}
+              <span className={cn("font-medium", d.extension_estimate.projected_additional_days_confidence === "low" ? "text-amber-700" : "text-gray-500")}>
+                {d.extension_estimate.projected_additional_days_confidence} confidence
+              </span>
+              {d.extension_estimate.projected_additional_days_confidence === "low" && (
+                <span> — several tickets are missing effort data, so treat this as a floor, not a fixed number</span>
+              )}
+              .
+              {d.extension_estimate.predicted_extension_start_date && d.extension_estimate.predicted_extension_end_date && (
+                <span className="block mt-0.5 text-gray-600">
+                  Predicted window: {d.extension_estimate.predicted_extension_start_date} → {d.extension_estimate.predicted_extension_end_date}
+                  {" "}({d.extension_estimate.projected_extension_duration_label})
+                </span>
+              )}
+            </p>
+          ) : d.extension_estimate.committed_overrun_days === 0 ? (
+            <p className="text-xs text-gray-500">No projected additional days beyond today — see DevOps tab for ticket-level detail.</p>
+          ) : null}
+          <p className="text-[10px] text-gray-400 pt-1">{d.extension_estimate.note}</p>
+        </div>
+      )}
       <div className="rounded-xl border border-[hsl(var(--primary)/0.3)] overflow-hidden">
         <div className="overflow-x-auto">
         <table className="w-full text-[11px]">
@@ -986,11 +1023,21 @@ function DevopsTab({ d }: { d: ProjectHealthDetail }) {
         </div>
 
         {devops.is_overdue ? (
-          <p className="text-sm text-gray-700">
-            Project end date <strong>{d.project_end_date ?? "?"}</strong> has passed —{" "}
-            <span className="text-red-700 font-semibold">{devops.remaining_effort_hours}h</span> of work is
-            still open. This is the pattern that leads to a late extension request.
-          </p>
+          <>
+            <p className="text-sm text-gray-700">
+              Project end date <strong>{d.project_end_date ?? "?"}</strong> has passed —{" "}
+              <span className="text-red-700 font-semibold">{devops.remaining_effort_hours}h</span> of work is
+              still open. This is the pattern that leads to a late extension request.
+            </p>
+            {d.extension_estimate.projected_additional_days != null && (
+              <p className="text-xs text-gray-600 mt-1">
+                At this team's current daily capacity, that's roughly{" "}
+                <strong>{d.extension_estimate.projected_additional_days} more day(s)</strong>
+                {" "}({d.extension_estimate.projected_additional_weeks}wk) of work —{" "}
+                {d.extension_estimate.projected_additional_days_confidence} confidence.
+              </p>
+            )}
+          </>
         ) : devops.within_risk_window ? (
           <>
             <p className="text-2xl font-semibold text-gray-800">
@@ -1007,6 +1054,12 @@ function DevopsTab({ d }: { d: ProjectHealthDetail }) {
                 `(${devops.team_capacity_hours}h before planned leave) `}
               vs. {devops.remaining_effort_hours}h of remaining work.
             </p>
+            {d.extension_estimate.projected_additional_days != null && (
+              <p className="text-xs text-red-700 mt-1 font-medium">
+                Projected to run {d.extension_estimate.projected_additional_days} day(s) beyond the {devops.working_days_in_window}-day window
+                {" "}({d.extension_estimate.projected_additional_weeks}wk) — {d.extension_estimate.projected_additional_days_confidence} confidence.
+              </p>
+            )}
           </>
         ) : (
           <p className="text-sm text-gray-600">

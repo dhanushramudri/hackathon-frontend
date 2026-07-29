@@ -136,6 +136,11 @@ function RecommendationsPageInner() {
   // default -- someone who can't actually take the requested % stays out of
   // Candidates regardless of which ranking parameters are selected.
   const [includeBelowCapacity, setIncludeBelowCapacity] = useState(false);
+  // How many points below the requested % still counts as a real, actionable
+  // option in the main Candidates list (not a fixed number -- fully adjustable
+  // via the Advanced Filters slider). Shared across By Role and By Project,
+  // same pattern as includeBelowCapacity above.
+  const [nearCapacityTolerancePct, setNearCapacityTolerancePct] = useState(25);
 
   const [pipelineCollapsed, setPipelineCollapsed] = useState(false);
 
@@ -677,6 +682,8 @@ function RecommendationsPageInner() {
                         setIncludeParams={setIncludeParams}
                         includeBelowCapacity={includeBelowCapacity}
                         setIncludeBelowCapacity={setIncludeBelowCapacity}
+                        nearCapacityTolerancePct={nearCapacityTolerancePct}
+                        setNearCapacityTolerancePct={setNearCapacityTolerancePct}
                         onOpenProfile={(employeeId, tab, skillMatchContext) => setOpenProfile({ employeeId, tab, skillMatchContext })}
                         onSelectSibling={setSelectedRoleRowIndex}
                       />
@@ -721,6 +728,8 @@ function RecommendationsPageInner() {
                                 setIncludeParams={setIncludeParams}
                                 includeBelowCapacity={includeBelowCapacity}
                                 setIncludeBelowCapacity={setIncludeBelowCapacity}
+                                nearCapacityTolerancePct={nearCapacityTolerancePct}
+                                setNearCapacityTolerancePct={setNearCapacityTolerancePct}
                                 onOpenProfile={(employeeId, tab, skillMatchContext) => setOpenProfile({ employeeId, tab, skillMatchContext })}
                                 onSelectSibling={(ri) => {
                                   setExpandedAllRoles((prev) => new Set(prev).add(ri));
@@ -963,6 +972,8 @@ function RecommendationsPageInner() {
               setIncludeParams={setIncludeParams}
               includeBelowCapacity={includeBelowCapacity}
               setIncludeBelowCapacity={setIncludeBelowCapacity}
+              nearCapacityTolerancePct={nearCapacityTolerancePct}
+              setNearCapacityTolerancePct={setNearCapacityTolerancePct}
               onOpenProfile={(employeeId, tab, skillMatchContext) => setOpenProfile({ employeeId, tab, skillMatchContext })}
               onSelectSibling={handleSelectRow}
             />
@@ -1078,6 +1089,8 @@ interface CandidateFilterOptions {
   // "Skill match" would silently have no effect on ordering. Defaults true to
   // match the platform default (skill included).
   includeSkill?: boolean;
+  includeAvailability?: boolean;
+  includeCoeAffinity?: boolean;
 }
 
 function filterAndSortCandidates(candidates: RecommendationCandidate[], opts: CandidateFilterOptions): RecommendationCandidate[] {
@@ -1115,17 +1128,12 @@ function filterAndSortCandidates(candidates: RecommendationCandidate[], opts: Ca
   if (opts.minRelevantProjects > 0) result = result.filter((c) => c.relevant_project_count >= opts.minRelevantProjects);
   if (opts.relevantExperienceOnly) result = result.filter((c) => c.relevant_project_count > 0);
 
-  const BUCKET_RANK: Record<string, number> = { eligible: 3, trainable: 2, gap: 1, not_assessed: 0 };
+  const BUCKET_RANK: Record<string, number> = { eligible: 1, trainable: 1, gap: 1, not_assessed: 0 };
   const CONF_RANK: Record<string, number> = { observed: 2, imputed: 1, semantic_match: 1, no_match: 0, no_requirement: 0 };
 
   const sorted = [...result];
   switch (opts.sort) {
     case "composite":
-      // Mirror the backend sort: bucket first (eligible > trainable > gap), then
-      // confidence tier (observed > imputed), then composite -- but ONLY when
-      // skill is actually a selected ranking parameter (both are skill-derived).
-      // If the RM excluded skill via Advanced Filters, ordering falls back to
-      // pure composite_score so that exclusion isn't silently a no-op.
       sorted.sort((a, b) => {
         if (opts.includeSkill !== false) {
           const bucketDiff = (BUCKET_RANK[b.bucket] ?? 0) - (BUCKET_RANK[a.bucket] ?? 0);
@@ -1133,11 +1141,16 @@ function filterAndSortCandidates(candidates: RecommendationCandidate[], opts: Ca
           const confDiff = (CONF_RANK[b.skill_confidence] ?? 0) - (CONF_RANK[a.skill_confidence] ?? 0);
           if (confDiff !== 0) return confDiff;
         }
+        if (opts.includeCoeAffinity !== false) {
+          const coeDiff = (b.coe_affinity_rank ?? 1) - (a.coe_affinity_rank ?? 1);
+          if (coeDiff !== 0) return coeDiff;
+        }
+        if (opts.includeAvailability !== false) {
+          const availDiff = b.available_pct - a.available_pct;
+          if (availDiff !== 0) return availDiff;
+        }
         const compositeDiff = b.composite_score - a.composite_score;
         if (compositeDiff !== 0) return compositeDiff;
-        // Tie-break on track record — mirrors the backend sort (recommendation_service.py):
-        // a candidate with more (and more concentrated) relevant project history wins
-        // when everything else is equal.
         const relevantDiff = b.relevant_project_count - a.relevant_project_count;
         if (relevantDiff !== 0) return relevantDiff;
         return b.relevant_project_ratio - a.relevant_project_ratio;
@@ -1249,7 +1262,7 @@ function AdvancedFiltersButton({
       title="Choose exactly which parameters (skill, competency, availability, category match, project count) shape the ranking"
     >
       <SlidersHorizontal className="w-3 h-3" />
-      Advanced{nonDefault && ` (${activeCount}/5${includeBelowCapacity ? "+pool" : ""})`}
+      Advanced{nonDefault && ` (${activeCount}/${ADVANCED_PARAMS.length}${includeBelowCapacity ? "+pool" : ""})`}
       <ChevronDown className={cn("w-3 h-3 transition-transform", open && "rotate-180")} />
     </button>
   );
@@ -1267,11 +1280,14 @@ interface AdvancedParamDef {
 // parameter later is just another entry here, a matching field on
 // RecommendationCandidate, and a matching key on IncludeParams/BASE_WEIGHTS.
 const ADVANCED_PARAMS: AdvancedParamDef[] = [
-  { key: "skill", label: "Skill match", weightPct: 50, description: "How well the employee's skill records match the requested skillset." },
-  { key: "competency", label: "Competency", weightPct: 30, description: "Employee's overall competency assessment score." },
-  { key: "availability", label: "Availability", weightPct: 20, description: "How much of the requested allocation percentage the employee has free." },
+  { key: "skill", label: "Skill match", weightPct: 40, description: "How well the employee's skill records match the requested skillset." },
+  { key: "competency", label: "Competency", weightPct: 25, description: "Employee's overall competency assessment score." },
+  { key: "availability", label: "Availability", weightPct: 35, description: "How much of the requested allocation percentage the employee has free." },
   { key: "category_match", label: "COE / Proposition category match", weightPct: 15, description: "Past projects matching this deal's proposition category (e.g. Data Advisory, Pricing) — a specialist with 4/4 matching projects can outrank a generalist with 1/4." },
   { key: "project_count", label: "Number of projects completed", weightPct: 15, description: "Overall completed/active project experience (breadth/seniority), regardless of category — capped at 20+ projects." },
+  { key: "coe_affinity", label: "CoE preference", weightPct: 0, description: "Prefer candidates from the CoE this role is asking for (e.g. a DS role prefers DS people first, falling back to other CoEs only if none rank higher). Data Engineering roles are exempt — any CoE can staff them. This is a sort tiebreak, not a blended composite weight." },
+
+  { key: "cost_efficiency", label: "Budget-friendly", weightPct: 0, description: "Among candidates who are already comparably good matches (within ~2 points of each other), prefer the lower-cost role — e.g. a Software Engineer over a Senior Software Engineer or Solutions Enabler at the same fit level. Never overrides a genuinely better match; only breaks near-ties." },
 ];
 
 // Inline dropdown, not a modal -- opens/closes exactly like the Filters panel.
@@ -1284,6 +1300,8 @@ function AdvancedFiltersPanel({
   onApply,
   includeBelowCapacity,
   onApplyBelowCapacity,
+  nearCapacityTolerancePct,
+  onApplyNearCapacityTolerancePct,
 }: {
   include: IncludeParams;
   onApply: (v: IncludeParams) => void;
@@ -1291,9 +1309,14 @@ function AdvancedFiltersPanel({
   // Only the By-Role view wires this in today.
   includeBelowCapacity?: boolean;
   onApplyBelowCapacity?: (v: boolean) => void;
+  // How many points below requested % still counts as "near enough" -- fully
+  // adjustable, paired with includeBelowCapacity in the same panel section.
+  nearCapacityTolerancePct?: number;
+  onApplyNearCapacityTolerancePct?: (v: number) => void;
 }) {
   const [draft, setDraft] = useState<IncludeParams>(include);
   const [draftBelowCapacity, setDraftBelowCapacity] = useState(includeBelowCapacity ?? false);
+  const [draftTolerance, setDraftTolerance] = useState(nearCapacityTolerancePct ?? 25);
   // Stay in sync if applied state changes from outside (e.g. a row/deal change
   // resets it) so the draft never silently disagrees with reality.
   useEffect(() => {
@@ -1302,9 +1325,15 @@ function AdvancedFiltersPanel({
   useEffect(() => {
     setDraftBelowCapacity(includeBelowCapacity ?? false);
   }, [includeBelowCapacity]);
+  useEffect(() => {
+    setDraftTolerance(nearCapacityTolerancePct ?? 25);
+  }, [nearCapacityTolerancePct]);
 
   const draftCount = Object.values(draft).filter(Boolean).length;
-  const isDirty = ADVANCED_PARAMS.some((p) => draft[p.key] !== include[p.key]) || draftBelowCapacity !== (includeBelowCapacity ?? false);
+  const isDirty =
+    ADVANCED_PARAMS.some((p) => draft[p.key] !== include[p.key]) ||
+    draftBelowCapacity !== (includeBelowCapacity ?? false) ||
+    draftTolerance !== (nearCapacityTolerancePct ?? 25);
   const appliedLabels = ADVANCED_PARAMS.filter((p) => include[p.key]).map((p) => p.label);
   const totalWeight = ADVANCED_PARAMS.filter((p) => draft[p.key]).reduce((sum, p) => sum + p.weightPct, 0);
 
@@ -1317,6 +1346,7 @@ function AdvancedFiltersPanel({
   const apply = () => {
     onApply(draft);
     if (onApplyBelowCapacity) onApplyBelowCapacity(draftBelowCapacity);
+    if (onApplyNearCapacityTolerancePct) onApplyNearCapacityTolerancePct(draftTolerance);
   };
 
   return (
@@ -1342,8 +1372,23 @@ function AdvancedFiltersPanel({
         ))}
       </div>
       {onApplyBelowCapacity && (
-        <div className="pt-2 border-t border-amber-100">
+        <div className="pt-2 border-t border-amber-100 space-y-3">
           <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Candidate pool — not a ranking weight</p>
+          <div>
+            <label className="text-[11px] text-gray-500 block mb-1">
+              Near-capacity tolerance: <span className="font-semibold text-gray-700">{draftTolerance} points</span>
+              <span className="text-gray-400"> — someone this many points short of the requested % still shows in Candidates</span>
+            </label>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={5}
+              value={draftTolerance}
+              onChange={(e) => setDraftTolerance(Number(e.target.value))}
+              className="w-full h-1 accent-primary"
+            />
+          </div>
           <label className="flex items-start gap-2.5 cursor-pointer">
             <input
               type="checkbox"
@@ -1354,9 +1399,8 @@ function AdvancedFiltersPanel({
             <span className="flex-1">
               <span className="text-sm font-medium text-gray-800">Include candidates below requested capacity</span>
               <span className="block text-[11px] text-gray-400 mt-0.5">
-                Off by default: someone who can't actually take the requested % stays out of Candidates no matter which
-                ranking parameters above are selected. Turn this on to see them anyway (e.g. to weigh pulling them off
-                something else) — they'll show with a "below requested %" tag.
+                Ignores the tolerance above entirely and shows everyone regardless of shortfall — they'll show with a
+                "below requested %" tag.
               </span>
             </span>
           </label>
@@ -1366,7 +1410,7 @@ function AdvancedFiltersPanel({
         <span className="text-[11px] text-gray-400">
           {isDirty
             ? "Not applied yet — click Apply to update the ranking"
-            : `Applied: ${appliedLabels.join(", ")}${includeBelowCapacity ? " + below-capacity included" : ""}`}
+            : `Applied: ${appliedLabels.join(", ")} · tolerance ${nearCapacityTolerancePct ?? 25} pts${includeBelowCapacity ? " + below-capacity included" : ""}`}
         </span>
         <button
           onClick={apply}
@@ -1529,6 +1573,8 @@ function RoleRecommendationDetail({
   setIncludeParams,
   includeBelowCapacity,
   setIncludeBelowCapacity,
+  nearCapacityTolerancePct,
+  setNearCapacityTolerancePct,
   onOpenProfile,
   onSelectSibling,
 }: {
@@ -1537,12 +1583,13 @@ function RoleRecommendationDetail({
   setIncludeParams: (v: IncludeParams) => void;
   includeBelowCapacity: boolean;
   setIncludeBelowCapacity: (v: boolean) => void;
+  nearCapacityTolerancePct: number;
+  setNearCapacityTolerancePct: (v: number) => void;
   onOpenProfile: (employeeId: string, tab: ProfileTab, skillMatchContext?: SkillMatchContext) => void;
   onSelectSibling: (rowIndex: number) => void;
 }) {
   const [semanticMatchResult, setSemanticMatchResult] = useState<SemanticMatchResult | undefined>(undefined);
   const semanticMatchMutation = useMutation({ mutationFn: (ri: number) => api.semanticMatch(ri) });
-
   const [candidateFiltersOpen, setCandidateFiltersOpen] = useState(false);
   const [candidateSearch, setCandidateSearch] = useState("");
   const [candidateSignal, setCandidateSignal] = useState<CandidateSignalFilter>("all");
@@ -1564,9 +1611,9 @@ function RoleRecommendationDetail({
 
   const roleMixCoes = useQuery({ queryKey: ["role-mix-coes"], queryFn: api.roleMixCoes });
   const recommendation = useQuery({
-    queryKey: ["recommendation", rowIndex, topN, includeParams, includeBelowCapacity],
-    queryFn: () => api.recommendationsForPipelineRow(rowIndex, topN, includeParams, includeBelowCapacity),
-  });
+    queryKey: ["recommendation", rowIndex, topN, includeParams, includeBelowCapacity, nearCapacityTolerancePct],
+    queryFn: () => api.recommendationsForPipelineRow(rowIndex, topN, includeParams, includeBelowCapacity, nearCapacityTolerancePct),
+});
 
   const selected = recommendation.data?.pipeline_row;
   const topCandidate =
@@ -1591,7 +1638,10 @@ function RoleRecommendationDetail({
     relevantExperienceOnly,
     sort: candidateSort,
     includeSkill: includeParams.skill,
+    includeAvailability: includeParams.availability,
+    includeCoeAffinity: includeParams.coe_affinity,
   });
+
   const hasActiveCandidateFilters =
     candidateSearch !== "" ||
     candidateSignal !== "all" ||
@@ -1603,7 +1653,8 @@ function RoleRecommendationDetail({
     minAvailable > 0 ||
     meetsCapacityOnly ||
     minRelevantProjects > 0 ||
-    relevantExperienceOnly;
+    relevantExperienceOnly ;
+
   const candidateFilterCount = [
     candidateSignal !== "all",
     candidateDesignation !== "all",
@@ -1793,6 +1844,8 @@ function RoleRecommendationDetail({
               onApply={setIncludeParams}
               includeBelowCapacity={includeBelowCapacity}
               onApplyBelowCapacity={setIncludeBelowCapacity}
+              nearCapacityTolerancePct={nearCapacityTolerancePct}
+              onApplyNearCapacityTolerancePct={setNearCapacityTolerancePct}
             />
           )}
           {candidateFiltersOpen && (
@@ -1862,6 +1915,7 @@ function RoleRecommendationDetail({
                   <input type="checkbox" checked={meetsCapacityOnly} onChange={(e) => setMeetsCapacityOnly(e.target.checked)} />
                   Meets capacity
                 </label>
+
                 <select
                   value={candidateSort}
                   onChange={(e) => setCandidateSort(e.target.value as CandidateSort)}
@@ -2188,6 +2242,8 @@ function OtherOptionsSection({
     search, signal, designation, coe, skillData, minSkill, minCompetency, minAvailable,
     meetsCapacityOnly, minRelevantProjects, relevantExperienceOnly, sort,
     includeSkill: includeParams.skill,
+    includeAvailability: includeParams.availability,
+    includeCoeAffinity: includeParams.coe_affinity,
   });
   const filtered = availableByDate
     ? filteredBase.filter((c) => c.meets_requested_capacity || (c.earliest_available_date != null && c.earliest_available_date <= availableByDate))
@@ -2195,20 +2251,21 @@ function OtherOptionsSection({
   const shown = filtered.slice(0, showN);
 
   const hasActiveFilters =
-    search !== "" || signal !== "all" || designation !== "all" || coe !== "all" || skillData !== "all" ||
-    minSkill > 0 || minCompetency > 0 || minAvailable > 0 || meetsCapacityOnly ||
-    minRelevantProjects > 0 || relevantExperienceOnly || availableByDate !== "";
-  const filterCount = [
-    signal !== "all", designation !== "all", coe !== "all", skillData !== "all",
-    minSkill > 0, minCompetency > 0, minAvailable > 0, meetsCapacityOnly,
-    minRelevantProjects > 0, relevantExperienceOnly, availableByDate !== "",
-  ].filter(Boolean).length;
+  search !== "" || signal !== "all" || designation !== "all" || coe !== "all" || skillData !== "all" ||
+  minSkill > 0 || minCompetency > 0 || minAvailable > 0 || meetsCapacityOnly ||
+  minRelevantProjects > 0 || relevantExperienceOnly || availableByDate !== "";
+
+const filterCount = [
+  signal !== "all", designation !== "all", coe !== "all", skillData !== "all",
+  minSkill > 0, minCompetency > 0, minAvailable > 0, meetsCapacityOnly,
+ minRelevantProjects > 0, relevantExperienceOnly, availableByDate !== "",
+].filter(Boolean).length;
 
   const clearFilters = () => {
-    setSearch(""); setSignal("all"); setDesignation("all"); setCoe("all"); setSkillData("all");
-    setMinSkill(0); setMinCompetency(0); setMinAvailable(0); setMeetsCapacityOnly(false);
-    setMinRelevantProjects(0); setRelevantExperienceOnly(false); setAvailableByDate("");
-  };
+  setSearch(""); setSignal("all"); setDesignation("all"); setCoe("all"); setSkillData("all");
+  setMinSkill(0); setMinCompetency(0); setMinAvailable(0); setMeetsCapacityOnly(false);
+  setMinRelevantProjects(0); setRelevantExperienceOnly(false); setAvailableByDate("");
+};
 
   return (
     <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
@@ -2322,6 +2379,7 @@ function OtherOptionsSection({
                   <input type="checkbox" checked={meetsCapacityOnly} onChange={(e) => setMeetsCapacityOnly(e.target.checked)} />
                   Meets capacity now
                 </label>
+
                 <select
                   value={sort}
                   onChange={(e) => setSort(e.target.value as CandidateSort)}
@@ -2483,10 +2541,20 @@ function CandidateRow({
         <span className="text-sm font-semibold text-gray-800 whitespace-nowrap">{candidate.employee_id}</span>
         <span className="text-xs text-gray-400 truncate">{candidate.job_name}</span>
         {candidate.coe ? (
-          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-violet-50 border border-violet-200 text-violet-600 whitespace-nowrap flex-shrink-0">
-            {candidate.coe}
-          </span>
-        ) : null}
+  <span
+    title={candidate.coe_preferred
+      ? "This candidate's home CoE matches what this role is asking for"
+      : "This candidate's home CoE is not the preferred one for this role — shown because no preferred-CoE candidate ranked higher"}
+    className={cn(
+      "text-[10px] px-1.5 py-0.5 rounded-full whitespace-nowrap flex-shrink-0 border",
+      candidate.coe_preferred
+        ? "bg-emerald-50 border-emerald-200 text-emerald-700"
+        : "bg-violet-50 border-violet-200 text-violet-600"
+    )}
+  >
+    {candidate.coe}{candidate.coe_preferred ? " · preferred" : ""}
+  </span>
+) : null}
         {candidate.bucket !== "gap" && <Badge variant={candidate.bucket}>{SIGNAL_LABEL[candidate.bucket]}</Badge>}
         {isTopPick && <Badge variant="eligible">Top pick</Badge>}
         {!candidate.meets_requested_capacity && <Badge variant="amber">below requested %</Badge>}
@@ -2529,6 +2597,7 @@ function CandidateRow({
           </span>
         )}
         <span className="ml-auto flex items-center gap-3 text-[11px] text-gray-400 whitespace-nowrap flex-shrink-0">
+          {candidate.hourly_rate_usd != null && <span>${candidate.hourly_rate_usd}/hr</span>}
           <span>{Math.round(candidate.skill_score * 100)}% skill</span>
           <span>{Math.round(candidate.competency_score * 100)}% comp</span>
           <span>{candidate.available_pct}% avail</span>
