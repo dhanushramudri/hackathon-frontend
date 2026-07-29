@@ -9,15 +9,19 @@ import {
 } from "lucide-react";
 import {
   api,
+  DEFAULT_INCLUDE_PARAMS,
   type AllocationRow, type EmployeeAllocationRow, type EmployeeProfile,
   type BackfillResult, type RecommendationCandidate, type FallbackCandidates,
+  type IncludeParams, type RedeployMatch,
 } from "@/lib/api";
 import { Modal } from "@/components/shared/Modal";
 import { Badge } from "@/components/shared/Badge";
 import { ErrorState } from "@/components/shared/EmptyState";
 import { ModalBodySkeleton, TableSkeleton } from "@/components/shared/Skeleton";
 import { TableControls } from "@/components/shared/TableControls";
+import { AdvancedFiltersButton, AdvancedFiltersPanel } from "@/components/shared/AdvancedFilters";
 import { FiredBadge } from "@/components/shared/FiredBadge";
+import { HoldDot, HoldChip } from "@/components/shared/HoldFlag";
 import { TimesheetProofModal } from "@/components/shared/TimesheetProofModal";
 import { cn } from "@/lib/utils";
 
@@ -83,7 +87,16 @@ export function EmployeeProfileModal({
 
   return (
     <Modal
-      title={profile.data ? `${employeeId} — ${profile.data.job_name ?? "Employee"}` : employeeId}
+      title={
+        profile.data ? (
+          <span className="inline-flex items-center gap-1.5">
+            {employeeId} — {profile.data.job_name ?? "Employee"}
+            <HoldDot onHold={profile.data.signals.on_hold} holdProjects={profile.data.signals.hold_projects} />
+          </span>
+        ) : (
+          employeeId
+        )
+      }
       onClose={onClose}
       widthClassName="max-w-5xl"
     >
@@ -160,10 +173,15 @@ function ReplacementTab({
   const [bestFitOpen, setBestFitOpen] = useState(false);
   const [fallbackOpen, setFallbackOpen] = useState(false);
   const [openProfile, setOpenProfile] = useState<string | null>(null);
+  // Same ranking-parameter flexibility as the main Recommendations engine.
+  const [includeParams, setIncludeParams] = useState<IncludeParams>(DEFAULT_INCLUDE_PARAMS);
+  const [includeBelowCapacity, setIncludeBelowCapacity] = useState(false);
+  const [nearCapacityTolerancePct, setNearCapacityTolerancePct] = useState(25);
+  const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
 
   const { data, isLoading, isError } = useQuery<BackfillResult>({
-    queryKey: ["backfill", employeeId, projectId],
-    queryFn: () => api.backfillCandidates(employeeId, projectId, 15),
+    queryKey: ["backfill", employeeId, projectId, includeParams, includeBelowCapacity, nearCapacityTolerancePct],
+    queryFn: () => api.backfillCandidates(employeeId, projectId, 15, includeParams, includeBelowCapacity, nearCapacityTolerancePct),
   });
 
   const allCandidates = data?.candidates ?? [];
@@ -245,6 +263,25 @@ function ReplacementTab({
       {!data?.error && (
         <>
           {/* Filter + sort bar */}
+          <div className="flex items-center justify-end">
+            <AdvancedFiltersButton
+              open={advancedFiltersOpen}
+              include={includeParams}
+              defaults={DEFAULT_INCLUDE_PARAMS}
+              includeBelowCapacity={includeBelowCapacity}
+              onClick={() => setAdvancedFiltersOpen((v) => !v)}
+            />
+          </div>
+          {advancedFiltersOpen && (
+            <AdvancedFiltersPanel
+              include={includeParams}
+              onApply={setIncludeParams}
+              includeBelowCapacity={includeBelowCapacity}
+              onApplyBelowCapacity={setIncludeBelowCapacity}
+              nearCapacityTolerancePct={nearCapacityTolerancePct}
+              onApplyNearCapacityTolerancePct={setNearCapacityTolerancePct}
+            />
+          )}
           <TableControls
             filters={[
               {
@@ -370,6 +407,7 @@ function ReplacementTab({
                                     <Zap className="w-2.5 h-2.5" />Free pool
                                   </span>
                                 )}
+                                <HoldChip onHold={c.on_hold} holdProjects={c.hold_projects} />
                               </div>
                             </td>
                             <td className="px-2.5 py-1.5 whitespace-nowrap">
@@ -655,6 +693,7 @@ function CandidateMiniList({
                     {c.in_free_pool && (
                       <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-50 border border-blue-200 text-blue-700 whitespace-nowrap">Free pool</span>
                     )}
+                    <HoldChip onHold={c.on_hold} holdProjects={c.hold_projects} />
                   </div>
                 </td>
                 <td className="px-2.5 py-1.5 whitespace-nowrap text-blue-500 text-[10px]">
@@ -674,9 +713,13 @@ function CandidateMiniList({
 type RedeployMatchSort = "composite_desc" | "skill_desc" | "competency_desc" | "available_desc";
 
 function RedeployMatchesTab({ employeeId }: { employeeId: string }) {
+  const [includeParams, setIncludeParams] = useState<IncludeParams>(DEFAULT_INCLUDE_PARAMS);
+  const [includeBelowCapacity, setIncludeBelowCapacity] = useState(false);
+  const [nearCapacityTolerancePct, setNearCapacityTolerancePct] = useState(25);
+  const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
   const matches = useQuery({
-    queryKey: ["free-pool-matches", employeeId],
-    queryFn: () => api.freePoolMatches(employeeId),
+    queryKey: ["free-pool-matches", employeeId, includeParams, includeBelowCapacity, nearCapacityTolerancePct],
+    queryFn: () => api.freePoolMatches(employeeId, 20, includeParams, includeBelowCapacity, nearCapacityTolerancePct),
   });
   const [coeFilter, setCoeFilter] = useState("all");
   const [roleFilter, setRoleFilter] = useState("all");
@@ -712,6 +755,25 @@ function RedeployMatchesTab({ employeeId }: { employeeId: string }) {
         </p>
       ) : (
         <>
+          <div className="flex items-center justify-end">
+            <AdvancedFiltersButton
+              open={advancedFiltersOpen}
+              include={includeParams}
+              defaults={DEFAULT_INCLUDE_PARAMS}
+              includeBelowCapacity={includeBelowCapacity}
+              onClick={() => setAdvancedFiltersOpen((v) => !v)}
+            />
+          </div>
+          {advancedFiltersOpen && (
+            <AdvancedFiltersPanel
+              include={includeParams}
+              onApply={setIncludeParams}
+              includeBelowCapacity={includeBelowCapacity}
+              onApplyBelowCapacity={setIncludeBelowCapacity}
+              nearCapacityTolerancePct={nearCapacityTolerancePct}
+              onApplyNearCapacityTolerancePct={setNearCapacityTolerancePct}
+            />
+          )}
           <TableControls
             filters={[
               { value: coeFilter, onChange: setCoeFilter, options: [["all", "All skill areas / CoE"], ...coeOptions.map((c) => [c, c] as [string, string])] },
@@ -736,7 +798,7 @@ function RedeployMatchesTab({ employeeId }: { employeeId: string }) {
                 <table className="w-full text-[11px]">
                   <thead>
                     <tr className="bg-gray-50 border-b border-gray-200">
-                      {["Fit", "Skill", "Competency", "Available", "Client", "Role requested", "Skill area / CoE", ""].map((h) => (
+                      {["Fit", "Skill", "Competency", "Available", "Client", "Role requested", "Skill area / CoE", "Flags", ""].map((h) => (
                         <th key={h} className="text-left font-semibold text-gray-500 px-2.5 py-1.5 whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
@@ -753,11 +815,16 @@ function RedeployMatchesTab({ employeeId }: { employeeId: string }) {
                         <td className="px-2.5 py-1.5 text-gray-600 whitespace-nowrap">
                           {Math.round(m.competency_score * 100)}%
                         </td>
-                        <td className="px-2.5 py-1.5 text-gray-600 whitespace-nowrap">{m.available_pct}%</td>
+                        <td className="px-2.5 py-1.5 text-gray-600 whitespace-nowrap">
+                          {m.available_pct}%{m.meets_requested_capacity === false && <span className="text-amber-600"> (below requested %)</span>}
+                        </td>
                         <td className="px-2.5 py-1.5 text-gray-700 font-medium whitespace-nowrap">{m.client ?? "-"}</td>
                         <td className="px-2.5 py-1.5 text-gray-600 whitespace-nowrap">{m.resources_requested ?? "-"}</td>
                         <td className="px-2.5 py-1.5 text-gray-500 max-w-[160px] truncate" title={m.skill_areas.join(", ")}>
                           {m.skill_areas.join(", ") || "-"}
+                        </td>
+                        <td className="px-2.5 py-1.5 whitespace-nowrap">
+                          <HoldChip onHold={m.on_hold} holdProjects={m.hold_projects} />
                         </td>
                         <td className="px-2.5 py-1.5">
                           <Link href={`/recommendations?row=${m.row_index}`} className="text-primary hover:underline whitespace-nowrap">
@@ -793,6 +860,23 @@ function OverviewTab({ profile }: { profile: EmployeeProfile }) {
   const [timesheetProject, setTimesheetProject] = useState<string | null>(null);
   const quietAllocations = profile.current_allocations.filter((a) => a.possible_unplanned_absence);
   const rows: { key: string; label: string; fired: boolean; detail: ReactNode }[] = [
+    {
+      key: "on_hold",
+      label: "Hold / doubt",
+      fired: s.on_hold,
+      detail:
+        s.hold_projects.length > 0 ? (
+          <span className="flex flex-wrap items-center gap-1.5">
+            Current project(s) flagged as likely to extend past end date:
+            {s.hold_projects.map((p) => (
+              <span key={p.project_code} className="text-amber-700 font-medium">{p.project_code}</span>
+            ))}
+            <span className="text-gray-400">— availability uncertain until confirmed.</span>
+          </span>
+        ) : (
+          "no current allocation on a project flagged as extending"
+        ),
+    },
     {
       key: "over_allocated",
       label: "Over-allocated",

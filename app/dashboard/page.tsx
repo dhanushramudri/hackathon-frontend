@@ -28,7 +28,7 @@ export default function DashboardPage() {
   const allocations = useQuery({ queryKey: ["allocations"], queryFn: api.allocations });
   const freePool = useQuery({ queryKey: ["free-pool"], queryFn: api.freePool });
   const revenue = useQuery({ queryKey: ["revenue-trend"], queryFn: api.revenueTrend });
-  const leave = useQuery({ queryKey: ["leave-impact"], queryFn: api.leaveImpact });
+  const leave = useQuery({ queryKey: ["leave-impact"], queryFn: () => api.leaveImpact() });
   const pipeline = useQuery({ queryKey: ["pipeline-forecast"], queryFn: api.pipelineForecast });
 
   const [selectedProject, setSelectedProject] = useState<string | null>(null);

@@ -1,9 +1,10 @@
 "use client";
 
 import { Award } from "lucide-react";
-import type { LeaveImpact, RedeployCandidate } from "@/lib/api";
+import type { IncludeParams, LeaveImpact, RedeployCandidate } from "@/lib/api";
 import { Modal } from "@/components/shared/Modal";
 import { Badge } from "@/components/shared/Badge";
+import { HoldChip } from "@/components/shared/HoldFlag";
 
 const REASON_VARIANT: Record<string, string> = { ending_soon: "amber", fully_free: "green", under_utilized: "under_utilized" };
 
@@ -24,10 +25,12 @@ function CandidateCard({
   candidate,
   rank,
   onSelectEmployee,
+  includeParams,
 }: {
   candidate: RedeployCandidate;
   rank: number;
   onSelectEmployee: (id: string) => void;
+  includeParams: IncludeParams;
 }) {
   const matched = candidate.matched_skills ?? [];
   const missing = candidate.missing_skills ?? [];
@@ -59,12 +62,26 @@ function CandidateCard({
               {Math.round((candidate.skill_score ?? 0) * 100)}% skill match
             </Badge>
           )}
+          <HoldChip onHold={candidate.on_hold} holdProjects={candidate.hold_projects} />
         </div>
       </div>
 
-      <div className="flex items-center gap-2.5 text-[11px] text-gray-400">
+      <div className="flex items-center gap-2.5 text-[11px] text-gray-400 flex-wrap">
         {candidate.coe && <span>{candidate.coe}</span>}
         {candidate.location && <span>· {candidate.location}</span>}
+        {candidate.composite_score != null && (
+          <span className="ml-auto font-semibold text-gray-600">{Math.round(candidate.composite_score * 100)}% overall fit</span>
+        )}
+        {candidate.competency_score != null && <span>{Math.round(candidate.competency_score * 100)}% comp</span>}
+        {includeParams.category_match && candidate.relevant_project_ratio != null && (
+          <span>cat {Math.round(candidate.relevant_project_ratio * 100)}%</span>
+        )}
+        {includeParams.project_count && candidate.project_count_score != null && (
+          <span>count {Math.round(candidate.project_count_score * 100)}%</span>
+        )}
+        {candidate.total_projects != null && candidate.total_projects > 0 && (
+          <span>{candidate.relevant_project_count}/{candidate.total_projects} relevant projects</span>
+        )}
       </div>
 
       {assessed && (matched.length > 0 || missing.length > 0) && (
@@ -103,10 +120,12 @@ export function LeaveBackfillModal({
   impact,
   onClose,
   onSelectEmployee,
+  includeParams,
 }: {
   impact: LeaveImpact;
   onClose: () => void;
   onSelectEmployee: (id: string) => void;
+  includeParams: IncludeParams;
 }) {
   return (
     <Modal
@@ -138,7 +157,7 @@ export function LeaveBackfillModal({
         ) : (
           <div className="space-y-2.5">
             {impact.backfill_candidates.map((c, i) => (
-              <CandidateCard key={c.employee_id} candidate={c} rank={i} onSelectEmployee={onSelectEmployee} />
+              <CandidateCard key={c.employee_id} candidate={c} rank={i} onSelectEmployee={onSelectEmployee} includeParams={includeParams} />
             ))}
           </div>
         )}

@@ -136,6 +136,14 @@ export interface ExperienceCategory {
   count: number;
 }
 
+export interface HoldProject {
+  project_code: string;
+  is_extension_risk: boolean;
+  devops_extension_risk: boolean;
+  projected_extension_duration_label: string | null;
+  projected_extension_confidence: "none" | "low" | "medium";
+}
+
 export interface RecommendationCandidate {
   employee_id: string;
   job_name: string;
@@ -161,6 +169,12 @@ export interface RecommendationCandidate {
   earliest_available_proof?: string | null;
   on_leave_now?: boolean;
   in_free_pool?: boolean;
+  // True when this person is currently actively allocated to a project the
+  // Health monitor flags as likely to extend past its end date -- see
+  // app/engines/availability_hold.py. They may look free/available on paper
+  // while their current project is actually at risk of running long.
+  on_hold?: boolean;
+  hold_projects?: HoldProject[];
   // Track-record / experience layer -- see app/engines/experience_engine.py
   total_projects: number;
   distinct_clients: number;
@@ -710,6 +724,8 @@ export interface FreePoolCandidate {
   last_ended_date: string | null;
   recommended_project_count?: number;
   top_recommended_project?: TopRecommendedProject | null;
+  on_hold?: boolean;
+  hold_projects?: HoldProject[];
 }
 
 export interface TopRecommendedProject {
@@ -731,6 +747,14 @@ export interface ReliefCandidate extends FreePoolCandidate {
   competency_confidence: "observed" | "imputed";
   skill_bucket: "eligible" | "trainable" | "gap" | "not_assessed";
   coe_matches_project: boolean;
+  coe_affinity_rank?: number;
+  total_projects?: number;
+  distinct_clients?: number;
+  relevant_project_count?: number;
+  relevant_project_ratio?: number;
+  experience_confidence?: ExperienceConfidence;
+  top_categories?: ExperienceCategory[];
+  project_count_score?: number;
   // Only present on available_soon_candidates -- still busy today, but with a real,
   // dated end to that.
   days_to_available?: number | null;
@@ -780,6 +804,7 @@ export interface RedeployMatch {
   likely_start_date: string | null;
   status: string | null;
   priority: string | null;
+  solution?: string | null;
   skill_areas: string[];
   skill_score: number;
   matched_skills: string[];
@@ -790,6 +815,21 @@ export interface RedeployMatch {
   available_pct: number;
   composite_score: number;
   bucket: "eligible" | "trainable" | "gap" | "not_assessed";
+  meets_requested_capacity?: boolean;
+  near_capacity?: boolean;
+  total_projects?: number;
+  distinct_clients?: number;
+  relevant_project_count?: number;
+  relevant_project_ratio?: number;
+  experience_confidence?: ExperienceConfidence;
+  top_categories?: ExperienceCategory[];
+  project_count_score?: number;
+  coe?: string | null;
+  coe_preferred?: boolean;
+  coe_affinity_rank?: number;
+  hourly_rate_usd?: number | null;
+  on_hold?: boolean;
+  hold_projects?: HoldProject[];
 }
 
 export interface RevenueMonth {
@@ -817,6 +857,25 @@ export interface RedeployCandidate {
   skill_bucket?: "eligible" | "trainable" | "gap" | "not_assessed";
   source_designation?: string;
   level_offset?: number;
+  on_hold?: boolean;
+  hold_projects?: HoldProject[];
+  // Full ranking-parameter parity with the main Recommendations engine -- see
+  // scoring.composite_score_v2 / experience_engine.match_experience.
+  composite_score?: number;
+  competency_score?: number;
+  competency_confidence?: "observed" | "imputed";
+  coe_affinity_rank?: number;
+  coe_preferred?: boolean;
+  relevant_project_count?: number;
+  relevant_project_ratio?: number;
+  total_projects?: number;
+  distinct_clients?: number;
+  experience_confidence?: ExperienceConfidence;
+  top_categories?: ExperienceCategory[];
+  project_count_score?: number;
+  hourly_rate_usd?: number | null;
+  meets_requested_capacity?: boolean;
+  near_capacity?: boolean;
 }
 
 export interface ForecastBreakdownRow {
@@ -1228,6 +1287,8 @@ export interface EmployeeSignals {
   overtime_sustained_min_days: number;
   overtime_window_days: number;
   possible_unplanned_absence: boolean;
+  on_hold: boolean;
+  hold_projects: HoldProject[];
 }
 
 export interface EmployeeProfile {
@@ -1321,6 +1382,8 @@ export interface EmployeeListRow {
   coe: string | null;
   // Current total allocation % across active projects -- null if no active allocation.
   current_allocation_pct: number | null;
+  on_hold: boolean;
+  hold_projects: HoldProject[];
 }
 
 export interface DigestSendResult {
@@ -1382,15 +1445,25 @@ export const api = {
   healthProjects: () => getJSON<HealthProject[]>("/health-monitor/projects"),
   projectRoster: (projectCode: string) => getJSON<ProjectRoster>(`/health-monitor/projects/${encodeURIComponent(projectCode)}/roster`),
   healthProjectDetail: (projectCode: string) => getJSON<ProjectHealthDetail>(`/health-monitor/projects/${encodeURIComponent(projectCode)}/detail`),
-  reliefStaffingCandidates: (projectCode: string) =>
-    getJSON<ReliefStaffingResult>(`/health-monitor/projects/${encodeURIComponent(projectCode)}/relief-candidates`),
+  reliefStaffingCandidates: (projectCode: string, include: IncludeParams = DEFAULT_INCLUDE_PARAMS) =>
+    getJSON<ReliefStaffingResult>(
+      `/health-monitor/projects/${encodeURIComponent(projectCode)}/relief-candidates?` +
+        `include_skill=${include.skill}&include_competency=${include.competency}&include_availability=${include.availability}` +
+        `&include_category_match=${include.category_match}&include_project_count=${include.project_count}` +
+        `&include_coe_affinity=${include.coe_affinity}&include_cost_efficiency=${include.cost_efficiency}`
+    ),
   healthProjectSentiment: (projectCode: string, lastN?: number) =>
     getJSON<SentimentSummary>(`/health-monitor/projects/${encodeURIComponent(projectCode)}/sentiment${lastN ? `?last_n=${lastN}` : ""}`),
   projectBurnoutOverview: () => getJSON<ProjectBurnoutOverview>("/wellbeing/projects"),
   employeeBurnoutOverview: () => getJSON<EmployeeBurnoutOverview>("/wellbeing/employees"),
   projectInfo: (projectCode: string) => getJSON<ProjectInfo>(`/health-monitor/projects/${encodeURIComponent(projectCode)}/info`),
-  newProjectForecast: (specs: ForecastSpec[]) =>
-    postJSON<NewProjectForecastResult>("/forecast/new-projects", specs),
+  newProjectForecast: (specs: ForecastSpec[], include: IncludeParams = DEFAULT_INCLUDE_PARAMS) =>
+    postJSON<NewProjectForecastResult>(
+      `/forecast/new-projects?include_skill=${include.skill}&include_competency=${include.competency}` +
+        `&include_availability=${include.availability}&include_category_match=${include.category_match}` +
+        `&include_project_count=${include.project_count}`,
+      specs
+    ),
   roleMixPreview: (coes: string[], typeOfProject: string | null) =>
     postJSON<RoleMixPreview>("/forecast/role-mix-preview", { coes, type_of_project: typeOfProject }),
   roleMixCoes: () => getJSON<CoeOption[]>("/role-mix/coes"),
@@ -1423,12 +1496,39 @@ export const api = {
     return getJSON<OutlookDrilldownResult>(`/forecast/six-month-outlook/drilldown?${params.toString()}`);
   },
   freePool: () => getJSON<FreePoolCandidate[]>("/free-pool"),
-  freePoolMatches: (employeeId: string, topN = 20) =>
-    getJSON<RedeployMatch[]>(`/free-pool/${encodeURIComponent(employeeId)}/matches?top_n=${topN}`),
-  backfillCandidates: (employeeId: string, sourceProjectId: string, topN = 15) =>
-    getJSON<BackfillResult>(`/recommendations/backfill?employee_id=${encodeURIComponent(employeeId)}&source_project_id=${encodeURIComponent(sourceProjectId)}&top_n=${topN}`),
+  freePoolMatches: (
+    employeeId: string, topN = 20, include: IncludeParams = DEFAULT_INCLUDE_PARAMS,
+    includeBelowCapacity: boolean = false, nearCapacityTolerancePct: number = 25
+  ) =>
+    getJSON<RedeployMatch[]>(
+      `/free-pool/${encodeURIComponent(employeeId)}/matches?top_n=${topN}` +
+        `&include_skill=${include.skill}&include_competency=${include.competency}&include_availability=${include.availability}` +
+        `&include_category_match=${include.category_match}&include_project_count=${include.project_count}` +
+        `&include_coe_affinity=${include.coe_affinity}&include_cost_efficiency=${include.cost_efficiency}` +
+        `&include_below_capacity=${includeBelowCapacity}&near_capacity_tolerance_pct=${nearCapacityTolerancePct}`
+    ),
+  backfillCandidates: (
+    employeeId: string, sourceProjectId: string, topN = 15, include: IncludeParams = DEFAULT_INCLUDE_PARAMS,
+    includeBelowCapacity: boolean = false, nearCapacityTolerancePct: number = 25
+  ) =>
+    getJSON<BackfillResult>(
+      `/recommendations/backfill?employee_id=${encodeURIComponent(employeeId)}&source_project_id=${encodeURIComponent(sourceProjectId)}&top_n=${topN}` +
+        `&include_skill=${include.skill}&include_competency=${include.competency}&include_availability=${include.availability}` +
+        `&include_category_match=${include.category_match}&include_project_count=${include.project_count}` +
+        `&include_coe_affinity=${include.coe_affinity}&include_cost_efficiency=${include.cost_efficiency}` +
+        `&include_below_capacity=${includeBelowCapacity}&near_capacity_tolerance_pct=${nearCapacityTolerancePct}`
+    ),
   revenueTrend: () => getJSON<RevenueMonth[]>("/revenue/trend"),
-  leaveImpact: () => getJSON<LeaveImpact[]>("/leave/impact"),
+  leaveImpact: (
+    include: IncludeParams = DEFAULT_INCLUDE_PARAMS,
+    includeBelowCapacity: boolean = false, nearCapacityTolerancePct: number = 25
+  ) =>
+    getJSON<LeaveImpact[]>(
+      `/leave/impact?include_skill=${include.skill}&include_competency=${include.competency}&include_availability=${include.availability}` +
+        `&include_category_match=${include.category_match}&include_project_count=${include.project_count}` +
+        `&include_coe_affinity=${include.coe_affinity}&include_cost_efficiency=${include.cost_efficiency}` +
+        `&include_below_capacity=${includeBelowCapacity}&near_capacity_tolerance_pct=${nearCapacityTolerancePct}`
+    ),
   predictionForecast: (horizonMonths: number = 24) =>
     getJSON<PredictionForecastResult>(`/forecast/prediction?horizon_months=${horizonMonths}`),
 };

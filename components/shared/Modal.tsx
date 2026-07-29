@@ -5,7 +5,7 @@ import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface ModalProps {
-  title: string;
+  title: React.ReactNode;
   subtitle?: string;
   onClose: () => void;
   children: React.ReactNode;

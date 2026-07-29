@@ -3,13 +3,19 @@
 import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { HeartPulse, ChevronDown, SlidersHorizontal, UserCheck } from "lucide-react";
-import { api, type ProjectHealthDetail, type ReliefCandidate, type WsrReportRow, type SentimentSummary, type DevopsTicketRow } from "@/lib/api";
+import {
+  api,
+  DEFAULT_INCLUDE_PARAMS,
+  type IncludeParams, type ProjectHealthDetail, type ReliefCandidate, type WsrReportRow, type SentimentSummary, type DevopsTicketRow,
+} from "@/lib/api";
 import { Modal } from "@/components/shared/Modal";
 import { Badge } from "@/components/shared/Badge";
 import { ErrorState } from "@/components/shared/EmptyState";
 import { ModalBodySkeleton, TableSkeleton } from "@/components/shared/Skeleton";
 import { TableControls } from "@/components/shared/TableControls";
+import { AdvancedFiltersButton, AdvancedFiltersPanel } from "@/components/shared/AdvancedFilters";
 import { FiredBadge } from "@/components/shared/FiredBadge";
+import { HoldChip } from "@/components/shared/HoldFlag";
 import { EmployeeProfileModal, type ProfileTab, type SkillMatchContext } from "@/components/shared/EmployeeProfileModal";
 import { cn, formatUsd } from "@/lib/utils";
 
@@ -1351,9 +1357,11 @@ function RequiredSkillSourceNote({ source, coe }: { source: string; coe: string 
 }
 
 function ReliefStaffingSection({ projectCode }: { projectCode: string }) {
+  const [includeParams, setIncludeParams] = useState<IncludeParams>(DEFAULT_INCLUDE_PARAMS);
+  const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
   const relief = useQuery({
-    queryKey: ["relief-staffing", projectCode],
-    queryFn: () => api.reliefStaffingCandidates(projectCode),
+    queryKey: ["relief-staffing", projectCode, includeParams],
+    queryFn: () => api.reliefStaffingCandidates(projectCode, includeParams),
   });
   const roleMixCoes = useQuery({ queryKey: ["role-mix-coes"], queryFn: api.roleMixCoes });
 
@@ -1421,7 +1429,19 @@ function ReliefStaffingSection({ projectCode }: { projectCode: string }) {
               Filters
               <ChevronDown className={cn("w-3 h-3 transition-transform", filtersOpen && "rotate-180")} />
             </button>
+            <AdvancedFiltersButton
+              open={advancedFiltersOpen}
+              include={includeParams}
+              defaults={DEFAULT_INCLUDE_PARAMS}
+              onClick={() => setAdvancedFiltersOpen((v) => !v)}
+            />
           </div>
+
+          {advancedFiltersOpen && (
+            <div className="mb-2.5">
+              <AdvancedFiltersPanel include={includeParams} onApply={setIncludeParams} />
+            </div>
+          )}
 
           {filtersOpen && (
             <div className="rounded-lg border border-gray-200 bg-white p-2.5 space-y-2.5 mb-2.5">
@@ -1483,7 +1503,7 @@ function ReliefStaffingSection({ projectCode }: { projectCode: string }) {
 
           <div className="space-y-2">
             {filterAndSortRelief(relief.data.candidates, { search, signal, designation, coe, reason, minSkill, minCompetency, minAvailable, sort }).map((c) => (
-              <ReliefCandidateCard key={c.employee_id} c={c} onOpenProfile={handleOpenProfile} />
+              <ReliefCandidateCard key={c.employee_id} c={c} onOpenProfile={handleOpenProfile} includeParams={includeParams} />
             ))}
             {filterAndSortRelief(relief.data.candidates, { search, signal, designation, coe, reason, minSkill, minCompetency, minAvailable, sort }).length === 0 && (
               <p className="text-xs text-gray-400 italic text-center py-3">No candidates match the current filters.</p>
@@ -1491,7 +1511,7 @@ function ReliefStaffingSection({ projectCode }: { projectCode: string }) {
           </div>
 
           {relief.data.available_soon_candidates.length > 0 && (
-            <AvailableSoonAccordion candidates={relief.data.available_soon_candidates} onOpenProfile={handleOpenProfile} />
+            <AvailableSoonAccordion candidates={relief.data.available_soon_candidates} onOpenProfile={handleOpenProfile} includeParams={includeParams} />
           )}
         </>
       )}
@@ -1534,11 +1554,12 @@ function Metric({
 }
 
 function ReliefCandidateCard({
-  c, onOpenProfile, availableSoon,
+  c, onOpenProfile, availableSoon, includeParams,
 }: {
   c: ReliefCandidate;
   onOpenProfile: (employeeId: string, tab: ProfileTab, skillMatchContext?: SkillMatchContext) => void;
   availableSoon?: boolean;
+  includeParams: IncludeParams;
 }) {
   const [expanded, setExpanded] = useState(false);
   return (
@@ -1569,6 +1590,7 @@ function ReliefCandidateCard({
           ) : (
             <span className="text-[10px] text-gray-300 flex-shrink-0">CoE not determined</span>
           )}
+          <HoldChip onHold={c.on_hold} holdProjects={c.hold_projects} />
         </div>
         <div className="flex items-center gap-1.5 flex-shrink-0">
           {availableSoon ? (
@@ -1620,8 +1642,11 @@ function ReliefCandidateCard({
             />
           </div>
           <p className="text-[11px] text-gray-400">
-            {Math.round(c.composite_score * 100)}% fit = 50%×{Math.round(c.skill_score * 100)}% skill + 30%×
-            {Math.round(c.competency_score * 100)}% competency + 20%×{c.idle_capacity_pct.toFixed(0)}% available
+            {Math.round(c.composite_score * 100)}% overall fit — skill {Math.round(c.skill_score * 100)}%, competency{" "}
+            {Math.round(c.competency_score * 100)}%, available {c.idle_capacity_pct.toFixed(0)}%
+            {includeParams.category_match && c.relevant_project_ratio != null && `, category match ${Math.round(c.relevant_project_ratio * 100)}%`}
+            {includeParams.project_count && c.project_count_score != null && `, project count ${Math.round(c.project_count_score * 100)}%`}
+            {" "}(only the selected Advanced Filters parameters are actually blended in)
           </p>
           {(c.matched_skills.length > 0 || c.missing_skills.length > 0) && (
             <div className="flex flex-wrap gap-1 text-[10px]">
@@ -1630,6 +1655,19 @@ function ReliefCandidateCard({
               ))}
               {c.missing_skills.map((s) => (
                 <span key={s} className="px-1.5 py-0.5 rounded-full bg-gray-50 border border-gray-200 text-gray-400">{s}</span>
+              ))}
+            </div>
+          )}
+          {c.total_projects != null && c.total_projects > 0 && (
+            <div className="flex items-center gap-1.5 text-[10px] flex-wrap">
+              <span className="text-gray-400 font-medium flex-shrink-0">Track record</span>
+              <span className="px-1.5 py-0.5 rounded-full border border-gray-200 bg-white text-gray-600">
+                {c.relevant_project_count}/{c.total_projects} relevant projects
+              </span>
+              {c.top_categories?.map((tc) => (
+                <span key={tc.category} className="px-1.5 py-0.5 rounded-full border border-gray-200 bg-white text-gray-500">
+                  {tc.category} ({tc.count})
+                </span>
               ))}
             </div>
           )}
@@ -1644,10 +1682,11 @@ function ReliefCandidateCard({
 }
 
 function AvailableSoonAccordion({
-  candidates, onOpenProfile,
+  candidates, onOpenProfile, includeParams,
 }: {
   candidates: ReliefCandidate[];
   onOpenProfile: (employeeId: string, tab: ProfileTab, skillMatchContext?: SkillMatchContext) => void;
+  includeParams: IncludeParams;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -1666,7 +1705,7 @@ function AvailableSoonAccordion({
       {open && (
         <div className="space-y-2 mt-2.5">
           {candidates.map((c) => (
-            <ReliefCandidateCard key={c.employee_id} c={c} onOpenProfile={onOpenProfile} availableSoon />
+            <ReliefCandidateCard key={c.employee_id} c={c} onOpenProfile={onOpenProfile} availableSoon includeParams={includeParams} />
           ))}
         </div>
       )}

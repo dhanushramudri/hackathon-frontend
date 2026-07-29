@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api, type EmployeeListRow } from "@/lib/api";
 import { Badge } from "@/components/shared/Badge";
+import { HoldDot } from "@/components/shared/HoldFlag";
 import { StatCard } from "@/components/shared/StatCard";
 import { ErrorState } from "@/components/shared/EmptyState";
 import { StatCardGridSkeleton, TableSkeleton } from "@/components/shared/Skeleton";
@@ -191,9 +192,12 @@ export default function EmployeesPage() {
             {filtered.map((r) => (
               <tr key={r.employee_id} className="border-b border-gray-50 last:border-0 hover:bg-gray-50/50">
                 <td className="px-3 py-2 whitespace-nowrap">
-                  <button onClick={() => setSelectedEmployee(r.employee_id)} className="font-medium text-primary hover:underline">
-                    {r.employee_id}
-                  </button>
+                  <span className="inline-flex items-center gap-1.5">
+                    <button onClick={() => setSelectedEmployee(r.employee_id)} className="font-medium text-primary hover:underline">
+                      {r.employee_id}
+                    </button>
+                    <HoldDot onHold={r.on_hold} holdProjects={r.hold_projects} />
+                  </span>
                 </td>
                 <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{r.job_name ?? "-"}</td>
                 <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{r.department_name ?? "-"}</td>

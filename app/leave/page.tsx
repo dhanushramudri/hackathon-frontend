@@ -4,19 +4,20 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 import { AlertTriangle, Users } from "lucide-react";
-import { api, type LeaveImpact } from "@/lib/api";
+import { api, DEFAULT_INCLUDE_PARAMS, type IncludeParams, type LeaveImpact } from "@/lib/api";
 import { Badge } from "@/components/shared/Badge";
 import { StatCard } from "@/components/shared/StatCard";
 import { LoadingState, ErrorState } from "@/components/shared/EmptyState";
 import { StatCardGridSkeleton, TableSkeleton } from "@/components/shared/Skeleton";
 import { TableControls } from "@/components/shared/TableControls";
+import { AdvancedFiltersButton, AdvancedFiltersPanel } from "@/components/shared/AdvancedFilters";
 import { EmployeeProfileModal } from "@/components/shared/EmployeeProfileModal";
 import { ProjectBasicModal } from "@/components/shared/ProjectBasicModal";
 import { ProjectHealthDetailModal } from "@/components/health/ProjectHealthDetailModal";
 import { LeaveBackfillModal } from "@/components/shared/LeaveBackfillModal";
 
 type LeaveTypeFilter = "all" | "Planned" | "Sick" | "Emergency";
-type Sort = "start_asc" | "start_desc" | "employee_asc" | "project_asc" | "alloc_desc" | "skill_desc";
+type Sort = "start_asc" | "start_desc" | "employee_asc" | "project_asc" | "alloc_desc" | "skill_desc" | "composite_desc";
 
 // Matches scoring.py's ELIGIBLE_THRESHOLD -- "strong match" means the same 0.6 cutoff
 // the rest of the app already uses to call a candidate "eligible" for redeployment.
@@ -76,6 +77,12 @@ function filterAndSortLeave(rows: LeaveImpact[], opts: FilterOptions): LeaveImpa
     case "skill_desc":
       sorted.sort((a, b) => (b.top_backfill_skill_score ?? -1) - (a.top_backfill_skill_score ?? -1));
       break;
+    case "composite_desc":
+      // backfill_candidates is already ranked by composite_score desc (see
+      // leave_service.get_leave_impact), so [0] is the best overall fit under
+      // whichever ranking parameters are currently selected.
+      sorted.sort((a, b) => (b.backfill_candidates[0]?.composite_score ?? -1) - (a.backfill_candidates[0]?.composite_score ?? -1));
+      break;
   }
   return sorted;
 }
@@ -89,7 +96,18 @@ export default function LeavePage() {
 }
 
 function LeavePageInner() {
-  const { data, isLoading, error } = useQuery({ queryKey: ["leave-impact"], queryFn: api.leaveImpact });
+  // Same ranking-parameter flexibility as the main Recommendations engine --
+  // skill/competency/availability/category_match/project_count, plus the
+  // below-capacity pool gate/tolerance. See components/shared/AdvancedFilters.
+  const [includeParams, setIncludeParams] = useState<IncludeParams>(DEFAULT_INCLUDE_PARAMS);
+  const [includeBelowCapacity, setIncludeBelowCapacity] = useState(false);
+  const [nearCapacityTolerancePct, setNearCapacityTolerancePct] = useState(25);
+  const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
+
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["leave-impact", includeParams, includeBelowCapacity, nearCapacityTolerancePct],
+    queryFn: () => api.leaveImpact(includeParams, includeBelowCapacity, nearCapacityTolerancePct),
+  });
   const healthProjects = useQuery({ queryKey: ["health-projects"], queryFn: api.healthProjects });
   const searchParams = useSearchParams();
 
@@ -106,7 +124,11 @@ function LeavePageInner() {
 
   const [selectedEmployee, setSelectedEmployee] = useState<string | null>(null);
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
-  const [backfillImpact, setBackfillImpact] = useState<LeaveImpact | null>(null);
+  // Identity only (not the row object itself) -- so if Advanced Filters change
+  // while this modal is open, the re-fetched `data` below re-derives fresh
+  // backfill_candidates for the same employee/project instead of showing a
+  // stale snapshot from before the filter change.
+  const [backfillTarget, setBackfillTarget] = useState<{ employeeId: string; projectId: string } | null>(null);
 
   useEffect(() => {
     if (searchParams.get("onLeaveNow") === "true") setOnLeaveOnly(true);
@@ -178,7 +200,24 @@ function LeavePageInner() {
               Clear filters
             </button>
           )}
+          <AdvancedFiltersButton
+            open={advancedFiltersOpen}
+            include={includeParams}
+            defaults={DEFAULT_INCLUDE_PARAMS}
+            includeBelowCapacity={includeBelowCapacity}
+            onClick={() => setAdvancedFiltersOpen((v) => !v)}
+          />
         </div>
+        {advancedFiltersOpen && (
+          <AdvancedFiltersPanel
+            include={includeParams}
+            onApply={setIncludeParams}
+            includeBelowCapacity={includeBelowCapacity}
+            onApplyBelowCapacity={setIncludeBelowCapacity}
+            nearCapacityTolerancePct={nearCapacityTolerancePct}
+            onApplyNearCapacityTolerancePct={setNearCapacityTolerancePct}
+          />
+        )}
         <TableControls
           search={{ value: search, onChange: setSearch, placeholder: "Search employee, designation, project…" }}
           filters={[
@@ -212,6 +251,7 @@ function LeavePageInner() {
               ["project_asc", "Project A–Z"],
               ["alloc_desc", "Alloc % ↓"],
               ["skill_desc", "Best skill match ↓"],
+              ["composite_desc", "Best overall fit ↓"],
             ],
           }}
         />
@@ -264,7 +304,7 @@ function LeavePageInner() {
                 <td className="px-3 py-2 whitespace-nowrap">
                   {i.backfill_available ? (
                     <button
-                      onClick={() => setBackfillImpact(i)}
+                      onClick={() => setBackfillTarget({ employeeId: i.employee_id, projectId: i.project_id })}
                       className="inline-flex items-center gap-1.5 text-primary hover:underline font-medium"
                     >
                       <Users className="w-3.5 h-3.5" />
@@ -298,9 +338,12 @@ function LeavePageInner() {
         ) : (
           <ProjectBasicModal projectCode={selectedProject} onClose={() => setSelectedProject(null)} />
         ))}
-      {backfillImpact && (
-        <LeaveBackfillModal impact={backfillImpact} onClose={() => setBackfillImpact(null)} onSelectEmployee={setSelectedEmployee} />
-      )}
+      {backfillTarget && (() => {
+        const liveImpact = data.find((i) => i.employee_id === backfillTarget.employeeId && i.project_id === backfillTarget.projectId);
+        return liveImpact ? (
+          <LeaveBackfillModal impact={liveImpact} onClose={() => setBackfillTarget(null)} onSelectEmployee={setSelectedEmployee} includeParams={includeParams} />
+        ) : null;
+      })()}
     </div>
   );
 }

@@ -3,10 +3,12 @@
 import { Fragment, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Plus, Trash2, AlertTriangle, ChevronDown, ChevronUp, X } from "lucide-react";
-import { api, type ForecastSpec, type RedeployCandidate } from "@/lib/api";
+import { api, DEFAULT_INCLUDE_PARAMS, type ForecastSpec, type IncludeParams, type RedeployCandidate } from "@/lib/api";
 import { ErrorState } from "@/components/shared/EmptyState";
 import { Skeleton, TableSkeleton } from "@/components/shared/Skeleton";
 import { Badge } from "@/components/shared/Badge";
+import { AdvancedFiltersButton, AdvancedFiltersPanel } from "@/components/shared/AdvancedFilters";
+import { HoldDot } from "@/components/shared/HoldFlag";
 import { EmployeeProfileModal, type SkillMatchContext } from "@/components/shared/EmployeeProfileModal";
 import { Modal } from "@/components/shared/Modal";
 import { cn, formatUsd } from "@/lib/utils";
@@ -72,10 +74,17 @@ function CandidateRow({
       >
         {c.employee_id}
       </button>
+      <HoldDot onHold={c.on_hold} holdProjects={c.hold_projects} />
       {c.coe && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-violet-50 border border-violet-200 text-violet-600">{c.coe}</span>}
       {levelNote && <Badge variant={qualifies ? "green" : "amber"}>{levelNote}</Badge>}
       <Badge variant={c.reason === "ending_soon" ? "amber" : c.reason === "fully_free" ? "green" : "under_utilized"}>{reasonDetail}</Badge>
-      {c.skill_score != null && <span className="ml-auto font-semibold text-gray-500">skill match {Math.round(c.skill_score * 100)}%</span>}
+      {c.total_projects != null && c.total_projects > 0 && (
+        <span className="text-gray-400">{c.relevant_project_count}/{c.total_projects} relevant</span>
+      )}
+      <span className="ml-auto flex items-center gap-2 flex-shrink-0">
+        {c.skill_score != null && <span className="text-gray-400">skill {Math.round(c.skill_score * 100)}%</span>}
+        {c.composite_score != null && <span className="font-semibold text-gray-600">{Math.round(c.composite_score * 100)}% overall fit</span>}
+      </span>
     </div>
   );
 }
@@ -250,7 +259,11 @@ export default function NewProjectForecastPage() {
   const [roleDrafts, setRoleDrafts] = useState<Record<number, { designation: string; headcount: string; pct: string }>>({});
   const [selectedEmployee, setSelectedEmployee] = useState<{ employeeId: string; skillMatchContext?: SkillMatchContext } | null>(null);
   const [candidateModal, setCandidateModal] = useState<{ title: string; subtitle?: string; candidates: RedeployCandidate[]; showQualifies?: boolean } | null>(null);
-  const forecast = useMutation({ mutationFn: () => api.newProjectForecast(specs.map(toForecastSpec)) });
+  // Same ranking-parameter flexibility as the main Recommendations engine --
+  // one selection for the whole forecast run (all role/spec rows share it).
+  const [includeParams, setIncludeParams] = useState<IncludeParams>(DEFAULT_INCLUDE_PARAMS);
+  const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
+  const forecast = useMutation({ mutationFn: () => api.newProjectForecast(specs.map(toForecastSpec), includeParams) });
 
   if (coeOptions.isLoading || categories.isLoading) {
     return (
@@ -699,15 +712,26 @@ export default function NewProjectForecastPage() {
           >
             <Plus className="w-3.5 h-3.5" /> Add project
           </button>
-          <button
-            onClick={() => forecast.mutate()}
-            disabled={forecast.isPending || anyPreviewLoading}
-            className="px-4 py-2 rounded-lg text-xs font-medium text-white disabled:opacity-50"
-            style={{ backgroundColor: "hsl(var(--primary))" }}
-          >
-            {forecast.isPending ? "Computing…" : "Run Forecast"}
-          </button>
+          <div className="flex items-center gap-2">
+            <AdvancedFiltersButton
+              open={advancedFiltersOpen}
+              include={includeParams}
+              defaults={DEFAULT_INCLUDE_PARAMS}
+              onClick={() => setAdvancedFiltersOpen((v) => !v)}
+            />
+            <button
+              onClick={() => forecast.mutate()}
+              disabled={forecast.isPending || anyPreviewLoading}
+              className="px-4 py-2 rounded-lg text-xs font-medium text-white disabled:opacity-50"
+              style={{ backgroundColor: "hsl(var(--primary))" }}
+            >
+              {forecast.isPending ? "Computing…" : "Run Forecast"}
+            </button>
+          </div>
         </div>
+        {advancedFiltersOpen && (
+          <AdvancedFiltersPanel include={includeParams} onApply={setIncludeParams} />
+        )}
       </div>
 
       {forecast.isPending && !forecast.data && (

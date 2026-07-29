@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api, type FreePoolCandidate } from "@/lib/api";
 import { Badge } from "@/components/shared/Badge";
+import { HoldDot } from "@/components/shared/HoldFlag";
 import { StatCard } from "@/components/shared/StatCard";
 import { ErrorState } from "@/components/shared/EmptyState";
 import { StatCardGridSkeleton, ChipRowSkeleton, TableSkeleton, Skeleton } from "@/components/shared/Skeleton";
@@ -225,8 +226,9 @@ export default function FreePoolPage() {
             {filtered.map((c) => (
               <tr key={c.employee_id} className="border-b border-gray-50 last:border-0 hover:bg-gray-50/50">
                 <td className="px-3 py-2 whitespace-nowrap">
-                  <button onClick={() => setSelectedEmployee(c.employee_id)} className="font-medium text-primary hover:underline flex items-center gap-1">
+                  <button onClick={() => setSelectedEmployee(c.employee_id)} className="font-medium text-primary hover:underline flex items-center gap-1.5">
                     {c.employee_id}
+                    <HoldDot onHold={c.on_hold} holdProjects={c.hold_projects} />
                   </button>
                 </td>
                 <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{c.job_name ?? "-"}</td>
