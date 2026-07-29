@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
+import { ChevronDown, ChevronUp, AlertTriangle, Clock, Users, DollarSign } from "lucide-react";
 import { api, type AllocationRow } from "@/lib/api";
 import { Badge } from "@/components/shared/Badge";
 import { LoadingState, ErrorState } from "@/components/shared/EmptyState";
@@ -11,7 +12,7 @@ import { EmployeeProfileModal } from "@/components/shared/EmployeeProfileModal";
 import { ProjectBasicModal } from "@/components/shared/ProjectBasicModal";
 import { ProjectHealthDetailModal } from "@/components/health/ProjectHealthDetailModal";
 import { TimesheetProofModal } from "@/components/shared/TimesheetProofModal";
-import { cn } from "@/lib/utils";
+import { cn, formatUsd } from "@/lib/utils";
 
 type Tab = "resource" | "project" | "availability";
 type StatusFilter = string;
@@ -212,6 +213,14 @@ function AllocationsPageInner() {
 
   const [selectedEmployee, setSelectedEmployee] = useState<string | null>(null);
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
+  const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
+  const toggleProjectExpanded = (projectId: string) =>
+    setExpandedProjects((prev) => {
+      const next = new Set(prev);
+      if (next.has(projectId)) next.delete(projectId);
+      else next.add(projectId);
+      return next;
+    });
   const [selectedTimesheet, setSelectedTimesheet] = useState<{ employeeId: string; projectId: string } | null>(null);
   const [selectedAvailabilityRow, setSelectedAvailabilityRow] = useState<{
     employee_id: string;
@@ -220,6 +229,10 @@ function AllocationsPageInner() {
 
   const healthTrackedProjects = useMemo(
     () => new Set((healthProjects.data ?? []).map((p) => p.project_code)),
+    [healthProjects.data]
+  );
+  const healthProjectByCode = useMemo(
+    () => new Map((healthProjects.data ?? []).map((p) => [p.project_code, p])),
     [healthProjects.data]
   );
 
@@ -527,33 +540,116 @@ const avgAvailablePct = useMemo(() => {
           </div>
         </div>
       ) : tab === "project" ?  (
-        <div className="space-y-3">
-          {Object.entries(byProject).map(([projectId, rows]) => (
-            <div key={projectId} className="rounded-xl border border-[hsl(var(--primary)/0.3)] bg-white overflow-hidden">
-              <div className="px-3 py-2 bg-gray-50 border-b border-gray-100 text-xs font-semibold text-gray-700 flex items-center gap-2">
-                <button onClick={() => openProject(projectId)} className="text-primary hover:underline" title="View full project detail">
-                  {projectId}
+        <div className="space-y-2.5">
+          {Object.entries(byProject).map(([projectId, rows]) => {
+            const isOpen = expandedProjects.has(projectId);
+            const health = healthProjectByCode.get(projectId);
+            const clientId = health?.client_id ?? rows.find((r) => r.type_of_project)?.project_id.split("_").slice(0, -1).join("_") ?? null;
+            const typeOfProject = health?.type_of_project ?? rows[0]?.type_of_project ?? null;
+            const coe = health?.coe ?? rows[0]?.coe ?? null;
+            const understaffed = health?.is_understaffed;
+            return (
+              <div
+                key={projectId}
+                className={cn(
+                  "rounded-xl border bg-white overflow-hidden transition",
+                  isOpen ? "border-primary/40 shadow-sm" : "border-gray-200"
+                )}
+              >
+                <button
+                  onClick={() => toggleProjectExpanded(projectId)}
+                  className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-left hover:bg-gray-50/70 transition flex-wrap"
+                >
+                  {isOpen ? <ChevronUp className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" /> : <ChevronDown className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />}
+                  <span
+                    onClick={(e) => { e.stopPropagation(); openProject(projectId); }}
+                    className="text-sm font-semibold text-primary hover:underline whitespace-nowrap"
+                    title="Open full project detail"
+                  >
+                    {projectId}
+                  </span>
+                  {clientId && <span className="text-xs text-gray-400 whitespace-nowrap">{clientId}</span>}
+                  {typeOfProject && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-50 border border-gray-200 text-gray-500 whitespace-nowrap">
+                      {typeOfProject}
+                    </span>
+                  )}
+                  {coe && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-violet-50 border border-violet-200 text-violet-600 whitespace-nowrap">
+                      {coe}
+                    </span>
+                  )}
+                  {health && (
+                    <Badge variant={health.risk_band}>{health.risk_band} risk</Badge>
+                  )}
+                  {understaffed && (
+                    <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-amber-700 whitespace-nowrap">
+                      <Users className="w-2.5 h-2.5" /> understaffed
+                    </span>
+                  )}
+                  {health?.is_extension_risk && (
+                    <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-amber-700 whitespace-nowrap">
+                      <Clock className="w-2.5 h-2.5" /> extension risk
+                    </span>
+                  )}
+                  {health?.is_escalation_risk && (
+                    <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-red-50 border border-red-200 text-red-700 whitespace-nowrap">
+                      <AlertTriangle className="w-2.5 h-2.5" /> escalation
+                    </span>
+                  )}
+                  {health && health.monthly_unbilled_value_usd > 0 && (
+                    <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-red-50 border border-red-200 text-red-700 whitespace-nowrap">
+                      <DollarSign className="w-2.5 h-2.5" /> {formatUsd(health.monthly_unbilled_value_usd)}/mo unbilled
+                    </span>
+                  )}
+                  <span className="ml-auto text-xs text-gray-400 whitespace-nowrap">
+                    {rows.length} resource{rows.length !== 1 ? "s" : ""}
+                    {health?.expected_headcount != null && (
+                      <span className="text-gray-300"> · {health.n_employees}/{health.expected_headcount} expected</span>
+                    )}
+                  </span>
                 </button>
-                <span className="text-gray-400 font-normal">· {rows.length} resources</span>
+
+                {isOpen && (
+                  <div className="border-t border-gray-100">
+                    {health && (
+                      <div className="px-3.5 py-2 bg-gray-50/60 border-b border-gray-100 flex items-center gap-3 flex-wrap text-[11px] text-gray-500">
+                        {health.wsr_latest_signal && (
+                          <span>
+                            Latest WSR: <Badge variant={health.wsr_latest_signal}>{health.wsr_latest_signal}</Badge>
+                          </span>
+                        )}
+                        {health.wsr_trend && <span>Trend: {health.wsr_trend}</span>}
+                        {health.overrun_days != null && health.overrun_days > 0 && <span className="text-amber-600">{health.overrun_days}d overrun</span>}
+                        {health.root_causes.length > 0 && (
+                          <span className="text-gray-400">Root causes: {health.root_causes.join(", ")}</span>
+                        )}
+                        <button onClick={() => openProject(projectId)} className="ml-auto text-primary hover:underline whitespace-nowrap">
+                          View full detail →
+                        </button>
+                      </div>
+                    )}
+                    <div className="overflow-x-auto">
+                    <table className="w-full text-xs data-table">
+                      <tbody>
+                        {rows.map((r) => (
+                          <ResourceRow
+                            key={`${r.employee_id}-${r.project_id}`}
+                            row={r}
+                            hideProject
+                            onOpenEmployee={() => setSelectedEmployee(r.employee_id)}
+                            onOpenProject={() => openProject(r.project_id)}
+                            onOpenTimesheet={() => setSelectedTimesheet({ employeeId: r.employee_id, projectId: r.project_id })}
+                          />
+                        ))}
+                      </tbody>
+                    </table>
+                    </div>
+                  </div>
+                )}
               </div>
-              <div className="overflow-x-auto">
-              <table className="w-full text-xs data-table">
-                <tbody>
-                  {rows.map((r) => (
-                    <ResourceRow
-                      key={`${r.employee_id}-${r.project_id}`}
-                      row={r}
-                      hideProject
-                      onOpenEmployee={() => setSelectedEmployee(r.employee_id)}
-                      onOpenProject={() => openProject(r.project_id)}
-                      onOpenTimesheet={() => setSelectedTimesheet({ employeeId: r.employee_id, projectId: r.project_id })}
-                    />
-                  ))}
-                </tbody>
-              </table>
-              </div>
-            </div>
-          ))}
+            );
+          })}
           {Object.keys(byProject).length === 0 && (
             <p className="text-center text-xs text-gray-400 italic py-6">No allocations match the current filters.</p>
           )}
