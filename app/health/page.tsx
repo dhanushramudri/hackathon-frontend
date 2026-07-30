@@ -79,6 +79,7 @@ interface HealthFilterOptions {
   sort: HealthSort;
   extensionRiskOnly: boolean;
   escalationRiskOnly: boolean;
+  pulseRiskOnly: boolean;
 }
 
 function filterAndSortHealth(rows: HealthProject[], opts: HealthFilterOptions): HealthProject[] {
@@ -111,6 +112,7 @@ function filterAndSortHealth(rows: HealthProject[], opts: HealthFilterOptions): 
   if (opts.devopsRiskOnly)      result = result.filter((p) => p.devops_extension_risk); // ← NEW
   if (opts.extensionRiskOnly)   result = result.filter((p) => p.is_extension_risk);
   if (opts.escalationRiskOnly)  result = result.filter((p) => p.is_escalation_risk);
+  if (opts.pulseRiskOnly)       result = result.filter((p) => p.is_pulse_risk);
 
   const sorted = [...result];
   switch (opts.sort) {
@@ -313,6 +315,7 @@ function HealthPageInner() {
 
   const [extensionRiskOnly, setExtensionRiskOnly] = useState(false);
 const [escalationRiskOnly, setEscalationRiskOnly] = useState(false);
+  const [pulseRiskOnly, setPulseRiskOnly] = useState(false);
 
   useEffect(() => {
     const risk = searchParams.get("risk");
@@ -362,7 +365,7 @@ const [escalationRiskOnly, setEscalationRiskOnly] = useState(false);
   const filtered = filterAndSortHealth(data, {
     search, riskFilter, rootCauseFilter, typeFilter, coeFilter,
     wsrFilter, understaffedOnly, rampDownOnly, hasUnbilledValueOnly,
-    devopsRiskOnly, extensionRiskOnly, escalationRiskOnly, sort,
+    devopsRiskOnly, extensionRiskOnly, escalationRiskOnly, pulseRiskOnly, sort,
   });
 
   const hasActiveFilters =
@@ -377,7 +380,8 @@ const [escalationRiskOnly, setEscalationRiskOnly] = useState(false);
     hasUnbilledValueOnly ||
     devopsRiskOnly ||
     extensionRiskOnly ||
-    escalationRiskOnly;
+    escalationRiskOnly ||
+    pulseRiskOnly;
 
   const clearFilters = () => {
     setSearch("");
@@ -393,6 +397,7 @@ const [escalationRiskOnly, setEscalationRiskOnly] = useState(false);
     setRevenueBreakdownOpen(false);
     setExtensionRiskOnly(false);
     setEscalationRiskOnly(false);
+    setPulseRiskOnly(false);
   };
 
   const counts = {
@@ -404,6 +409,7 @@ const [escalationRiskOnly, setEscalationRiskOnly] = useState(false);
   const devopsRiskCount    = data.filter((p) => p.devops_extension_risk).length; // ← NEW
   const extensionRiskCount = data.filter((p) => p.is_extension_risk).length;
   const escalationRiskCount = data.filter((p) => p.is_escalation_risk).length;
+  const pulseRiskCount = data.filter((p) => p.is_pulse_risk).length;
   const totalUnbilledValue = data.reduce((sum, p) => sum + p.monthly_unbilled_value_usd, 0);
   const unbilledProjects = [...data]
     .filter((p) => p.monthly_unbilled_value_usd > 0)
@@ -829,6 +835,26 @@ const [escalationRiskOnly, setEscalationRiskOnly] = useState(false);
     </span>
   )}
 </button>
+
+<button
+  onClick={() => setPulseRiskOnly((v) => !v)}
+  className={cn(
+    "text-[11px] px-2 py-1 rounded-lg border whitespace-nowrap transition-colors",
+    pulseRiskOnly
+      ? "bg-purple-50 border-purple-300 text-purple-700 font-semibold"
+      : "border-gray-200 text-gray-500 hover:border-gray-300"
+  )}
+>
+  Pulse risk only
+  {pulseRiskCount > 0 && (
+    <span className={cn(
+      "ml-1 inline-flex items-center justify-center rounded-full px-1 text-[9px] font-bold leading-none",
+      pulseRiskOnly ? "bg-purple-500 text-white" : "bg-gray-200 text-gray-600"
+    )}>
+      {pulseRiskCount}
+    </span>
+  )}
+</button>
         </div>
       </div>
 
@@ -880,7 +906,8 @@ const [escalationRiskOnly, setEscalationRiskOnly] = useState(false);
                     <div className="flex items-center gap-1 flex-wrap">
                       {p.is_extension_risk && <Badge variant="amber">extension</Badge>}
                       {p.is_escalation_risk && <Badge variant="red">escalation</Badge>}
-                      <span>{p.root_causes.map(rootCauseLabel).join(", ") || (!p.is_extension_risk && !p.is_escalation_risk ? "-" : "")}</span>
+                      {p.is_pulse_risk && <Badge variant="purple">pulse {p.pulse_avg_score}/4</Badge>}
+                      <span>{p.root_causes.map(rootCauseLabel).join(", ") || (!p.is_extension_risk && !p.is_escalation_risk && !p.is_pulse_risk ? "-" : "")}</span>
                     </div>
                   </td>
 

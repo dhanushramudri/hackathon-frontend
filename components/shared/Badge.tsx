@@ -19,6 +19,7 @@ const VARIANTS: Record<string, string> = {
   unbilled: "bg-red-50 text-red-700 border-red-200",
   proposed: "bg-blue-50 text-blue-700 border-blue-200",
   pending: "bg-gray-50 text-gray-500 border-gray-200",
+  purple: "bg-purple-50 text-purple-700 border-purple-200",
   default: "bg-gray-50 text-gray-600 border-gray-200",
 };
 

@@ -41,6 +41,7 @@ import {
 } from "@/components/shared/candidateFilters";
 import { AdvancedFiltersButton, AdvancedFiltersPanel, RangeFilter, FilterSelect } from "@/components/shared/AdvancedFilters";
 import { CandidateRow, ProjectHistoryModal } from "@/components/shared/CandidateRow";
+import { AssignModal } from "@/components/shared/AssignModal";
 import { cn } from "@/lib/utils";
 
 type DemandSort = "date_asc" | "date_desc" | "client_asc" | "cluster_asc" | "priority_desc" | "status_asc";
@@ -1172,6 +1173,139 @@ function SemanticMatchPanel({
   );
 }
 
+const PROJECT_TYPE_OPTIONS = ["Client Project", "Internal Project", "Managed Services", "BAU Activity", "Sales Activity"];
+
+function todayStr(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function addWeeksToDate(dateStr: string, weeks: number): string {
+  const d = new Date(dateStr);
+  d.setDate(d.getDate() + weeks * 7);
+  return d.toISOString().slice(0, 10);
+}
+
+// Pipeline deals have no real project_code (that's why Assign wasn't wired
+// here before -- see recommendation_service.py/pipeline_forecast, no
+// project_code column exists). This turns a deal into a real project so the
+// same Assign flow used everywhere else in the app (Relief Staffing, Leave
+// Backfill, Replacement tab) works here too. linkedProject is per-mount
+// (session) state, not persisted back onto the pipeline row -- reopening
+// this deal later won't remember it without creating it again.
+function CreateProjectSection({
+  clientName,
+  fallbackName,
+  likelyStartDate,
+  numberOfWeeks,
+  linkedProject,
+  onLinked,
+}: {
+  clientName: string | null;
+  fallbackName: string | null;
+  likelyStartDate: string | null;
+  numberOfWeeks: number | string | null;
+  linkedProject: { code: string; clientId: string; startDate: string; endDate: string } | null;
+  onLinked: (p: { code: string; clientId: string; startDate: string; endDate: string }) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [code, setCode] = useState("");
+  const [typeOfProject, setTypeOfProject] = useState(PROJECT_TYPE_OPTIONS[0]);
+  const [startDate, setStartDate] = useState(likelyStartDate ?? todayStr());
+  const weeks = typeof numberOfWeeks === "number" ? numberOfWeeks : Number(numberOfWeeks) || 12;
+  const [endDate, setEndDate] = useState(addWeeksToDate(likelyStartDate ?? todayStr(), weeks));
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  if (linkedProject) {
+    return (
+      <div className="rounded-xl border border-emerald-200 bg-emerald-50/40 px-3.5 py-2 text-xs">
+        <span className="text-emerald-700 font-semibold">Linked project: {linkedProject.code}</span>
+        <span className="text-gray-400"> — candidates below can now be assigned to it directly.</span>
+      </div>
+    );
+  }
+
+  if (!open) {
+    return (
+      <button
+        onClick={async () => {
+          setOpen(true);
+          const r = await api.suggestProjectCode(clientName || fallbackName || "New Project");
+          setCode(r.suggested_code);
+        }}
+        className="text-xs font-medium text-primary hover:underline"
+      >
+        + Create project code for this deal
+      </button>
+    );
+  }
+
+  const submit = async () => {
+    setError(null);
+    setSubmitting(true);
+    try {
+      const { exists } = await api.projectCodeExists(code);
+      if (exists) {
+        setError(`Project code "${code}" already exists — edit it to something unused.`);
+        return;
+      }
+      const created = await api.createProject({
+        projectCode: code,
+        clientId: clientName || fallbackName || "Unknown",
+        typeOfProject,
+        startDate,
+        endDate,
+      });
+      onLinked({
+        code: created.project_code, clientId: created.client_id,
+        startDate: created.project_start_date, endDate: created.project_end_date,
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not create this project.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-2">
+      <p className="text-[11px] text-gray-400">Turns this pipeline deal into a real project so candidates can be assigned to it.</p>
+      {error && <p className="text-[11px] text-red-600 bg-red-50 border border-red-200 rounded-lg px-2 py-1">{error}</p>}
+      <div className="flex items-end gap-2 flex-wrap">
+        <div>
+          <label className="text-[10px] text-gray-400 block mb-0.5">Project code</label>
+          <input
+            value={code}
+            onChange={(e) => setCode(e.target.value.toUpperCase())}
+            placeholder="ABC_001"
+            className="w-24 px-2 py-1.5 rounded-lg border border-gray-200 text-xs uppercase outline-none"
+          />
+        </div>
+        <div>
+          <label className="text-[10px] text-gray-400 block mb-0.5">Type</label>
+          <select value={typeOfProject} onChange={(e) => setTypeOfProject(e.target.value)} className="px-2 py-1.5 rounded-lg border border-gray-200 text-xs bg-white">
+            {PROJECT_TYPE_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="text-[10px] text-gray-400 block mb-0.5">Start date</label>
+          <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="px-2 py-1.5 rounded-lg border border-gray-200 text-xs" />
+        </div>
+        <div>
+          <label className="text-[10px] text-gray-400 block mb-0.5">End date</label>
+          <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="px-2 py-1.5 rounded-lg border border-gray-200 text-xs" />
+        </div>
+        <button onClick={submit} disabled={submitting || !code} className="text-xs px-3 py-1.5 rounded-lg bg-primary text-white disabled:opacity-50">
+          {submitting ? "Creating…" : "Create project"}
+        </button>
+        <button onClick={() => setOpen(false)} className="text-xs px-2 py-1.5 text-gray-400 hover:text-gray-600">
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // Full single-role recommendation view -- identical content/behavior whether
 // reached from the By Role sidebar or a By Project role tab. Mounted with
 // key={rowIndex} at both call sites so switching rows/tabs gives every piece
@@ -1218,6 +1352,8 @@ function RoleRecommendationDetail({
   const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
   const [dealDetailsOpen, setDealDetailsOpen] = useState(false);
   const [expandedCandidateId, setExpandedCandidateId] = useState<string | null>(null);
+  const [linkedProject, setLinkedProject] = useState<{ code: string; clientId: string; startDate: string; endDate: string } | null>(null);
+  const [assignEmployeeId, setAssignEmployeeId] = useState<string | null>(null);
 
   const roleMixCoes = useQuery({ queryKey: ["role-mix-coes"], queryFn: api.roleMixCoes });
   const recommendation = useQuery({
@@ -1336,11 +1472,22 @@ function RoleRecommendationDetail({
         />
       )}
 
+      <CreateProjectSection
+        clientName={selected?.client ?? null}
+        fallbackName={selected?.resources_requested ?? selected?.solution ?? null}
+        likelyStartDate={selected?.likely_start_date ?? null}
+        numberOfWeeks={selected?.number_of_weeks ?? null}
+        linkedProject={linkedProject}
+        onLinked={setLinkedProject}
+      />
+
       <OtherOptionsSection
         otherOptions={recommendation.data.other_options}
         windowDays={recommendation.data.other_options_window_days}
         includeParams={includeParams}
         onOpenProfile={onOpenProfile}
+        linkedProjectId={linkedProject?.code}
+        onAssign={(employeeId) => setAssignEmployeeId(employeeId)}
       />
 
       {recommendation.data.candidates.length > 0 && (
@@ -1555,6 +1702,7 @@ function RoleRecommendationDetail({
             onToggleExpand={() => setExpandedCandidateId((prev) => (prev === c.employee_id ? null : c.employee_id))}
             onOpenProfile={(tab, skillMatchContext) => onOpenProfile(c.employee_id, tab, skillMatchContext)}
             includeParams={includeParams}
+            onAssign={linkedProject ? () => setAssignEmployeeId(c.employee_id) : undefined}
           />
         ))}
         {recommendation.data.candidates.length === 0 && (
@@ -1564,6 +1712,17 @@ function RoleRecommendationDetail({
           <p className="text-sm text-gray-400 italic">No candidates match the current filters.</p>
         )}
       </div>
+
+      {assignEmployeeId && linkedProject && (
+        <AssignModal
+          employeeId={assignEmployeeId}
+          projectId={linkedProject.code}
+          defaultStartDate={linkedProject.startDate}
+          defaultEndDate={linkedProject.endDate}
+          onClose={() => setAssignEmployeeId(null)}
+          onAssigned={() => setAssignEmployeeId(null)}
+        />
+      )}
     </div>
   );
 }
@@ -1816,6 +1975,8 @@ function OtherOptionsSection({
   windowDays,
   includeParams,
   onOpenProfile,
+  linkedProjectId,
+  onAssign,
 }: {
   // Optional/nullable on purpose: an un-restarted or older backend simply
   // won't have this field yet -- render nothing rather than crash.
@@ -1823,6 +1984,8 @@ function OtherOptionsSection({
   windowDays?: number;
   includeParams: IncludeParams;
   onOpenProfile: (employeeId: string, tab: ProfileTab, skillMatchContext?: SkillMatchContext) => void;
+  linkedProjectId?: string | null;
+  onAssign?: (employeeId: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -2045,6 +2208,7 @@ const filterCount = [
                 onToggleExpand={() => setExpandedId((prev) => (prev === c.employee_id ? null : c.employee_id))}
                 onOpenProfile={(tab, skillMatchContext) => onOpenProfile(c.employee_id, tab, skillMatchContext)}
                 includeParams={includeParams}
+                onAssign={linkedProjectId ? () => onAssign?.(c.employee_id) : undefined}
               />
             ))}
             {shown.length === 0 && (

@@ -23,18 +23,26 @@ export function AssignModal({
   employeeId,
   projectId,
   defaultAllocationPct = 100,
+  defaultStartDate,
+  defaultEndDate,
   onClose,
   onAssigned,
 }: {
   employeeId: string;
   projectId: string;
   defaultAllocationPct?: number;
+  // Caller-supplied real dates (leave start/end, project start/end, the
+  // vacated allocation's own dates, etc.) -- falls back to today/+12w only
+  // when the caller genuinely has nothing better to seed from. Always
+  // editable regardless of where the default came from.
+  defaultStartDate?: string | null;
+  defaultEndDate?: string | null;
   onClose: () => void;
   onAssigned?: () => void;
 }) {
   const [allocationPct, setAllocationPct] = useState(String(Math.round(defaultAllocationPct)));
-  const [startDate, setStartDate] = useState(todayStr());
-  const [endDate, setEndDate] = useState(addWeeks(todayStr(), 12));
+  const [startDate, setStartDate] = useState(defaultStartDate || todayStr());
+  const [endDate, setEndDate] = useState(defaultEndDate || addWeeks(defaultStartDate || todayStr(), 12));
   const [resourcingStatus, setResourcingStatus] = useState("BILLABLE");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);

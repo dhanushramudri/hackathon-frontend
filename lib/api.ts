@@ -390,6 +390,9 @@ export interface HealthProject {
   root_cause_categories: Record<string, string[]>;
   is_extension_risk: boolean;
   is_escalation_risk: boolean;
+  is_pulse_risk: boolean;
+  pulse_avg_score: number | null;
+  pulse_response_count: number;
   is_ramp_down_candidate: boolean;
   days_to_ramp_down: number | null;
   wsr_data_available: boolean;
@@ -627,6 +630,7 @@ export interface DevopsExtensionRiskProof {
   team_capacity_hours_after_leave: number;
   team_daily_capacity_hours: number;
   capacity_surplus_hours: number | null;
+  days_to_clear_backlog: number | null;
   is_overdue: boolean;
   tickets_missing_remaining_estimate: number;
   tickets_with_no_effort_data: number;
@@ -669,6 +673,16 @@ export interface ProjectHealthDetail {
   root_cause_categories: Record<string, string[]>;
   is_extension_risk: boolean;
   is_escalation_risk: boolean;
+  is_pulse_risk: boolean;
+  pulse: {
+    response_count: number;
+    distinct_employees: number;
+    avg_score: number;
+    scores: Record<string, number>;
+    is_pulse_risk: boolean;
+    worst_question: string;
+    window_weeks: number;
+  } | null;
   extension_estimate: ExtensionEstimate;
    extension_revenue: {
     fired: boolean;
@@ -791,9 +805,17 @@ export interface BurnoutOvertimeEmployee {
   recent_projects: { project_id: string; hours_recent: number; needs_support: boolean }[];
 }
 
+export interface NotHappyEmployee {
+  employee_id: string;
+  job_name: string | null;
+  department_name: string | null;
+}
+
 export interface EmployeeBurnoutOverview {
   overtime_employee_count: number;
   overtime_employees: BurnoutOvertimeEmployee[];
+  not_happy_count: number;
+  not_happy_employees: NotHappyEmployee[];
 }
 
 export interface RedeployMatch {
@@ -1348,6 +1370,26 @@ export interface EmployeeProfile {
   daily_hours_recent: EmployeeDailyHours[];
   leaves: EmployeeLeaveRow[];
   signals: EmployeeSignals;
+  pulse: EmployeePulseDetail | null;
+}
+
+export interface EmployeePulseAnswer {
+  score: number;
+  meaning: string;
+  is_not_happy_question: boolean;
+}
+
+export interface EmployeePulseResponse {
+  week_start_date: string;
+  project_id: string;
+  is_not_happy: boolean;
+  answers: Record<string, EmployeePulseAnswer>;
+}
+
+export interface EmployeePulseDetail {
+  is_not_happy: boolean;
+  responses: EmployeePulseResponse[];
+  window_weeks: number;
 }
 
 export interface AllocationTimesheet extends AllocationRow {
@@ -1392,6 +1434,8 @@ export interface BackfillContext {
   pulled_employee_coe: string | null;
   source_project_id: string;
   vacated_allocation_pct: number;
+  vacated_start_date: string | null;
+  vacated_end_date: string | null;
   skill_basis: string[];
 }
 
@@ -1475,6 +1519,29 @@ export const api = {
     if (!res.ok) {
       const err = await res.json().catch(() => null);
       throw new Error(err?.detail || `Assign failed: ${res.status}`);
+    }
+    return res.json();
+  },
+  suggestProjectCode: (name: string) =>
+    getJSON<{ suggested_code: string }>(`/projects/suggest-code?name=${encodeURIComponent(name)}`),
+  projectCodeExists: (projectCode: string) =>
+    getJSON<{ exists: boolean }>(`/projects/code-exists?project_code=${encodeURIComponent(projectCode)}`),
+  createProject: async (body: {
+    projectCode: string; clientId: string; typeOfProject: string;
+    startDate: string; endDate: string; techCoe?: string | null; propositionCoe?: string | null;
+  }): Promise<{ project_code: string; client_id: string; project_start_date: string; project_end_date: string }> => {
+    const res = await fetch(`${BASE}/projects/create`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        project_code: body.projectCode, client_id: body.clientId, type_of_project: body.typeOfProject,
+        start_date: body.startDate, end_date: body.endDate,
+        tech_coe: body.techCoe ?? null, proposition_coe: body.propositionCoe ?? null,
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => null);
+      throw new Error(err?.detail || `Create project failed: ${res.status}`);
     }
     return res.json();
   },

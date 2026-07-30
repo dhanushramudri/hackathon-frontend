@@ -14,7 +14,7 @@ import {
   Sparkles,
   PartyPopper,
 } from "lucide-react";
-import { api, type BurnoutOvertimeEmployee, type HealthProject } from "@/lib/api";
+import { api, type BurnoutOvertimeEmployee, type HealthProject, type NotHappyEmployee } from "@/lib/api";
 import { ErrorState } from "@/components/shared/EmptyState";
 import { TableSkeleton } from "@/components/shared/Skeleton";
 import { TableControls } from "@/components/shared/TableControls";
@@ -23,9 +23,10 @@ import { EmployeeProfileModal } from "@/components/shared/EmployeeProfileModal";
 import { cn } from "@/lib/utils";
 
 type WellbeingTab = "projects" | "employees";
-type ProjectSignal = "all" | "overtime" | "understaffed";
+type ProjectSignal = "all" | "overtime" | "understaffed" | "healthy";
 type ProjectSort = "support_desc" | "overtime_desc" | "project_asc";
 type EmployeeSort = "hours_desc" | "days_desc" | "employee_asc";
+type EmployeeSignal = "overtime" | "not_happy";
 
 // Plain-language, people-first framing -- this page is about support, not risk
 // classification (that's what the Health page is for).
@@ -179,12 +180,13 @@ function ProjectsTab() {
   const totalActive = healthProjects.data?.length;
   const healthyCount = totalActive != null ? Math.max(0, totalActive - overview.data.total_flagged) : null;
 
-  let rows = overview.data.projects;
+  const flaggedCodes = new Set(overview.data.projects.map((r) => r.project_code));
+  let rows = signal === "healthy" ? (healthProjects.data ?? []).filter((r) => !flaggedCodes.has(r.project_code)) : overview.data.projects;
   const q = search.trim().toLowerCase();
   if (q) {
     rows = rows.filter((r) => r.project_code.toLowerCase().includes(q) || (r.client_id ?? "").toLowerCase().includes(q));
   }
-  if (signal !== "all") {
+  if (signal === "overtime" || signal === "understaffed") {
     rows = rows.filter((r) => (signal === "overtime" ? r.root_causes.includes("overtime_risk") : r.root_causes.includes("understaffed")));
   }
   rows = [...rows];
@@ -203,6 +205,8 @@ function ProjectsTab() {
           value={overview.data.total_flagged}
           sub="overworked and/or short-staffed teams"
           theme="rose"
+          onClick={() => setSignal("all")}
+          active={signal === "all"}
         />
         <WellbeingTile
           icon={Flame}
@@ -227,16 +231,20 @@ function ProjectsTab() {
             value={`${healthyCount}/${totalActive}`}
             sub="no support needed right now"
             theme="emerald"
+            onClick={() => setSignal(signal === "healthy" ? "all" : "healthy")}
+            active={signal === "healthy"}
           />
         )}
       </div>
 
-      {overview.data.total_flagged === 0 ? (
+      {overview.data.total_flagged === 0 && signal !== "healthy" ? (
         <AllClearCard icon={PartyPopper} message="Every active project is running within healthy thresholds right now." />
       ) : (
         <>
           <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-2.5">
-            <p className="text-xs font-semibold text-gray-700">Teams That Could Use Support ({rows.length}/{overview.data.total_flagged})</p>
+            <p className="text-xs font-semibold text-gray-700">
+              {signal === "healthy" ? `Projects Running Healthy (${rows.length})` : `Teams That Could Use Support (${rows.length}/${overview.data.total_flagged})`}
+            </p>
             <TableControls
               search={{ value: search, onChange: setSearch, placeholder: "Search project or client…" }}
               sort={{
@@ -270,12 +278,12 @@ function ProjectsTab() {
                   >
                     <td className="px-3 py-2 font-medium text-primary whitespace-nowrap">{r.project_code}</td>
                     <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{r.client_id ?? "-"}</td>
-                    <td className="px-3 py-2 text-gray-500">{supportReason(r)}</td>
+                    <td className="px-3 py-2 text-gray-500">{signal === "healthy" ? "No active risk signals" : supportReason(r)}</td>
                     <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{r.overtime_employee_count}</td>
                     <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{r.n_employees} / {r.expected_headcount ?? "?"}</td>
                     <td className="px-3 py-2 whitespace-nowrap">
                       <span className="inline-flex items-center gap-1 text-[11px] font-medium text-jman-rose-700 bg-jman-rose-50 border border-jman-rose-100 rounded-full px-2.5 py-1">
-                        <HandHeart className="w-3 h-3" /> Support options <ChevronRight className="w-3 h-3" />
+                        <HandHeart className="w-3 h-3" /> {signal === "healthy" ? "View project" : "Support options"} <ChevronRight className="w-3 h-3" />
                       </span>
                     </td>
                   </tr>
@@ -318,7 +326,9 @@ function OvertimeEmployeeCard({
             {e.employee_id} — {e.job_name ?? "Employee"}
           </button>
         </div>
-        <p className="text-[11px] text-gray-400">{e.overtime_days_recent} overtime day(s) · max {e.max_daily_hours_recent}h</p>
+        <div className="flex items-center gap-1.5">
+          <p className="text-[11px] text-gray-400">{e.overtime_days_recent} overtime day(s) · max {e.max_daily_hours_recent}h</p>
+        </div>
       </div>
       {e.department_name && <p className="text-[11px] text-gray-400 mb-1.5 ml-9">{e.department_name}</p>}
       <div className="flex gap-1.5 flex-wrap ml-9">
@@ -354,8 +364,20 @@ function OvertimeEmployeeCard({
   );
 }
 
+function NotHappyCard({ e, onSelect }: { e: NotHappyEmployee; onSelect: (id: string) => void }) {
+  return (
+    <div className="rounded-lg border border-purple-200 bg-white px-3 py-2 flex items-center gap-2">
+      <HeartPulse className="w-3.5 h-3.5 text-purple-500 flex-shrink-0" />
+      <button onClick={() => onSelect(e.employee_id)} className="text-xs font-medium text-primary hover:underline truncate">
+        {e.employee_id} — {e.job_name ?? "Employee"}
+      </button>
+    </div>
+  );
+}
+
 function EmployeesTab() {
   const overview = useQuery({ queryKey: ["wellbeing-employees"], queryFn: api.employeeBurnoutOverview });
+  const [signal, setSignal] = useState<EmployeeSignal>("overtime");
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<EmployeeSort>("hours_desc");
   const [selectedEmployee, setSelectedEmployee] = useState<string | null>(null);
@@ -374,9 +396,8 @@ function EmployeesTab() {
     case "employee_asc": employees.sort((a, b) => a.employee_id.localeCompare(b.employee_id)); break;
   }
 
-  const projectsReliefCouldHelp = new Set(
-    employees.filter((e) => e.recent_projects[0]?.needs_support).map((e) => e.recent_projects[0].project_id)
-  ).size;
+  let notHappy = overview.data.not_happy_employees;
+  if (q) notHappy = notHappy.filter((e) => e.employee_id.toLowerCase().includes(q) || (e.job_name ?? "").toLowerCase().includes(q));
 
   return (
     <div className="space-y-4">
@@ -385,43 +406,64 @@ function EmployeesTab() {
           icon={Flame}
           label="Sustained Overtime"
           value={overview.data.overtime_employee_count}
-          sub=">9h logged on 4+ of the trailing 14 days"
+          sub="≥11h logged on 4+ of the trailing 14 days"
           theme="red"
+          onClick={() => setSignal("overtime")}
+          active={signal === "overtime"}
         />
         <WellbeingTile
-          icon={HandHeart}
-          label="Projects Eligible for Relief"
-          value={projectsReliefCouldHelp}
-          sub="of these employees' projects could bring in support"
+          icon={HeartPulse}
+          label="Not Happy"
+          value={overview.data.not_happy_count}
+          sub="Disagreed on project fit/support/workload, last 4wks"
           theme="rose"
+          onClick={() => setSignal("not_happy")}
+          active={signal === "not_happy"}
         />
       </div>
 
-      {overview.data.overtime_employee_count === 0 ? (
-        <AllClearCard icon={Sparkles} message="No one is in sustained overtime right now -- a great sign for the team." />
+      {signal === "overtime" ? (
+        overview.data.overtime_employee_count === 0 ? (
+          <AllClearCard icon={Sparkles} message="No one is in sustained overtime right now -- a great sign for the team." />
+        ) : (
+          <>
+            <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-2.5">
+              <p className="text-xs font-semibold text-gray-700">Sustained Overtime ({employees.length})</p>
+              <TableControls
+                search={{ value: search, onChange: setSearch, placeholder: "Search employee ID or role…" }}
+                sort={{
+                  value: sort,
+                  onChange: (v) => setSort(v as EmployeeSort),
+                  options: [
+                    ["hours_desc", "Max daily hours ↓"],
+                    ["days_desc", "Overtime days ↓"],
+                    ["employee_asc", "Employee A–Z"],
+                  ],
+                }}
+              />
+            </div>
+
+            <div className="space-y-2.5">
+              {employees.map((e) => (
+                <OvertimeEmployeeCard key={e.employee_id} e={e} onSelect={setSelectedEmployee} onSupport={setSelectedProject} />
+              ))}
+              {employees.length === 0 && <p className="text-xs text-gray-400 italic text-center py-4">No employees match the current search.</p>}
+            </div>
+          </>
+        )
+      ) : overview.data.not_happy_count === 0 ? (
+        <AllClearCard icon={Sparkles} message="No one has flagged as not happy in the last 4 weeks -- a great sign for the team." />
       ) : (
         <>
           <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-2.5">
-            <p className="text-xs font-semibold text-gray-700">Sustained Overtime ({employees.length})</p>
-            <TableControls
-              search={{ value: search, onChange: setSearch, placeholder: "Search employee ID or role…" }}
-              sort={{
-                value: sort,
-                onChange: (v) => setSort(v as EmployeeSort),
-                options: [
-                  ["hours_desc", "Max daily hours ↓"],
-                  ["days_desc", "Overtime days ↓"],
-                  ["employee_asc", "Employee A–Z"],
-                ],
-              }}
-            />
+            <p className="text-xs font-semibold text-gray-700">Not Happy ({notHappy.length})</p>
+            <TableControls search={{ value: search, onChange: setSearch, placeholder: "Search employee ID or role…" }} />
           </div>
-
-          <div className="space-y-2.5">
-            {employees.map((e) => (
-              <OvertimeEmployeeCard key={e.employee_id} e={e} onSelect={setSelectedEmployee} onSupport={setSelectedProject} />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {notHappy.map((e) => (
+              <NotHappyCard key={e.employee_id} e={e} onSelect={setSelectedEmployee} />
             ))}
-            {employees.length === 0 && <p className="text-xs text-gray-400 italic text-center py-4">No employees match the current search.</p>}
+            {notHappy.length === 0 && <p className="text-xs text-gray-400 italic text-center py-4 col-span-2">No employees match the current search.</p>}
           </div>
         </>
       )}

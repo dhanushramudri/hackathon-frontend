@@ -79,7 +79,13 @@ export function ProjectHealthDetailModal({ projectCode, onClose, initialTab }: P
             {tab === "allocations" && <AllocationsTab d={detail.data} />}
             {tab === "staffing" && <StaffingTab d={detail.data} />}
             {tab === "overtime" && <OvertimeTab d={detail.data} />}
-            {tab === "relief" && <ReliefStaffingSection projectCode={detail.data.project_code} />}
+            {tab === "relief" && (
+              <ReliefStaffingSection
+                projectCode={detail.data.project_code}
+                projectStartDate={detail.data.project_start_date}
+                projectEndDate={detail.data.project_end_date}
+              />
+            )}
             {tab === "wsr" && <WsrTab d={detail.data} projectCode={projectCode} />}
             {tab === "devops" && <DevopsTab d={detail.data} />}
           </>
@@ -89,7 +95,7 @@ export function ProjectHealthDetailModal({ projectCode, onClose, initialTab }: P
   );
 }
 
-function Field({ label, value }: { label: string; value: string }) {
+function Field({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div>
       <p className="text-[10px] uppercase tracking-wide text-gray-400">{label}</p>
@@ -206,6 +212,14 @@ function OverviewTab({ d }: { d: ProjectHealthDetail }) {
         return `${dv.open_ticket_count} open ticket(s), ${dv.remaining_effort_hours}h remaining — outside the ${dv.window_days}-day risk window — see DevOps tab.`;
       })(),
 },
+    {
+      key: "pulse_risk",
+      label: "Pulse risk",
+      fired: d.is_pulse_risk,
+      detail: !d.pulse
+        ? "no Weekly Pulse submissions for this project"
+        : `${d.pulse.avg_score}/4 avg (inspired/valued/workload), ${d.pulse.response_count} response(s) from ${d.pulse.distinct_employees} employee(s), last ${d.pulse.window_weeks}w — threshold ≤2.5. Worst: ${d.pulse.worst_question}.`,
+    },
   ];
 
   return (
@@ -214,13 +228,26 @@ function OverviewTab({ d }: { d: ProjectHealthDetail }) {
         <Field label="Client" value={d.client_id ?? "-"} />
         <Field label="Type" value={d.type_of_project} />
         <Field label="Tech COE" value={d.tech_coe ?? "-"} />
-        <Field label="Project window" value={`${d.project_start_date ?? "?"} → ${d.project_end_date ?? "?"}`} />
+        <Field
+          label="Project window"
+          value={
+            d.extension_estimate.predicted_extension_end_date ? (
+              <>
+                <span className="line-through text-gray-400">{d.project_start_date ?? "?"} → {d.project_end_date ?? "?"}</span>
+                <span className="block text-amber-700">→ {d.extension_estimate.predicted_extension_end_date} (predicted)</span>
+              </>
+            ) : (
+              `${d.project_start_date ?? "?"} → ${d.project_end_date ?? "?"}`
+            )
+          }
+        />
       </div>
       <div className="flex items-center gap-3 flex-wrap">
         <Badge variant={d.risk_band}>{d.risk_band} risk</Badge>
         <span className="text-xs text-gray-400">{d.risk_score} of {rows.length} tracked root causes are flagged</span>
         {d.is_extension_risk && <Badge variant="amber">extension risk</Badge>}
         {d.is_escalation_risk && <Badge variant="red">escalation</Badge>}
+        {d.is_pulse_risk && <Badge variant="purple">pulse {d.pulse?.avg_score}/4</Badge>}
       </div>
 
       {d.is_extension_risk && (
@@ -1069,10 +1096,19 @@ function DevopsTab({ d }: { d: ProjectHealthDetail }) {
             )}
           </>
         ) : (
-          <p className="text-sm text-gray-600">
-            {devops.remaining_effort_hours}h remaining across {devops.open_ticket_count} open ticket(s) — outside
-            the {devops.window_days}-day risk window, so capacity hasn&apos;t been evaluated yet.
-          </p>
+          <>
+            <p className="text-sm text-gray-600">
+              {devops.remaining_effort_hours}h remaining across {devops.open_ticket_count} open ticket(s) — more than
+              {" "}{devops.window_days} days from the project end date, so no shortfall has been evaluated yet.
+            </p>
+            {devops.days_to_clear_backlog != null && (
+              <p className="text-xs text-gray-500 mt-1">
+                At this team&apos;s current pace ({devops.team_daily_capacity_hours}h/day), clearing the existing
+                backlog alone would take roughly <strong>{devops.days_to_clear_backlog} day(s)</strong> — well within
+                the time remaining.
+              </p>
+            )}
+          </>
         )}
 
         <div className="flex items-center gap-4 mt-3 pt-3 border-t border-black/5 text-[11px] text-gray-500">
@@ -1357,7 +1393,13 @@ function RequiredSkillSourceNote({ source, coe }: { source: string; coe: string 
   return <>no skill data available to assess fit -- ranked by competency and availability only</>;
 }
 
-function ReliefStaffingSection({ projectCode }: { projectCode: string }) {
+function ReliefStaffingSection({
+  projectCode, projectStartDate, projectEndDate,
+}: {
+  projectCode: string;
+  projectStartDate: string | null;
+  projectEndDate: string | null;
+}) {
   const [includeParams, setIncludeParams] = useState<IncludeParams>(DEFAULT_INCLUDE_PARAMS);
   const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
   const queryClient = useQueryClient();
@@ -1535,6 +1577,7 @@ function ReliefStaffingSection({ projectCode }: { projectCode: string }) {
           employeeId={assignTarget.employeeId}
           projectId={projectCode}
           defaultAllocationPct={assignTarget.allocationPct}
+          defaultEndDate={projectEndDate}
           onClose={() => setAssignTarget(null)}
           onAssigned={handleAssigned}
         />
