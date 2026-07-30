@@ -1,12 +1,12 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { HeartPulse, ChevronDown, SlidersHorizontal, UserCheck } from "lucide-react";
+import { useIsMutating, useQuery, useQueryClient } from "@tanstack/react-query";
+import { HeartPulse, ChevronDown, SlidersHorizontal, UserCheck, Loader2, Pencil } from "lucide-react";
 import {
   api,
   DEFAULT_INCLUDE_PARAMS,
-  type IncludeParams, type ProjectHealthDetail, type ReliefCandidate, type WsrReportRow, type SentimentSummary, type DevopsTicketRow,
+  type IncludeParams, type ProjectHealthDetail, type ReliefCandidate, type RosterEntry, type WsrReportRow, type SentimentSummary, type DevopsTicketRow,
 } from "@/lib/api";
 import { Modal } from "@/components/shared/Modal";
 import { Badge } from "@/components/shared/Badge";
@@ -18,6 +18,8 @@ import { FiredBadge } from "@/components/shared/FiredBadge";
 import { HoldChip } from "@/components/shared/HoldFlag";
 import { EmployeeProfileModal, type ProfileTab, type SkillMatchContext } from "@/components/shared/EmployeeProfileModal";
 import { AssignModal } from "@/components/shared/AssignModal";
+import { ExtendProjectModal } from "@/components/shared/ExtendProjectModal";
+import { ExtendAllocationModal } from "@/components/shared/ExtendAllocationModal";
 import { cn, formatUsd } from "@/lib/utils";
 
 type DetailTab = "overview" | "allocations" | "staffing" | "overtime" | "relief" | "wsr" | "devops";
@@ -37,7 +39,12 @@ const BASE_TABS: { key: DetailTab; label: string }[] = [
   { key: "devops", label: "DevOps" },
 ];
 
-export function ProjectHealthDetailModal({ projectCode, onClose, initialTab }: ProjectHealthDetailModalProps) {
+// The tab bar + tab content, with no modal chrome around it -- shared between
+// ProjectHealthDetailModal (below, used everywhere as a modal) and the Health
+// page's full-page drilldown view (app/health/page.tsx), which swaps to this
+// in place of the project list instead of opening it in a modal, since that
+// page is where these tabs get used most heavily and a modal is cramped for it.
+export function ProjectHealthDetailContent({ projectCode, initialTab }: { projectCode: string; initialTab?: DetailTab }) {
   const [tab, setTab] = useState<DetailTab>(initialTab ?? "overview");
   const detail = useQuery({
     queryKey: ["health-detail", projectCode],
@@ -47,11 +54,7 @@ export function ProjectHealthDetailModal({ projectCode, onClose, initialTab }: P
   const tabs = [...BASE_TABS.slice(0, 4), { key: "relief" as const, label: "Relief Staffing" }, ...BASE_TABS.slice(4)];
 
   return (
-    <Modal
-      title={detail.data ? `${projectCode} — ${detail.data.client_id ?? "Unknown client"}` : projectCode}
-      onClose={onClose}
-      widthClassName="max-w-6xl"
-    >
+    <>
       <div className="flex border-b border-gray-100 px-5 sticky top-0 bg-white z-10 overflow-x-auto">
         {tabs.map((t) => (
           <button
@@ -85,6 +88,23 @@ export function ProjectHealthDetailModal({ projectCode, onClose, initialTab }: P
           </>
         ) : null}
       </div>
+    </>
+  );
+}
+
+export function ProjectHealthDetailModal({ projectCode, onClose, initialTab }: ProjectHealthDetailModalProps) {
+  const detail = useQuery({
+    queryKey: ["health-detail", projectCode],
+    queryFn: () => api.healthProjectDetail(projectCode),
+  });
+
+  return (
+    <Modal
+      title={detail.data ? `${projectCode} — ${detail.data.client_id ?? "Unknown client"}` : projectCode}
+      onClose={onClose}
+      widthClassName="max-w-6xl"
+    >
+      <ProjectHealthDetailContent projectCode={projectCode} initialTab={initialTab} />
     </Modal>
   );
 }
@@ -113,9 +133,9 @@ function OverviewTab({ d }: { d: ProjectHealthDetail }) {
       label: "Overrunning",
       fired: d.overrun.fired,
       detail:
-        d.overrun.overrun_days != null
-          ? `${d.overrun.overrun_days}d past project end (${d.overrun.project_end_date ?? "?"}) — threshold >${d.overrun.threshold_days}d`
-          : "no allocation runs past the project end date",
+        d.overrun.overrun_days != null && d.overrun.overrun_days > 0
+          ? `${d.overrun.overrun_days}d past the currently-resourced end date (${d.overrun.project_end_date ?? "?"}) with nothing further booked — threshold >${d.overrun.threshold_days}d`
+          : `resourced (via active allocations) through ${d.overrun.project_end_date ?? "the project end date"} — no current gap`,
     },
     {
       key: "shadow_heavy",
@@ -194,19 +214,41 @@ function OverviewTab({ d }: { d: ProjectHealthDetail }) {
     ? "No open work items found on the board"
     : (() => {
         const dv = d.devops;
+        // has_devops_extension_risk (dv.fired) can be true purely because of blocked
+        // or past-due tickets, independent of the capacity comparison below -- call
+        // those out explicitly so "Flagged" next to a capacity SURPLUS doesn't read
+        // as a contradiction.
+        const reasons: string[] = [];
+        if (dv.blocked_ticket_count > 0) reasons.push(`${dv.blocked_ticket_count} ticket(s) blocked`);
+        if (dv.tickets_due_past_project_end > 0) reasons.push(`${dv.tickets_due_past_project_end} ticket(s) due past the resourced end date`);
+
+        let capacityText: string;
         if (dv.is_overdue) {
-          return `Project end (${d.project_end_date ?? "?"}) has passed with ${dv.open_ticket_count} open ticket(s), ${dv.remaining_effort_hours}h remaining — see DevOps tab.`;
-        }
-        if (dv.within_risk_window) {
+          capacityText = `Currently-resourced end date (${d.effective_end_date ?? d.project_end_date ?? "?"}) has passed with ${dv.open_ticket_count} open ticket(s), ${dv.remaining_effort_hours}h remaining`;
+        } else if (dv.within_risk_window) {
           const shortfall = dv.capacity_surplus_hours ?? 0;
-          return shortfall >= 0
-            ? `${dv.working_days_in_window} working day(s) left, ${shortfall}h capacity surplus over ${dv.remaining_effort_hours}h remaining — see DevOps tab.`
-            : `${dv.working_days_in_window} working day(s) left, ${Math.abs(shortfall)}h capacity shortfall against ${dv.remaining_effort_hours}h remaining — see DevOps tab.`;
+          capacityText = shortfall >= 0
+            ? `${dv.working_days_in_window} working day(s) left, ${shortfall}h capacity surplus over ${dv.remaining_effort_hours}h remaining`
+            : `${dv.working_days_in_window} working day(s) left, ${Math.abs(shortfall)}h capacity shortfall against ${dv.remaining_effort_hours}h remaining`;
+        } else {
+          capacityText = `${dv.open_ticket_count} open ticket(s), ${dv.remaining_effort_hours}h remaining — outside the ${dv.window_days}-day risk window`;
         }
-        return `${dv.open_ticket_count} open ticket(s), ${dv.remaining_effort_hours}h remaining — outside the ${dv.window_days}-day risk window — see DevOps tab.`;
+        return [...reasons, capacityText].join(" — ") + " — see DevOps tab.";
       })(),
 },
   ];
+
+  // The displayed end date is the PURE project end date, or the RM's own
+  // explicitly-approved extension (project_extended_end_date) when one exists --
+  // never a silently-inferred date. Inference from allocation data alone
+  // (effective_end_date running past this without an approved extension) is
+  // a signal to go extend the project, not something we unilaterally display
+  // as if it already happened.
+  const displayEndDate = d.project_extended_end_date ?? d.project_end_date;
+  const isExplicitlyExtended = d.project_extended_end_date != null;
+  const hasUnapprovedInferredExtension =
+    !isExplicitlyExtended && d.effective_end_date != null && displayEndDate != null && d.effective_end_date > displayEndDate;
+  const [extending, setExtending] = useState(false);
 
   return (
     <div className="space-y-4">
@@ -214,8 +256,42 @@ function OverviewTab({ d }: { d: ProjectHealthDetail }) {
         <Field label="Client" value={d.client_id ?? "-"} />
         <Field label="Type" value={d.type_of_project} />
         <Field label="Tech COE" value={d.tech_coe ?? "-"} />
-        <Field label="Project window" value={`${d.project_start_date ?? "?"} → ${d.project_end_date ?? "?"}`} />
+        <div>
+          <p className="text-[10px] uppercase tracking-wide text-gray-400">Project window</p>
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="text-gray-700 font-medium">
+              {d.project_start_date ?? "?"} → {displayEndDate ?? "?"}
+            </p>
+            <button
+              onClick={() => setExtending(true)}
+              className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full border border-gray-200 text-gray-500 hover:border-primary hover:text-primary transition whitespace-nowrap"
+              title="Extend this project's end date"
+            >
+              <Pencil className="w-2.5 h-2.5" /> Extend
+            </button>
+          </div>
+          {isExplicitlyExtended && (
+            <p className="text-[10px] text-amber-600">
+              end date changed — originally {d.project_end_date}
+              {d.project_extended_end_status && ` · ${d.project_extended_end_status.toLowerCase()}`}
+            </p>
+          )}
+          {hasUnapprovedInferredExtension && (
+            <p className="text-[10px] text-gray-400">
+              active allocations run through {d.effective_end_date} — not yet reflected in an approved extension
+            </p>
+          )}
+        </div>
       </div>
+      {extending && (
+        <ExtendProjectModal
+          projectCode={d.project_code}
+          originalEndDate={d.project_end_date}
+          currentExtendedEndDate={d.project_extended_end_date}
+          currentExtendedEndStatus={d.project_extended_end_status}
+          onClose={() => setExtending(false)}
+        />
+      )}
       <div className="flex items-center gap-3 flex-wrap">
         <Badge variant={d.risk_band}>{d.risk_band} risk</Badge>
         <span className="text-xs text-gray-400">{d.risk_score} of {rows.length} tracked root causes are flagged</span>
@@ -224,37 +300,30 @@ function OverviewTab({ d }: { d: ProjectHealthDetail }) {
       </div>
 
       {d.is_extension_risk && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-1">
-          <p className="text-xs font-semibold text-amber-800">Extension outlook</p>
-          {d.extension_estimate.committed_overrun_days > 0 && (
-            <p className="text-xs text-gray-700">
-              Already booked <strong>{d.extension_estimate.committed_overrun_days} day(s)</strong> past the official end date
-              ({d.extension_estimate.committed_overrun_source}).
-            </p>
-          )}
-          {d.extension_estimate.projected_additional_days != null ? (
-            <p className="text-xs text-gray-700">
-              Estimated <strong>{d.extension_estimate.projected_additional_days} more day(s)</strong>
-              {" "}({d.extension_estimate.projected_additional_weeks}wk) beyond that, based on{" "}
-              {d.extension_estimate.projected_basis} —{" "}
-              <span className={cn("font-medium", d.extension_estimate.projected_additional_days_confidence === "low" ? "text-amber-700" : "text-gray-500")}>
-                {d.extension_estimate.projected_additional_days_confidence} confidence
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+          <p className="text-xs font-semibold text-amber-800 mb-1.5">Extension outlook</p>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-700">
+            {d.extension_estimate.committed_overrun_days > 0 && (
+              <span>
+                <strong>{d.extension_estimate.committed_overrun_days}d</strong> overrun (past{" "}
+                {d.extension_estimate.currently_resourced_through_date ?? "?"})
               </span>
-              {d.extension_estimate.projected_additional_days_confidence === "low" && (
-                <span> — several tickets are missing effort data, so treat this as a floor, not a fixed number</span>
-              )}
-              .
-              {d.extension_estimate.predicted_extension_start_date && d.extension_estimate.predicted_extension_end_date && (
-                <span className="block mt-0.5 text-gray-600">
-                  Predicted window: {d.extension_estimate.predicted_extension_start_date} → {d.extension_estimate.predicted_extension_end_date}
-                  {" "}({d.extension_estimate.projected_extension_duration_label})
+            )}
+            {d.extension_estimate.projected_additional_days != null && (
+              <span>
+                +<strong>{d.extension_estimate.projected_additional_days}d</strong> more est.{" "}
+                <span className={cn("font-medium", d.extension_estimate.projected_additional_days_confidence === "low" ? "text-amber-700" : "text-gray-500")}>
+                  ({d.extension_estimate.projected_additional_days_confidence} confidence)
                 </span>
-              )}
-            </p>
-          ) : d.extension_estimate.committed_overrun_days === 0 ? (
-            <p className="text-xs text-gray-500">No projected additional days beyond today — see DevOps tab for ticket-level detail.</p>
-          ) : null}
-          <p className="text-[10px] text-gray-400 pt-1">{d.extension_estimate.note}</p>
+              </span>
+            )}
+            {d.extension_estimate.predicted_extension_end_date && (
+              <span>predicted through <strong>{d.extension_estimate.predicted_extension_end_date}</strong></span>
+            )}
+            {d.extension_estimate.projected_additional_days == null && d.extension_estimate.committed_overrun_days === 0 && (
+              <span className="text-gray-500">No additional delay projected — see DevOps tab.</span>
+            )}
+          </div>
         </div>
       )}
       <div className="rounded-xl border border-[hsl(var(--primary)/0.3)] overflow-hidden">
@@ -292,6 +361,7 @@ function AllocationsTab({ d }: { d: ProjectHealthDetail }) {
   const [statusFilter, setStatusFilter] = useState("all");
   const [activeOnly, setActiveOnly] = useState(false);
   const [sort, setSort] = useState<AllocSort>("start_desc");
+  const [extending, setExtending] = useState<RosterEntry | null>(null);
 
   if (d.allocations_roster.length === 0) {
     return <p className="text-sm text-gray-400 italic">No allocation history for this project.</p>;
@@ -348,31 +418,100 @@ function AllocationsTab({ d }: { d: ProjectHealthDetail }) {
         <table className="w-full text-[11px]">
           <thead>
             <tr className="bg-gray-50 border-b border-gray-200">
-              {["Employee", "Designation", "Status", "Alloc %", "Start", "End", "Active?"].map((h) => (
+              {["Employee", "Designation", "Status", "Alloc %", "Start", "End", "Extended Start", "Extended End", "Active?"].map((h) => (
                 <th key={h} className="text-left font-semibold text-gray-500 px-2.5 py-1.5 whitespace-nowrap">{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {rows.map((r, i) => (
-              <tr key={i} className="border-b border-gray-50 last:border-0">
-                <td className="px-2.5 py-1.5 font-medium text-gray-700 whitespace-nowrap">{r.employee_id}</td>
-                <td className="px-2.5 py-1.5 text-gray-600 whitespace-nowrap">{r.job_name ?? "-"}</td>
-                <td className="px-2.5 py-1.5 whitespace-nowrap"><Badge variant={r.resourcing_status}>{r.resourcing_status}</Badge></td>
-                <td className="px-2.5 py-1.5 text-gray-500 whitespace-nowrap">{r.allocation_by_percentage}%</td>
-                <td className="px-2.5 py-1.5 text-gray-500 whitespace-nowrap">{r.allocated_start_date ?? "-"}</td>
-                <td className="px-2.5 py-1.5 text-gray-500 whitespace-nowrap">{r.allocated_end_date ?? "-"}</td>
-                <td className="px-2.5 py-1.5 whitespace-nowrap">
-                  {r.is_allocation_active ? <Badge variant="billable">Active</Badge> : <Badge variant="default">Past</Badge>}
-                </td>
-              </tr>
+            {rows.map((r) => (
+              <RosterRow
+                key={r.allocation_id}
+                row={r}
+                projectExtendedEndDate={d.project_extended_end_date}
+                onExtend={() => setExtending(r)}
+              />
             ))}
           </tbody>
         </table>
         </div>
         {rows.length === 0 && <p className="text-xs text-gray-400 italic text-center py-4">No allocations match the current filters.</p>}
       </div>
+      {extending && (
+        <ExtendAllocationModal
+          allocationId={extending.allocation_id}
+          employeeId={extending.employee_id}
+          projectId={d.project_code}
+          currentEndDate={extending.allocated_end_date ?? ""}
+          currentExtendedEndDate={extending.extended_end_date}
+          currentExtendedStatus={extending.extended_status}
+          currentResourcingStatus={extending.resourcing_status}
+          projectExtendedEndDate={d.project_extended_end_date}
+          onClose={() => setExtending(null)}
+        />
+      )}
     </div>
+  );
+}
+
+function RosterRow({
+  row,
+  projectExtendedEndDate,
+  onExtend,
+}: {
+  row: RosterEntry;
+  projectExtendedEndDate: string | null;
+  onExtend: () => void;
+}) {
+  const isPending = useIsMutating({ mutationKey: ["extend-allocation", row.allocation_id] }) > 0;
+
+  return (
+    <tr className="border-b border-gray-50 last:border-0">
+      <td className="px-2.5 py-1.5 font-medium text-gray-700 whitespace-nowrap">{row.employee_id}</td>
+      <td className="px-2.5 py-1.5 text-gray-600 whitespace-nowrap">{row.job_name ?? "-"}</td>
+      <td className="px-2.5 py-1.5 whitespace-nowrap"><Badge variant={row.resourcing_status}>{row.resourcing_status}</Badge></td>
+      <td className="px-2.5 py-1.5 text-gray-500 whitespace-nowrap">{row.allocation_by_percentage}%</td>
+      <td className="px-2.5 py-1.5 text-gray-500 whitespace-nowrap">{row.allocated_start_date ?? "-"}</td>
+      <td className="px-2.5 py-1.5 text-gray-500 whitespace-nowrap">{row.allocated_end_date ?? "-"}</td>
+      <td className="px-2.5 py-1.5 text-gray-500 whitespace-nowrap">{row.extended_start_date ?? "-"}</td>
+      <td className="px-2.5 py-1.5 whitespace-nowrap">
+        {isPending ? (
+          <span className="flex items-center gap-1 text-gray-400">
+            <Loader2 className="w-3 h-3 animate-spin" /> updating…
+          </span>
+        ) : !row.is_allocation_active ? (
+          <span className="text-gray-500">{row.extended_end_date ?? "-"}</span>
+        ) : row.extended_end_date ? (
+          <button
+            onClick={onExtend}
+            className="text-primary hover:underline"
+            title={projectExtendedEndDate ? `Click to change (up to the project's extended end date, ${projectExtendedEndDate})` : undefined}
+          >
+            {row.extended_end_date}
+            {row.extended_status && <span className="ml-1 text-gray-400">({row.extended_status.toLowerCase()})</span>}
+          </button>
+        ) : projectExtendedEndDate ? (
+          <button
+            onClick={onExtend}
+            className="text-gray-400 hover:text-primary underline decoration-dotted"
+            title={`Extend up to the project's extended end date, ${projectExtendedEndDate}`}
+          >
+            + Extend
+          </button>
+        ) : (
+          <button
+            onClick={onExtend}
+            className="text-amber-600 hover:text-amber-700 underline decoration-dotted font-medium"
+            title="Extend the project's end date first, then this allocation can be extended up to it."
+          >
+            extend project first
+          </button>
+        )}
+      </td>
+      <td className="px-2.5 py-1.5 whitespace-nowrap">
+        {row.is_allocation_active ? <Badge variant="billable">Active</Badge> : <Badge variant="default">Past</Badge>}
+      </td>
+    </tr>
   );
 }
 
@@ -1029,22 +1168,29 @@ function DevopsTab({ d }: { d: ProjectHealthDetail }) {
           </span>
         </div>
 
+        {/* Blocked/past-due tickets can fire the flag on their own, independent of
+            the capacity comparison below -- call it out so "Flagged" next to a
+            capacity SURPLUS doesn't read as a contradiction. */}
+        {devops.fired && (devops.blocked_ticket_count > 0 || devops.tickets_due_past_project_end > 0) && (
+          <p className="text-xs text-red-700 font-medium mb-2">
+            Flagged: {[
+              devops.blocked_ticket_count > 0 ? `${devops.blocked_ticket_count} ticket(s) blocked` : null,
+              devops.tickets_due_past_project_end > 0 ? `${devops.tickets_due_past_project_end} ticket(s) due past the resourced end date` : null,
+            ].filter(Boolean).join(" · ")}
+          </p>
+        )}
+
         {devops.is_overdue ? (
-          <>
-            <p className="text-sm text-gray-700">
-              Project end date <strong>{d.project_end_date ?? "?"}</strong> has passed —{" "}
-              <span className="text-red-700 font-semibold">{devops.remaining_effort_hours}h</span> of work is
-              still open. This is the pattern that leads to a late extension request.
-            </p>
+          <p className="text-sm text-gray-700">
+            End date <strong>{d.effective_end_date ?? d.project_end_date ?? "?"}</strong> passed —{" "}
+            <span className="text-red-700 font-semibold">{devops.remaining_effort_hours}h</span> still open
             {d.extension_estimate.projected_additional_days != null && (
-              <p className="text-xs text-gray-600 mt-1">
-                At this team's current daily capacity, that's roughly{" "}
-                <strong>{d.extension_estimate.projected_additional_days} more day(s)</strong>
-                {" "}({d.extension_estimate.projected_additional_weeks}wk) of work —{" "}
-                {d.extension_estimate.projected_additional_days_confidence} confidence.
-              </p>
+              <>
+                {" "}· +<strong>{d.extension_estimate.projected_additional_days}d</strong> more est.{" "}
+                ({d.extension_estimate.projected_additional_days_confidence} confidence)
+              </>
             )}
-          </>
+          </p>
         ) : devops.within_risk_window ? (
           <>
             <p className="text-2xl font-semibold text-gray-800">
@@ -1055,58 +1201,45 @@ function DevopsTab({ d }: { d: ProjectHealthDetail }) {
               )}
             </p>
             <p className="text-xs text-gray-500 mt-1">
-              {devops.working_days_in_window} working day(s) left → {devops.team_capacity_hours_after_leave}h team
-              capacity{" "}
-              {devops.team_capacity_hours_after_leave !== devops.team_capacity_hours &&
-                `(${devops.team_capacity_hours}h before planned leave) `}
-              vs. {devops.remaining_effort_hours}h of remaining work.
+              {devops.working_days_in_window} working day(s) left · {devops.team_capacity_hours_after_leave}h capacity
+              {" "}vs. {devops.remaining_effort_hours}h remaining
+              {d.extension_estimate.projected_additional_days != null && (
+                <>
+                  {" "}· +<strong>{d.extension_estimate.projected_additional_days}d</strong> beyond window{" "}
+                  ({d.extension_estimate.projected_additional_days_confidence} confidence)
+                </>
+              )}
             </p>
-            {d.extension_estimate.projected_additional_days != null && (
-              <p className="text-xs text-red-700 mt-1 font-medium">
-                Projected to run {d.extension_estimate.projected_additional_days} day(s) beyond the {devops.working_days_in_window}-day window
-                {" "}({d.extension_estimate.projected_additional_weeks}wk) — {d.extension_estimate.projected_additional_days_confidence} confidence.
-              </p>
-            )}
           </>
         ) : (
           <p className="text-sm text-gray-600">
-            {devops.remaining_effort_hours}h remaining across {devops.open_ticket_count} open ticket(s) — outside
-            the {devops.window_days}-day risk window, so capacity hasn&apos;t been evaluated yet.
+            {devops.remaining_effort_hours}h remaining across {devops.open_ticket_count} open ticket(s) — outside the {devops.window_days}-day risk window
           </p>
         )}
 
         <div className="flex items-center gap-4 mt-3 pt-3 border-t border-black/5 text-[11px] text-gray-500">
           <span>{devops.completed_work_hours}h completed</span>
-          <span>{devops.original_estimate_hours}h originally estimated</span>
-          {devops.effort_completion_pct != null && <span>{devops.effort_completion_pct}% tracked-work complete</span>}
+          <span>{devops.original_estimate_hours}h estimated</span>
+          {devops.effort_completion_pct != null && <span>{devops.effort_completion_pct}% complete</span>}
+          {devops.tickets_with_no_effort_data > 0 && (
+            <span className="text-amber-700">{devops.tickets_with_no_effort_data} missing effort data</span>
+          )}
         </div>
-
-        {(devops.tickets_missing_remaining_estimate > 0 || devops.tickets_with_no_effort_data > 0) && (
-          <p className="text-[11px] text-amber-700 mt-2">
-            {devops.tickets_with_no_effort_data > 0
-              ? `${devops.tickets_with_no_effort_data} ticket(s) have no effort data at all — the ${devops.remaining_effort_hours}h figure is a floor, not the real total.`
-              : `${devops.tickets_missing_remaining_estimate} ticket(s) used their original estimate in place of a missing remaining-work value.`}
-          </p>
-        )}
       </div>
 
         {devops.sprint_breakdown.length > 0 && (
         <div className="rounded-xl border border-[hsl(var(--primary)/0.3)] overflow-hidden">
-          <div className="px-3 py-2 border-b border-gray-100 bg-gray-50">
+          <div className="px-3 py-2 border-b border-gray-100 bg-gray-50 flex flex-wrap items-center gap-x-3 gap-y-0.5">
             <p className="text-xs font-semibold text-gray-700">Sprint breakdown</p>
             {devops.sprint_breakdown[0].has_open_work && (devops.is_overdue || devops.within_risk_window) && (
-              <p className="text-[11px] text-red-600 mt-0.5">
-                {devops.sprint_breakdown[0].sprint_name} still has open work — may need a new sprint to close this out.
-              </p>
+              <span className="text-[11px] text-red-600">{devops.sprint_breakdown[0].sprint_name} still open</span>
             )}
-             {(() => {
+            {(() => {
               const unknownCount = devops.sprint_breakdown.filter(
                 (s) => s.remaining_hours === 0 && s.tickets_with_no_effort_data > 0
               ).length;
               return unknownCount > 0 ? (
-                <p className="text-[11px] text-amber-600 mt-0.5">
-                  {unknownCount} of {devops.sprint_breakdown.length} sprints have no reliable remaining-hours data — treat their totals as unknown, not zero.
-                </p>
+                <span className="text-[11px] text-amber-600">{unknownCount} sprint(s) missing hours data</span>
               ) : null;
             })()}
           </div>

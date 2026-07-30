@@ -10,9 +10,9 @@ import { StatCard } from "@/components/shared/StatCard";
 import { LoadingState, ErrorState } from "@/components/shared/EmptyState";
 import { StatCardGridSkeleton, TableSkeleton } from "@/components/shared/Skeleton";
 import { Modal } from "@/components/shared/Modal";
-import { ProjectHealthDetailModal } from "@/components/health/ProjectHealthDetailModal";
+import { ProjectHealthDetailContent } from "@/components/health/ProjectHealthDetailModal";
 import { EmployeeProfileModal } from "@/components/shared/EmployeeProfileModal";
-import { cn, formatUsd, rootCauseLabel, ROOT_CAUSE_LABEL } from "@/lib/utils";
+import { cn, formatUsd, ROOT_CAUSE_LABEL } from "@/lib/utils";
 
 type RiskFilter = "all" | "high" | "medium" | "low";
 type WsrFilter = "all" | "RED" | "AMBER" | "GREEN" | "no_report" | "has_report";
@@ -346,7 +346,7 @@ const [escalationRiskOnly, setEscalationRiskOnly] = useState(false);
 
   if (projects.isLoading) {
     return (
-      <div className="p-4 sm:p-6 max-w-6xl mx-auto space-y-4">
+      <div className="p-4 sm:p-6 w-full space-y-4">
         <StatCardGridSkeleton count={3} className="grid grid-cols-1 sm:grid-cols-3 gap-4" />
         <StatCardGridSkeleton count={4} className="grid grid-cols-2 lg:grid-cols-4 gap-4" />
         <TableSkeleton columns={TABLE_COLUMNS.length} rows={10} />
@@ -417,8 +417,32 @@ const [escalationRiskOnly, setEscalationRiskOnly] = useState(false);
       ((a.extension_unbilled_value_usd ?? 0) + (a.predicted_extension_revenue_loss_usd ?? 0))
     );
 
+  if (selectedProject) {
+    return (
+      <div className="p-4 sm:p-6 w-full space-y-4">
+        {/* ── Breadcrumb -- drills into the project's full detail as a page instead of
+            a modal, since the Health page is where those tabs get used most heavily
+            and a modal is cramped for that. Same content as ProjectHealthDetailModal
+            (which is untouched, and still used everywhere else). ── */}
+        <nav className="flex items-center gap-1.5 text-xs">
+          <button
+            onClick={() => { setSelectedProject(null); setSelectedProjectTab(undefined); }}
+            className="text-primary hover:underline"
+          >
+            Health
+          </button>
+          <span className="text-gray-300">/</span>
+          <span className="text-gray-500 font-medium">{selectedProject}</span>
+        </nav>
+        <div className="rounded-xl border border-[hsl(var(--primary)/0.3)] bg-white overflow-hidden">
+          <ProjectHealthDetailContent projectCode={selectedProject} initialTab={selectedProjectTab as any} />
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="p-4 sm:p-6 max-w-6xl mx-auto space-y-4">
+    <div className="p-4 sm:p-6 w-full space-y-4">
 
       {/* ── Row 1: three separate risk cards (High/Medium/Low), each independently clickable ── */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -880,7 +904,7 @@ const [escalationRiskOnly, setEscalationRiskOnly] = useState(false);
                     <div className="flex items-center gap-1 flex-wrap">
                       {p.is_extension_risk && <Badge variant="amber">extension</Badge>}
                       {p.is_escalation_risk && <Badge variant="red">escalation</Badge>}
-                      <span>{p.root_causes.map(rootCauseLabel).join(", ") || (!p.is_extension_risk && !p.is_escalation_risk ? "-" : "")}</span>
+                      {!p.is_extension_risk && !p.is_escalation_risk && <span>-</span>}
                     </div>
                   </td>
 
@@ -948,13 +972,6 @@ const [escalationRiskOnly, setEscalationRiskOnly] = useState(false);
       </div>
 
       {/* ── Modals ── */}
-      {selectedProject && (
-        <ProjectHealthDetailModal
-          projectCode={selectedProject}
-          initialTab={selectedProjectTab as any}
-          onClose={() => { setSelectedProject(null); setSelectedProjectTab(undefined); }}
-        />
-      )}
       {unbilledProofProject && (
         <UnbilledValueProofModal
           projectCode={unbilledProofProject.code}

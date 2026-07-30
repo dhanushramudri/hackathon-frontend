@@ -38,6 +38,7 @@ export interface AvailabilityRow {
 }
 
 export interface AllocationRow {
+  allocation_id: string;
   employee_id: string;
   job_name: string | null;
   department_name: string | null;
@@ -49,6 +50,13 @@ export interface AllocationRow {
   allocation_by_percentage: number;
   allocated_start_date: string;
   allocated_end_date: string;
+  // Resource manager's own record of a real-world extension, kept separate
+  // from allocated_end_date/project_end_date so both remain visible.
+  extended_end_date: string | null;
+  extended_status: "BILLABLE" | "UNBILLABLE" | "SHADOW" | null;
+  project_end_date: string | null;
+  project_extended_end_date: string | null;
+  project_extended_end_status: "BILLABLE" | "UNBILLABLE" | null;
   employee_total_allocation_pct: number;
   // Excludes Internal Project allocation -- this is what utilization_band's
   // "over_allocated" is actually judged on, since internal work is discretionary.
@@ -378,6 +386,8 @@ export interface HealthProject {
   expected_headcount: number | null;
   is_understaffed: boolean;
   overrun_days: number | null;
+  effective_end_date: string | null;
+  planned_extension_days: number | null;
   shadow_unbilled_share: number | null;
   monthly_unbilled_value_usd: number;
   churn_per_month: number | null;
@@ -426,12 +436,16 @@ export interface HealthProject {
 }
 
 export interface RosterEntry {
+  allocation_id: string;
   employee_id: string;
   job_name: string | null;
   resourcing_status: string;
   allocation_by_percentage: number;
   allocated_start_date: string | null;
   allocated_end_date: string | null;
+  extended_start_date: string | null;
+  extended_end_date: string | null;
+  extended_status: "BILLABLE" | "UNBILLABLE" | "SHADOW" | null;
   is_allocation_active: boolean;
 }
 
@@ -636,6 +650,9 @@ export interface DevopsExtensionRiskProof {
 }
 
 export interface ExtensionEstimate {
+  planned_extension_days: number;
+  originally_planned_end_date: string | null;
+  currently_resourced_through_date: string | null;
   committed_overrun_days: number;
   committed_overrun_source: string;
   projected_additional_days: number | null;
@@ -654,6 +671,10 @@ export interface ProjectHealthDetail {
   tech_coe: string | null;
   project_start_date: string | null;
   project_end_date: string | null;
+  effective_end_date: string | null;
+  planned_extension_days: number | null;
+  project_extended_end_date: string | null;
+  project_extended_end_status: "BILLABLE" | "UNBILLABLE" | null;
   risk_score: number;
   risk_band: "high" | "medium" | "low";
   root_causes: string[];
@@ -1478,6 +1499,38 @@ export const api = {
     }
     return res.json();
   },
+  extendAllocationEndDate: async (
+    allocationId: string,
+    extendedEndDate: string | null,
+    status: "BILLABLE" | "UNBILLABLE" | "SHADOW" | null
+  ): Promise<{ allocation_id: string; extended_start_date: string | null; extended_end_date: string | null; extended_status: string | null }> => {
+    const res = await fetch(`${BASE}/allocations/${encodeURIComponent(allocationId)}/extend`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ extended_end_date: extendedEndDate, status }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => null);
+      throw new Error(err?.detail || `Extend failed: ${res.status}`);
+    }
+    return res.json();
+  },
+  extendProjectEndDate: async (
+    projectCode: string,
+    extendedEndDate: string | null,
+    status: "BILLABLE" | "UNBILLABLE" | null
+  ): Promise<{ project_code: string; extended_end_date: string | null; extended_end_status: string | null }> => {
+    const res = await fetch(`${BASE}/allocations/projects/${encodeURIComponent(projectCode)}/extend`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ extended_end_date: extendedEndDate, status }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => null);
+      throw new Error(err?.detail || `Extend failed: ${res.status}`);
+    }
+    return res.json();
+  },
   roleMixTemplates: () => getJSON<RoleMixTemplate[]>("/role-mix/templates"),
   roleMixCategories: () => getJSON<DocxCategoryRoleMix[]>("/role-mix/categories"),
   recommendationsForPipelineRow: (
@@ -1621,6 +1674,8 @@ export const api = {
     ),
   predictionForecast: (horizonMonths: number = 24) =>
     getJSON<PredictionForecastResult>(`/forecast/prediction?horizon_months=${horizonMonths}`),
+  headcountPrediction: (horizonMonths: number = 12) =>
+    getJSON<HeadcountPredictionResult>(`/forecast/headcount-prediction?horizon_months=${horizonMonths}`),
 };
 
 // ── Prediction Forecast ────────────────────────────────────────────────────
@@ -1657,6 +1712,43 @@ export interface PredictionForecastResult {
     formula: string;
     training_months: number;
     training_period: string;
+    confidence_interval: string;
+    note: string;
+  };
+}
+
+// ── Headcount Prediction ───────────────────────────────────────────────────
+export interface HeadcountHistoryRow {
+  month: string;
+  total_active_headcount: number;
+}
+
+export interface HeadcountForecastRow {
+  month: string;
+  forecast: number;
+  lower: number;
+  upper: number;
+  is_validated_horizon: boolean;
+}
+
+export interface HeadcountPredictionResult {
+  history: HeadcountHistoryRow[];
+  training_period: string;
+  horizon_months: number;
+  validated_horizon_months: number;
+  forecast: HeadcountForecastRow[];
+  model_info: {
+    type: string;
+    formula: string;
+    trained_on: string;
+    training_rows_used: number;
+    features_used: string[];
+    validated_forecast_horizon_months: number;
+    holdout_mape_pct: number;
+    walk_forward_avg_mape_pct: number;
+    acceptance_threshold_mape_pct: number;
+    other_candidates_evaluated: Record<string, { holdout_mape_pct: number; walk_forward_avg_mape_pct: number }>;
+    recommendation_rationale: string;
     confidence_interval: string;
     note: string;
   };

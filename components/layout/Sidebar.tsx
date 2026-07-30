@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
   LayoutDashboard, Users, Contact, Sparkles, ShieldAlert, TrendingUp, CalendarRange, UserCheck, CalendarOff,
-  ChevronLeft, X, LineChart,
+  ChevronLeft, X, LineChart, Users2,
 } from "lucide-react";
 import Image from "next/image";
 import { cn } from "@/lib/utils";
@@ -39,6 +39,7 @@ const NAV_GROUPS: { label: string; links: NavLinkSpec[] }[] = [
       { label: "Forecast", href: "/forecast/new-project", icon: TrendingUp },
       { label: "Pipeline", href: "/forecast/pipeline", icon: CalendarRange },
       { label: "Prediction", href: "/forecast/prediction", icon: LineChart },
+      { label: "Headcount Prediction", href: "/forecast/headcount-prediction", icon: Users2 },
     ],
   },
 ];

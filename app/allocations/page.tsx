@@ -1,15 +1,17 @@
 "use client";
 
 import { Suspense, useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useIsMutating, useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
-import { ChevronDown, ChevronUp, AlertTriangle, Clock, Users, DollarSign } from "lucide-react";
+import { ChevronDown, ChevronUp, AlertTriangle, Clock, Users, DollarSign, Loader2 } from "lucide-react";
 import { api, type AllocationRow } from "@/lib/api";
 import { Badge } from "@/components/shared/Badge";
 import { LoadingState, ErrorState } from "@/components/shared/EmptyState";
 import { TableSkeleton } from "@/components/shared/Skeleton";
 import { EmployeeProfileModal } from "@/components/shared/EmployeeProfileModal";
 import { ProjectBasicModal } from "@/components/shared/ProjectBasicModal";
+import { ExtendProjectModal } from "@/components/shared/ExtendProjectModal";
+import { ExtendAllocationModal } from "@/components/shared/ExtendAllocationModal";
 import { ProjectHealthDetailModal } from "@/components/health/ProjectHealthDetailModal";
 import { TimesheetProofModal } from "@/components/shared/TimesheetProofModal";
 import { cn, formatUsd } from "@/lib/utils";
@@ -213,6 +215,8 @@ function AllocationsPageInner() {
 
   const [selectedEmployee, setSelectedEmployee] = useState<string | null>(null);
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
+  const [extendingProjectCode, setExtendingProjectCode] = useState<string | null>(null);
+  const [extendingAllocation, setExtendingAllocation] = useState<AllocationRow | null>(null);
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
   const toggleProjectExpanded = (projectId: string) =>
     setExpandedProjects((prev) => {
@@ -269,6 +273,12 @@ function AllocationsPageInner() {
     });
   }, [availability.data, search, availDesignationFilter, availLocationFilter, availStatusFilter, availMinFilter, availProjectSearch, availSort]);
 
+  const avgAvailablePct = useMemo(() => {
+    if (!availability.data || availability.data.length === 0) return 0;
+    const sum = availability.data.reduce((acc, r) => acc + r.available_pct, 0);
+    return Math.round((sum / availability.data.length) * 10) / 10;
+  }, [availability.data]);
+
   const hasActiveFilters =
     tab === "availability"
       ? search !== "" || availDesignationFilter !== "all" || availLocationFilter !== "all" ||
@@ -296,7 +306,7 @@ function AllocationsPageInner() {
 
   if (isLoading) {
     return (
-      <div className="p-4 sm:p-6 max-w-6xl mx-auto space-y-4">
+      <div className="p-4 sm:p-6 w-full space-y-4">
         <TableSkeleton columns={11} rows={10} />
       </div>
     );
@@ -307,15 +317,8 @@ function AllocationsPageInner() {
 
   const openProject = (projectId: string) => setSelectedProject(projectId);
 
-const avgAvailablePct = useMemo(() => {
-  if (!availability.data || availability.data.length === 0) return 0;
-  const sum = availability.data.reduce((acc, r) => acc + r.available_pct, 0);
-  return Math.round((sum / availability.data.length) * 10) / 10;
-}, [availability.data]);
-
-
   return (
-    <div className="p-4 sm:p-6 max-w-6xl mx-auto space-y-4">
+    <div className="p-4 sm:p-6 w-full space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center bg-gray-100 rounded-full p-0.5 text-xs font-medium">
           {(["resource", "project", "availability"] as Tab[]).map((t) => (
@@ -515,7 +518,7 @@ const avgAvailablePct = useMemo(() => {
           <table className="w-full text-xs data-table">
             <thead className="bg-secondary text-secondary-foreground">
               <tr>
-                {["Employee", "Designation", "Location", "Project", "Billing", "Alloc %", "Total %", "Utilization", "Hours Util.", "Ends", "Soon?"].map((h) => (
+                {["Employee", "Designation", "Location", "Project", "Billing", "Alloc %", "Total %", "Utilization", "Hours Util.", "Ends", "Extended End", "Soon?"].map((h) => (
                   <th key={h} className="text-left font-medium px-3 py-2 whitespace-nowrap">{h}</th>
                 ))}
               </tr>
@@ -528,11 +531,12 @@ const avgAvailablePct = useMemo(() => {
                   onOpenEmployee={() => setSelectedEmployee(r.employee_id)}
                   onOpenProject={() => openProject(r.project_id)}
                   onOpenTimesheet={() => setSelectedTimesheet({ employeeId: r.employee_id, projectId: r.project_id })}
+                  onExtendAllocation={() => setExtendingAllocation(r)}
                 />
               ))}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={11} className="text-center text-xs text-gray-400 italic py-6">No allocations match the current filters.</td>
+                  <td colSpan={12} className="text-center text-xs text-gray-400 italic py-6">No allocations match the current filters.</td>
                 </tr>
               )}
             </tbody>
@@ -612,6 +616,28 @@ const avgAvailablePct = useMemo(() => {
 
                 {isOpen && (
                   <div className="border-t border-gray-100">
+                    <div className="px-3.5 py-2 bg-gray-50/60 border-b border-gray-100 flex items-center gap-2 flex-wrap text-[11px] text-gray-500">
+                      <span>Project end: <strong className="text-gray-700">{rows[0]?.project_end_date ?? "?"}</strong></span>
+                      <span className="text-gray-300">·</span>
+                      <span className="flex items-center gap-1">
+                        Extended end:
+                        {rows[0]?.project_extended_end_date ? (
+                          <button onClick={() => setExtendingProjectCode(projectId)} className="text-primary hover:underline">
+                            {rows[0].project_extended_end_date}
+                            {rows[0].project_extended_end_status && (
+                              <span className="ml-1 text-gray-400">({rows[0].project_extended_end_status.toLowerCase()})</span>
+                            )}
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => setExtendingProjectCode(projectId)}
+                            className="text-gray-400 hover:text-primary underline decoration-dotted"
+                          >
+                            + Extend
+                          </button>
+                        )}
+                      </span>
+                    </div>
                     {health && (
                       <div className="px-3.5 py-2 bg-gray-50/60 border-b border-gray-100 flex items-center gap-3 flex-wrap text-[11px] text-gray-500">
                         {health.wsr_latest_signal && (
@@ -640,6 +666,7 @@ const avgAvailablePct = useMemo(() => {
                             onOpenEmployee={() => setSelectedEmployee(r.employee_id)}
                             onOpenProject={() => openProject(r.project_id)}
                             onOpenTimesheet={() => setSelectedTimesheet({ employeeId: r.employee_id, projectId: r.project_id })}
+                            onExtendAllocation={() => setExtendingAllocation(r)}
                           />
                         ))}
                       </tbody>
@@ -739,6 +766,28 @@ const avgAvailablePct = useMemo(() => {
         ) : (
           <ProjectBasicModal projectCode={selectedProject} onClose={() => setSelectedProject(null)} />
         ))}
+      {extendingProjectCode && (
+        <ExtendProjectModal
+          projectCode={extendingProjectCode}
+          originalEndDate={byProject[extendingProjectCode]?.[0]?.project_end_date ?? null}
+          currentExtendedEndDate={byProject[extendingProjectCode]?.[0]?.project_extended_end_date ?? null}
+          currentExtendedEndStatus={byProject[extendingProjectCode]?.[0]?.project_extended_end_status ?? null}
+          onClose={() => setExtendingProjectCode(null)}
+        />
+      )}
+      {extendingAllocation && (
+        <ExtendAllocationModal
+          allocationId={extendingAllocation.allocation_id}
+          employeeId={extendingAllocation.employee_id}
+          projectId={extendingAllocation.project_id}
+          currentEndDate={extendingAllocation.allocated_end_date}
+          currentExtendedEndDate={extendingAllocation.extended_end_date}
+          currentExtendedStatus={extendingAllocation.extended_status}
+          currentResourcingStatus={extendingAllocation.resourcing_status}
+          projectExtendedEndDate={extendingAllocation.project_extended_end_date}
+          onClose={() => setExtendingAllocation(null)}
+        />
+      )}
       {selectedTimesheet && (
         <TimesheetProofModal
           employeeId={selectedTimesheet.employeeId}
@@ -758,18 +807,77 @@ const avgAvailablePct = useMemo(() => {
   );
 }
 
+function ExtendAllocationDateCell({
+  allocationId,
+  value,
+  projectExtendedEndDate,
+  onOpen,
+}: {
+  allocationId: string;
+  value: string | null;
+  // The project must be extended first -- an allocation can't run past a
+  // project that hasn't itself been formally extended (see ExtendProjectModal).
+  projectExtendedEndDate: string | null;
+  onOpen: () => void;
+}) {
+  // Tracks the extend mutation regardless of which component triggered it
+  // (this row's own modal, or the same allocation edited from the project
+  // detail's Allocations tab) -- so the row visibly shows "updating" for the
+  // whole save + refetch lag, instead of just changing on its own moments later.
+  const isPending = useIsMutating({ mutationKey: ["extend-allocation", allocationId] }) > 0;
+
+  if (isPending) {
+    return (
+      <span className="flex items-center gap-1 text-gray-400 whitespace-nowrap">
+        <Loader2 className="w-3 h-3 animate-spin" /> updating…
+      </span>
+    );
+  }
+
+  if (!projectExtendedEndDate) {
+    return (
+      <button
+        onClick={onOpen}
+        className="text-amber-600 hover:text-amber-700 underline decoration-dotted font-medium whitespace-nowrap"
+        title="Extend the project's end date first, then individual allocations can be extended up to it."
+      >
+        extend project first
+      </button>
+    );
+  }
+  return value ? (
+    <button
+      onClick={onOpen}
+      className="text-primary hover:underline whitespace-nowrap"
+      title={`Click to change (up to the project's extended end date, ${projectExtendedEndDate})`}
+    >
+      {value}
+    </button>
+  ) : (
+    <button
+      onClick={onOpen}
+      className="text-gray-400 hover:text-primary underline decoration-dotted whitespace-nowrap"
+      title={`Extend up to the project's extended end date, ${projectExtendedEndDate}`}
+    >
+      + Extend
+    </button>
+  );
+}
+
 function ResourceRow({
   row,
   hideProject,
   onOpenEmployee,
   onOpenProject,
   onOpenTimesheet,
+  onExtendAllocation,
 }: {
   row: AllocationRow;
   hideProject?: boolean;
   onOpenEmployee: () => void;
   onOpenProject: () => void;
   onOpenTimesheet: () => void;
+  onExtendAllocation: () => void;
 }) {
   return (
     <tr className="border-b border-gray-50 last:border-0 hover:bg-gray-50/50">
@@ -816,6 +924,14 @@ function ResourceRow({
         </button>
       </td>
       <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{row.allocated_end_date}</td>
+      <td className="px-3 py-2 whitespace-nowrap">
+        <ExtendAllocationDateCell
+          allocationId={row.allocation_id}
+          value={row.extended_end_date}
+          projectExtendedEndDate={row.project_extended_end_date}
+          onOpen={onExtendAllocation}
+        />
+      </td>
       <td className="px-3 py-2 whitespace-nowrap">{row.ending_soon && <Badge variant="amber">{row.days_to_end}d</Badge>}</td>
     </tr>
   );
