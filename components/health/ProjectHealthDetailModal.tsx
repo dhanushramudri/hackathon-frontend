@@ -6,7 +6,7 @@ import { HeartPulse, ChevronDown, SlidersHorizontal, UserCheck, Loader2, Pencil 
 import {
   api,
   DEFAULT_INCLUDE_PARAMS,
-  type IncludeParams, type ProjectHealthDetail, type ReliefCandidate, type RosterEntry, type WsrReportRow, type SentimentSummary, type DevopsTicketRow,
+  type IncludeParams, type ProjectHealthDetail, type ProjectExtensionRecord, type ReliefCandidate, type RosterEntry, type WsrReportRow, type SentimentSummary, type DevopsTicketRow,
 } from "@/lib/api";
 import { Modal } from "@/components/shared/Modal";
 import { Badge } from "@/components/shared/Badge";
@@ -22,7 +22,7 @@ import { ExtendProjectModal } from "@/components/shared/ExtendProjectModal";
 import { ExtendAllocationModal } from "@/components/shared/ExtendAllocationModal";
 import { cn, formatUsd } from "@/lib/utils";
 
-type DetailTab = "overview" | "allocations" | "staffing" | "overtime" | "relief" | "wsr" | "devops";
+type DetailTab = "overview" | "extensions" | "allocations" | "staffing" | "overtime" | "relief" | "wsr" | "devops";
 
 interface ProjectHealthDetailModalProps {
   projectCode: string;
@@ -32,6 +32,7 @@ interface ProjectHealthDetailModalProps {
 
 const BASE_TABS: { key: DetailTab; label: string }[] = [
   { key: "overview", label: "Overview" },
+  { key: "extensions", label: "Extensions" },
   { key: "allocations", label: "Allocations" },
   { key: "staffing", label: "Staffing & Cost" },
   { key: "overtime", label: "Overtime & Effort" },
@@ -51,7 +52,7 @@ export function ProjectHealthDetailContent({ projectCode, initialTab }: { projec
     queryFn: () => api.healthProjectDetail(projectCode),
   });
 
-  const tabs = [...BASE_TABS.slice(0, 4), { key: "relief" as const, label: "Relief Staffing" }, ...BASE_TABS.slice(4)];
+  const tabs = [...BASE_TABS.slice(0, 5), { key: "relief" as const, label: "Relief Staffing" }, ...BASE_TABS.slice(5)];
 
   return (
     <>
@@ -78,7 +79,8 @@ export function ProjectHealthDetailContent({ projectCode, initialTab }: { projec
           <ErrorState message="Could not load this project's detail." />
         ) : detail.data ? (
           <>
-            {tab === "overview" && <OverviewTab d={detail.data} />}
+            {tab === "overview" && <OverviewTab d={detail.data} onGoToExtensions={() => setTab("extensions")} />}
+            {tab === "extensions" && <ExtensionsTab d={detail.data} />}
             {tab === "allocations" && <AllocationsTab d={detail.data} />}
             {tab === "staffing" && <StaffingTab d={detail.data} />}
             {tab === "overtime" && <OvertimeTab d={detail.data} />}
@@ -128,10 +130,31 @@ function ragSequence(reports: WsrReportRow[]): string {
   return reports.length ? reports.map((r) => r.worst_signal).join(", ") : "no reports";
 }
 
-function OverviewTab({ d }: { d: ProjectHealthDetail }) {
+function OverviewTab({ d, onGoToExtensions }: { d: ProjectHealthDetail; onGoToExtensions: () => void }) {
   const recentReports = d.wsr.reports.slice(-d.wsr.recent_n);
   const priorReports = d.wsr.reports.slice(-d.wsr.min_reports_required, -d.wsr.recent_n);
   const baselineReports = d.wsr.reports.slice(0, d.wsr.recent_n);
+
+  // The 3 underlying WSR signals (getting worse / stuck at red-amber / fell
+  // and hasn't recovered) all read the exact same severity series -- one bad
+  // recent stretch can fire all 3 at once. Shown as ONE row, listing
+  // whichever sub-signal(s) actually fired instead of 3 near-duplicate rows.
+  const wsrFiredParts: string[] = [];
+  if (d.wsr.fired_critical) {
+    wsrFiredParts.push(`stuck at red/amber -- last ${d.wsr.critical_min_reports_required} reports: ${ragSequence(recentReports)}, none green`);
+  }
+  if (d.wsr.fired_deteriorating) {
+    wsrFiredParts.push(`getting worse -- last ${d.wsr.recent_n}: ${ragSequence(recentReports)} vs. the ${d.wsr.recent_n} before that: ${ragSequence(priorReports)}`);
+  }
+  if (d.wsr.fired_long_term_decline) {
+    wsrFiredParts.push(`hasn't recovered -- now ${ragSequence(recentReports)} vs. when reporting started ${ragSequence(baselineReports)}`);
+  }
+  const wsrDetail =
+    wsrFiredParts.length > 0
+      ? wsrFiredParts.join("; ")
+      : d.wsr.recent_avg_severity != null
+      ? `last ${d.wsr.critical_min_reports_required} reports: ${ragSequence(recentReports)} -- no risk signal`
+      : `not enough real WSR history (need ${d.wsr.critical_min_reports_required}+ reports)`;
 
   const rows: { key: string; label: string; fired: boolean; detail: string }[] = [
     {
@@ -183,30 +206,10 @@ function OverviewTab({ d }: { d: ProjectHealthDetail }) {
           : "no timesheet history for this project",
     },
     {
-      key: "wsr_deteriorating",
-      label: "WSR getting worse",
-      fired: d.wsr.fired_deteriorating,
-      detail: d.wsr.trend
-        ? `Last ${d.wsr.recent_n} reports: ${ragSequence(recentReports)} — vs. the ${d.wsr.recent_n} before that: ${ragSequence(priorReports)}`
-        : `not enough real WSR history (need ${d.wsr.min_reports_required}+ reports)`,
-    },
-    {
-      key: "wsr_critical",
-      label: "WSR stuck at red/amber",
-      fired: d.wsr.fired_critical,
-      detail:
-        d.wsr.recent_avg_severity != null
-          ? `Last ${d.wsr.critical_min_reports_required} reports: ${ragSequence(recentReports)} — none green`
-          : `not enough real WSR history (need ${d.wsr.critical_min_reports_required}+ reports)`,
-    },
-    {
-      key: "wsr_long_term_decline",
-      label: "WSR fell and hasn't recovered",
-      fired: d.wsr.fired_long_term_decline,
-      detail:
-        d.wsr.baseline_avg_severity != null
-          ? `Now: ${ragSequence(recentReports)} — when reporting started: ${ragSequence(baselineReports)}. Still worse than where it began, even if that fall happened before the recent-trend window above.`
-          : `not enough real WSR history (need ${d.wsr.long_term_min_reports_required}+ reports)`,
+      key: "wsr_risk",
+      label: "WSR risk",
+      fired: d.wsr.fired,
+      detail: wsrDetail,
     },
    {
   key: "devops_extension_risk",
@@ -262,7 +265,6 @@ function OverviewTab({ d }: { d: ProjectHealthDetail }) {
   const isExplicitlyExtended = d.project_extended_end_date != null;
   const hasUnapprovedInferredExtension =
     !isExplicitlyExtended && d.effective_end_date != null && displayEndDate != null && d.effective_end_date > displayEndDate;
-  const [extending, setExtending] = useState(false);
 
   return (
     <div className="space-y-4">
@@ -277,11 +279,11 @@ function OverviewTab({ d }: { d: ProjectHealthDetail }) {
               {d.project_start_date ?? "?"} → {displayEndDate ?? "?"}
             </p>
             <button
-              onClick={() => setExtending(true)}
+              onClick={onGoToExtensions}
               className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full border border-gray-200 text-gray-500 hover:border-primary hover:text-primary transition whitespace-nowrap"
-              title="Extend this project's end date"
+              title="View extension history and change this project's end date"
             >
-              <Pencil className="w-2.5 h-2.5" /> Extend
+              <Pencil className="w-2.5 h-2.5" /> Extensions
             </button>
           </div>
           {isExplicitlyExtended && (
@@ -302,15 +304,6 @@ function OverviewTab({ d }: { d: ProjectHealthDetail }) {
           )}
         </div>
       </div>
-      {extending && (
-        <ExtendProjectModal
-          projectCode={d.project_code}
-          originalEndDate={d.project_end_date}
-          currentExtendedEndDate={d.project_extended_end_date}
-          currentExtendedEndStatus={d.project_extended_end_status}
-          onClose={() => setExtending(false)}
-        />
-      )}
       <div className="flex items-center gap-3 flex-wrap">
         <Badge variant={d.risk_band}>{d.risk_band} risk</Badge>
         <span className="text-xs text-gray-400">{d.risk_score} of {rows.length} tracked root causes are flagged</span>
@@ -320,30 +313,33 @@ function OverviewTab({ d }: { d: ProjectHealthDetail }) {
       </div>
 
       {d.is_extension_risk && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
-          <p className="text-xs font-semibold text-amber-800 mb-1.5">Extension outlook</p>
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-700">
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-1">
+          <p className="text-xs font-semibold text-amber-800">Extension outlook</p>
+          <p className="text-xs text-gray-700">
+            Resourced through <strong>{d.extension_estimate.currently_resourced_through_date ?? "?"}</strong>
             {d.extension_estimate.committed_overrun_days > 0 && (
-              <span>
-                <strong>{d.extension_estimate.committed_overrun_days}d</strong> overrun (past{" "}
-                {d.extension_estimate.currently_resourced_through_date ?? "?"})
+              <> — already <strong>{d.extension_estimate.committed_overrun_days}d</strong> past that, with nothing further booked.</>
+            )}
+          </p>
+          {d.extension_estimate.projected_additional_days != null && (
+            <p className="text-xs text-gray-700">
+              DevOps estimate adds <strong>+{d.extension_estimate.projected_additional_days}d</strong> of remaining ticket work
+              (
+              <span className={cn("font-medium", d.extension_estimate.projected_additional_days_confidence === "low" ? "text-amber-700" : "text-gray-500")}>
+                {d.extension_estimate.projected_additional_days_confidence} confidence
               </span>
-            )}
-            {d.extension_estimate.projected_additional_days != null && (
-              <span>
-                +<strong>{d.extension_estimate.projected_additional_days}d</strong> more est.{" "}
-                <span className={cn("font-medium", d.extension_estimate.projected_additional_days_confidence === "low" ? "text-amber-700" : "text-gray-500")}>
-                  ({d.extension_estimate.projected_additional_days_confidence} confidence)
-                </span>
-              </span>
-            )}
-            {d.extension_estimate.predicted_extension_end_date && (
-              <span>predicted through <strong>{d.extension_estimate.predicted_extension_end_date}</strong></span>
-            )}
-            {d.extension_estimate.projected_additional_days == null && d.extension_estimate.committed_overrun_days === 0 && (
-              <span className="text-gray-500">No additional delay projected — see DevOps tab.</span>
-            )}
-          </div>
+              ), counted from <strong>{d.extension_estimate.predicted_extension_start_date ?? "today"}</strong>
+              {d.extension_estimate.predicted_extension_end_date && (
+                <> → new projected end <strong>{d.extension_estimate.predicted_extension_end_date}</strong>.</>
+              )}
+            </p>
+          )}
+          {d.extension_estimate.projected_basis && (
+            <p className="text-[10px] text-gray-500">{d.extension_estimate.projected_basis}</p>
+          )}
+          {d.extension_estimate.projected_additional_days == null && d.extension_estimate.committed_overrun_days === 0 && (
+            <p className="text-xs text-gray-500">No additional delay projected — see DevOps tab.</p>
+          )}
         </div>
       )}
       <div className="rounded-xl border border-[hsl(var(--primary)/0.3)] overflow-hidden">
@@ -369,6 +365,83 @@ function OverviewTab({ d }: { d: ProjectHealthDetail }) {
           </tbody>
         </table>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// The sole place an RM changes a project's end date -- the Overview tab only
+// links here now, it no longer opens the Extend modal inline. Keeping the
+// edit affordance in one place (next to the real history of past changes)
+// is what actually resolves the confusion of 3 different dates showing up
+// on the Overview tab with no record of how they got there.
+function ExtensionsTab({ d }: { d: ProjectHealthDetail }) {
+  const history = useQuery({
+    queryKey: ["project-extensions", d.project_code],
+    queryFn: () => api.projectExtensionHistory(d.project_code),
+  });
+  const [extending, setExtending] = useState(false);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <p className="text-xs text-gray-500">
+          Originally planned to end <strong className="text-gray-700">{d.project_end_date ?? "?"}</strong>.
+          {d.project_extended_end_date && (
+            <>
+              {" "}Currently extended to <strong className="text-gray-700">{d.project_extended_end_date}</strong>
+              {d.project_extended_end_status && ` (${d.project_extended_end_status.toLowerCase()})`}.
+            </>
+          )}
+        </p>
+        <button
+          onClick={() => setExtending(true)}
+          className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg text-white font-medium"
+          style={{ backgroundColor: "hsl(var(--primary))" }}
+        >
+          <Pencil className="w-3 h-3" /> Extend end date
+        </button>
+      </div>
+
+      {extending && (
+        <ExtendProjectModal
+          projectCode={d.project_code}
+          originalEndDate={d.project_end_date}
+          currentExtendedEndDate={d.project_extended_end_date}
+          currentExtendedEndStatus={d.project_extended_end_status}
+          onClose={() => setExtending(false)}
+        />
+      )}
+
+      <div className="rounded-xl border border-gray-200 overflow-hidden">
+        <table className="w-full text-[11px]">
+          <thead>
+            <tr className="bg-gray-50 border-b border-gray-200">
+              <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5 whitespace-nowrap">From end date</th>
+              <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5 whitespace-nowrap">To end date</th>
+              <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5 whitespace-nowrap">Status</th>
+              <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5 whitespace-nowrap">Recorded</th>
+            </tr>
+          </thead>
+          <tbody>
+            {history.isLoading ? (
+              <tr><td colSpan={4} className="px-2.5 py-3 text-gray-400 italic">Loading…</td></tr>
+            ) : !history.data || history.data.length === 0 ? (
+              <tr><td colSpan={4} className="px-2.5 py-3 text-gray-400 italic">No extensions recorded yet -- still on the original plan.</td></tr>
+            ) : (
+              history.data.map((h, i) => (
+                <tr key={i} className="border-b border-gray-50 last:border-0">
+                  <td className="px-2.5 py-2 text-gray-700 whitespace-nowrap">{h.from_end_date ?? "-"}</td>
+                  <td className="px-2.5 py-2 text-gray-700 font-medium whitespace-nowrap">
+                    {h.to_end_date ?? "reverted to original plan"}
+                  </td>
+                  <td className="px-2.5 py-2 text-gray-500 whitespace-nowrap">{h.status ?? "-"}</td>
+                  <td className="px-2.5 py-2 text-gray-400 whitespace-nowrap">{h.recorded_at}</td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
       </div>
     </div>
   );

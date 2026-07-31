@@ -19,9 +19,7 @@ export const ROOT_CAUSE_LABEL: Record<string, string> = {
   understaffed: "Understaffed",
   overtime_risk: "Overtime risk",
   effort_spike: "Effort spike",
-  wsr_deteriorating: "WSR getting worse",
-  wsr_critical: "WSR stuck at red/amber",
-  wsr_long_term_decline: "WSR fell and hasn't recovered",
+  wsr_risk: "WSR risk",
   devops_extension_risk: "DevOps extension risk",
   pulse_risk: "Pulse risk",
 };

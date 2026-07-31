@@ -35,6 +35,7 @@ export function ExtendProjectModal({
       queryClient.invalidateQueries({ queryKey: ["allocations"] }),
       queryClient.invalidateQueries({ queryKey: ["health-projects"] }),
       queryClient.invalidateQueries({ queryKey: ["health-detail", projectCode] }),
+      queryClient.invalidateQueries({ queryKey: ["project-extensions", projectCode] }),
     ]);
 
   const mutation = useMutation({

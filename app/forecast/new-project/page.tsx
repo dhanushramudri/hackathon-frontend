@@ -1,19 +1,40 @@
 "use client";
 
-import { Fragment, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Plus, Trash2, AlertTriangle, ChevronDown, ChevronUp, X, Search } from "lucide-react";
-import { api, DEFAULT_INCLUDE_PARAMS, type ForecastSpec, type RedeployCandidate } from "@/lib/api";
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, ResponsiveContainer, Legend,
+} from "recharts";
+import {
+  api, DEFAULT_INCLUDE_PARAMS,
+  type ForecastBreakdownRow, type ForecastSpec, type RecommendationCandidate, type RedeployCandidate,
+} from "@/lib/api";
 import { ErrorState } from "@/components/shared/EmptyState";
 import { Skeleton, TableSkeleton } from "@/components/shared/Skeleton";
 import { Badge } from "@/components/shared/Badge";
 import { HoldDot } from "@/components/shared/HoldFlag";
 import { EmployeeProfileModal, type SkillMatchContext } from "@/components/shared/EmployeeProfileModal";
-import { Modal } from "@/components/shared/Modal";
 import { cn, formatUsd } from "@/lib/utils";
-import { JMAN, JMAN_HEADER_GRADIENT } from "@/lib/brandColors";
+import { JMAN, JMAN_HEADER_GRADIENT, CHART_CHROME } from "@/lib/brandColors";
 
-const INLINE_CANDIDATE_LIMIT = 5;
+type DurationMixPct = { short: number; mid: number; long: number };
+
+function adjustDurationMix(current: DurationMixPct, changed: keyof DurationMixPct, rawValue: number): DurationMixPct {
+  const value = Math.max(0, Math.min(100, Math.round(rawValue)));
+  const others = (["short", "mid", "long"] as const).filter((k) => k !== changed);
+  const remaining = 100 - value;
+  const othersSum = current[others[0]] + current[others[1]];
+  const next: DurationMixPct = { ...current, [changed]: value };
+  if (othersSum <= 0) {
+    next[others[0]] = remaining;
+    next[others[1]] = 0;
+  } else {
+    next[others[0]] = Math.round((current[others[0]] / othersSum) * remaining);
+    next[others[1]] = remaining - next[others[0]];
+  }
+  return next;
+}
 
 function levelNoteFor(c: RedeployCandidate): string | undefined {
   if (c.level_offset == null || c.level_offset === 0) return undefined;
@@ -89,43 +110,417 @@ function CandidateRow({
   );
 }
 
-function CandidateListSection({
-  title,
+// Checkbox-based multi-select filter -- any combination of options can be
+// selected at once (empty selection = no filter applied, i.e. "all").
+function MultiSelectFilter({
+  label,
+  options,
+  selected,
+  onChange,
+}: {
+  label: string;
+  options: [string, string][]; // [value, display label][]
+  selected: Set<string>;
+  onChange: (next: Set<string>) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const toggle = (value: string) => {
+    const next = new Set(selected);
+    if (next.has(value)) next.delete(value);
+    else next.add(value);
+    onChange(next);
+  };
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className={cn(
+          "flex items-center gap-1 text-[11px] px-2.5 py-1.5 rounded-lg border whitespace-nowrap transition",
+          selected.size > 0 ? "border-primary/40 text-primary bg-primary/5" : "border-gray-200 text-gray-500 bg-white hover:border-gray-300"
+        )}
+      >
+        {label}
+        {selected.size > 0 && ` (${selected.size})`}
+        <ChevronDown className={cn("w-3 h-3 transition-transform", open && "rotate-180")} />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute z-20 mt-1 min-w-[200px] max-h-64 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg p-2 space-y-0.5">
+            {options.length === 0 && <p className="text-[11px] text-gray-400 px-1.5 py-1">No options available.</p>}
+            {options.map(([value, optLabel]) => (
+              <label key={value} className="flex items-center gap-2 text-[11px] px-1.5 py-1 rounded hover:bg-gray-50 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={selected.has(value)}
+                  onChange={() => toggle(value)}
+                  className="rounded border-gray-300 accent-primary"
+                />
+                <span className="text-gray-700">{optLabel}</span>
+              </label>
+            ))}
+            {selected.size > 0 && (
+              <button
+                onClick={() => onChange(new Set())}
+                className="w-full text-left text-[10px] text-primary hover:underline pt-1 mt-1 border-t border-gray-100 px-1.5"
+              >
+                Clear ({selected.size})
+              </button>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+type RedeploySort = "composite_desc" | "skill_desc" | "competency_desc" | "available_desc";
+
+const REDEPLOY_SORTS: [RedeploySort, string][] = [
+  ["composite_desc", "Best overall fit ↓"],
+  ["skill_desc", "Skill match ↓"],
+  ["competency_desc", "Competency ↓"],
+  ["available_desc", "Availability ↓"],
+];
+
+function sortRedeployCandidates(candidates: RedeployCandidate[], sort: RedeploySort): RedeployCandidate[] {
+  const sorted = [...candidates];
+  switch (sort) {
+    case "composite_desc": sorted.sort((a, b) => (b.composite_score ?? 0) - (a.composite_score ?? 0)); break;
+    case "skill_desc": sorted.sort((a, b) => (b.skill_score ?? 0) - (a.skill_score ?? 0)); break;
+    case "competency_desc": sorted.sort((a, b) => (b.competency_score ?? 0) - (a.competency_score ?? 0)); break;
+    case "available_desc": sorted.sort((a, b) => (b.available_pct_as_of ?? 0) - (a.available_pct_as_of ?? 0)); break;
+  }
+  return sorted;
+}
+
+// Full, non-truncated, searchable/filterable candidate list -- used inside
+// RoleDetailPage's tabs, which each have their own dedicated scroll space
+// (and now, room for real search/filter controls), unlike the old cramped
+// inline table-row expansion this replaced.
+function RoleCandidateList({
   candidates,
   onOpen,
-  onShowAll,
   showQualifies,
   emptyText,
+  note,
 }: {
-  title: string;
   candidates: RedeployCandidate[];
   onOpen: (sel: { employeeId: string; skillMatchContext?: SkillMatchContext }) => void;
-  onShowAll: () => void;
   showQualifies?: boolean;
   emptyText?: string;
+  note?: string;
 }) {
+  const [search, setSearch] = useState("");
+  const [coeFilter, setCoeFilter] = useState<Set<string>>(new Set());
+  const [reasonFilter, setReasonFilter] = useState<Set<string>>(new Set());
+  const [sort, setSort] = useState<RedeploySort>("composite_desc");
+
   if (candidates.length === 0) {
-    return emptyText ? <p className="text-[11px] text-gray-400">{emptyText}</p> : null;
+    return <p className="text-xs text-gray-400 italic">{emptyText ?? "No candidates in this category."}</p>;
   }
+
+  const coeOptions = Array.from(new Set(candidates.map((c) => c.coe).filter((v): v is string => Boolean(v)))).sort();
+  const reasonOptions = Array.from(new Set(candidates.map((c) => c.reason)));
+
+  let filtered = candidates;
+  const q = search.trim().toLowerCase();
+  if (q) filtered = filtered.filter((c) => c.employee_id.toLowerCase().includes(q) || c.job_name.toLowerCase().includes(q) || (c.coe ?? "").toLowerCase().includes(q));
+  if (coeFilter.size > 0) filtered = filtered.filter((c) => c.coe != null && coeFilter.has(c.coe));
+  if (reasonFilter.size > 0) filtered = filtered.filter((c) => reasonFilter.has(c.reason));
+  filtered = sortRedeployCandidates(filtered, sort);
+
   return (
     <div>
-      {title && <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 mb-1.5">{title}</p>}
-      <div className="flex flex-col gap-1">
-        {candidates.slice(0, INLINE_CANDIDATE_LIMIT).map((c) => (
-          <CandidateRow
-            key={c.employee_id}
-            c={c}
-            onOpen={onOpen}
-            levelNote={levelNoteFor(c)}
-            qualifies={showQualifies && c.skill_score != null ? c.skill_score >= 0.6 : undefined}
-          />
-        ))}
+      {note && <p className="text-[11px] text-gray-500 mb-2.5">{note}</p>}
+      <div className="flex items-center gap-1.5 flex-wrap mb-2">
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search employee ID, role, or CoE…"
+          className="flex-1 min-w-[180px] text-[11px] px-2.5 py-1.5 rounded-lg border border-gray-200 outline-none focus:border-primary/40 bg-white"
+        />
+        <MultiSelectFilter label="CoE" options={coeOptions.map((c) => [c, c])} selected={coeFilter} onChange={setCoeFilter} />
+        <MultiSelectFilter label="Reason" options={reasonOptions.map((r) => [r, REASON_LABEL[r]])} selected={reasonFilter} onChange={setReasonFilter} />
+        <select
+          value={sort}
+          onChange={(e) => setSort(e.target.value as RedeploySort)}
+          className="text-[11px] px-2.5 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-600 outline-none"
+        >
+          {REDEPLOY_SORTS.map(([value, label]) => (
+            <option key={value} value={value}>{label}</option>
+          ))}
+        </select>
       </div>
-      {candidates.length > INLINE_CANDIDATE_LIMIT && (
-        <button onClick={onShowAll} className="mt-1 text-[11px] text-primary hover:underline">
-          + Show all {candidates.length}
-        </button>
+      {filtered.length === 0 ? (
+        <p className="text-xs text-gray-400 italic py-4 text-center">No candidates match the current filters.</p>
+      ) : (
+        <div className="flex flex-col gap-1.5">
+          {filtered.map((c) => (
+            <CandidateRow
+              key={c.employee_id}
+              c={c}
+              onOpen={onOpen}
+              levelNote={levelNoteFor(c)}
+              qualifies={showQualifies ? isQualifying(c) : undefined}
+            />
+          ))}
+        </div>
       )}
+    </div>
+  );
+}
+
+// Cross-role match / trainable tabs use RecommendationCandidate (org-wide
+// search results), a different shape from RedeployCandidate -- separate row
+// renderer rather than overloading CandidateRow with optional fields for
+// both shapes.
+function SkillMatchCandidateRow({
+  c,
+  onOpen,
+  showMissingSkills,
+}: {
+  c: RecommendationCandidate;
+  onOpen: (sel: { employeeId: string; skillMatchContext?: SkillMatchContext }) => void;
+  showMissingSkills?: boolean;
+}) {
+  return (
+    <div className="flex items-center gap-2 text-[11px] flex-wrap">
+      <button
+        onClick={() =>
+          onOpen({
+            employeeId: c.employee_id,
+            skillMatchContext: { matchedSkills: c.matched_skills ?? [], missingSkills: c.missing_skills ?? [] },
+          })
+        }
+        className="font-medium text-primary hover:underline"
+      >
+        {c.employee_id}
+      </button>
+      <HoldDot onHold={c.on_hold} holdProjects={c.hold_projects} />
+      <span className="text-gray-500">{c.job_name}</span>
+      {showMissingSkills && c.missing_skills.length > 0 && (
+        <span className="text-purple-600">needs: {c.missing_skills.slice(0, 4).join(", ")}</span>
+      )}
+      <span className="ml-auto font-semibold text-gray-500">skill match {Math.round(c.skill_score * 100)}%</span>
+    </div>
+  );
+}
+
+type SkillMatchSort = "composite_desc" | "skill_desc" | "competency_desc" | "available_desc";
+
+const SKILL_MATCH_SORTS: [SkillMatchSort, string][] = [
+  ["composite_desc", "Best overall fit ↓"],
+  ["skill_desc", "Skill match ↓"],
+  ["competency_desc", "Competency ↓"],
+  ["available_desc", "Availability ↓"],
+];
+
+function sortSkillMatchCandidates(candidates: RecommendationCandidate[], sort: SkillMatchSort): RecommendationCandidate[] {
+  const sorted = [...candidates];
+  switch (sort) {
+    case "composite_desc": sorted.sort((a, b) => b.composite_score - a.composite_score); break;
+    case "skill_desc": sorted.sort((a, b) => b.skill_score - a.skill_score); break;
+    case "competency_desc": sorted.sort((a, b) => b.competency_score - a.competency_score); break;
+    case "available_desc": sorted.sort((a, b) => b.available_pct - a.available_pct); break;
+  }
+  return sorted;
+}
+
+function SkillMatchCandidateList({
+  candidates,
+  onOpen,
+  emptyText,
+  note,
+  showMissingSkills,
+}: {
+  candidates: RecommendationCandidate[];
+  onOpen: (sel: { employeeId: string; skillMatchContext?: SkillMatchContext }) => void;
+  emptyText?: string;
+  note?: string;
+  showMissingSkills?: boolean;
+}) {
+  const [search, setSearch] = useState("");
+  const [coeFilter, setCoeFilter] = useState<Set<string>>(new Set());
+  const [roleFilter, setRoleFilter] = useState<Set<string>>(new Set());
+  const [sort, setSort] = useState<SkillMatchSort>("composite_desc");
+
+  if (candidates.length === 0) {
+    return <p className="text-xs text-gray-400 italic">{emptyText ?? "No candidates in this category."}</p>;
+  }
+
+  const coeOptions = Array.from(new Set(candidates.map((c) => c.coe).filter((v): v is string => Boolean(v)))).sort();
+  const roleOptions = Array.from(new Set(candidates.map((c) => c.job_name).filter(Boolean))).sort();
+
+  let filtered = candidates;
+  const q = search.trim().toLowerCase();
+  if (q) filtered = filtered.filter((c) => c.employee_id.toLowerCase().includes(q) || c.job_name.toLowerCase().includes(q) || (c.coe ?? "").toLowerCase().includes(q));
+  if (coeFilter.size > 0) filtered = filtered.filter((c) => c.coe != null && coeFilter.has(c.coe));
+  if (roleFilter.size > 0) filtered = filtered.filter((c) => roleFilter.has(c.job_name));
+  filtered = sortSkillMatchCandidates(filtered, sort);
+
+  return (
+    <div>
+      {note && <p className="text-[11px] text-gray-500 mb-2.5">{note}</p>}
+      <div className="flex items-center gap-1.5 flex-wrap mb-2">
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search employee ID, role, or CoE…"
+          className="flex-1 min-w-[180px] text-[11px] px-2.5 py-1.5 rounded-lg border border-gray-200 outline-none focus:border-primary/40 bg-white"
+        />
+        <MultiSelectFilter label="CoE" options={coeOptions.map((c) => [c, c])} selected={coeFilter} onChange={setCoeFilter} />
+        <MultiSelectFilter label="Role" options={roleOptions.map((r) => [r, r])} selected={roleFilter} onChange={setRoleFilter} />
+        <select
+          value={sort}
+          onChange={(e) => setSort(e.target.value as SkillMatchSort)}
+          className="text-[11px] px-2.5 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-600 outline-none"
+        >
+          {SKILL_MATCH_SORTS.map(([value, label]) => (
+            <option key={value} value={value}>{label}</option>
+          ))}
+        </select>
+      </div>
+      {filtered.length === 0 ? (
+        <p className="text-xs text-gray-400 italic py-4 text-center">No candidates match the current filters.</p>
+      ) : (
+        <div className="flex flex-col gap-1.5">
+          {filtered.map((c) => (
+            <SkillMatchCandidateRow key={c.employee_id} c={c} onOpen={onOpen} showMissingSkills={showMissingSkills} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+type RoleDetailTabKey = "on_skill" | "adjacent" | "cross_role" | "trainable" | "recommended_date";
+
+// Trust the backend's own gating decision (meets_requested_skillset) rather
+// than reimplementing "skill_score >= threshold" here -- leadership
+// designations are exempt from that threshold on the backend, so guessing
+// client-side would wrongly split a Manager with a low skill_score into
+// "doesn't qualify" even though the backend counts them as qualifying.
+function isQualifying(c: RedeployCandidate): boolean {
+  return c.meets_requested_skillset ?? true;
+}
+
+// Per-role detail: instead of dumping every category into one long inline
+// block on row-expand, a full breadcrumb-navigated page (same pattern as
+// Health's project drill-down) -- one category at a time via tabs, full
+// list, no truncation, and real room to breathe instead of a cramped modal.
+function RoleDetailPage({
+  breakdown: b,
+  onOpenProfile,
+}: {
+  breakdown: ForecastBreakdownRow;
+  onOpenProfile: (sel: { employeeId: string; skillMatchContext?: SkillMatchContext }) => void;
+}) {
+  const tabs: { key: RoleDetailTabKey; label: string; count: number }[] = [
+    { key: "on_skill", label: "On-Skill", count: b.qualifying_for_redeploy },
+    { key: "adjacent", label: "Adjacent Title", count: b.adjacent_level_candidates.length },
+    { key: "cross_role", label: "Cross-Role Match", count: b.cross_role_candidates.length },
+    { key: "trainable", label: "Trainable", count: b.training_candidates.length },
+    { key: "recommended_date", label: "Recommended Date", count: b.recommended_start_date ? 1 : 0 },
+  ];
+  const [tab, setTab] = useState<RoleDetailTabKey>(tabs.find((t) => t.count > 0)?.key ?? "on_skill");
+
+  const qualifyingOnSkill = b.redeploy_candidates.filter(isQualifying);
+  const nonQualifyingOnSkill = b.redeploy_candidates.filter((c) => !isQualifying(c));
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl border border-gray-200 bg-white p-4">
+        <p className="text-sm font-semibold text-gray-800">{b.designation}</p>
+        <p className="text-xs text-gray-500 mt-0.5">
+          Needed by {b.start_date}{b.duration_weeks != null && ` (+${b.duration_weeks}w)`} ·{" "}
+          <strong className="text-gray-700">{b.needed_headcount}</strong> needed ·{" "}
+          <strong className="text-gray-700">{b.qualifying_for_redeploy + b.adjacent_fill_count}</strong> covers ·{" "}
+          <strong className={b.shortfall > 0 ? "text-red-600" : "text-emerald-600"}>{b.shortfall}</strong> shortfall
+          {b.shortfall > 0 ? <Badge variant="red">hire signal</Badge> : <Badge variant="green">covered</Badge>}
+        </p>
+      </div>
+
+      <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+        <div className="flex border-b border-gray-100 px-5 overflow-x-auto">
+          {tabs.map((t) => (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={cn(
+                "px-4 py-3 text-xs font-medium border-b-2 -mb-px transition whitespace-nowrap",
+                tab === t.key ? "border-primary text-primary" : "border-transparent text-gray-400 hover:text-gray-600",
+                t.count === 0 && "opacity-40"
+              )}
+            >
+              {t.label} ({t.count})
+            </button>
+          ))}
+        </div>
+        <div className="p-6">
+          {tab === "on_skill" && (
+            <div className="space-y-5">
+              <RoleCandidateList
+                candidates={qualifyingOnSkill}
+                onOpen={onOpenProfile}
+                emptyText="No one holding this title meets the requested skillset."
+              />
+              {nonQualifyingOnSkill.length > 0 && (
+                <div className="pt-4 border-t border-gray-100">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-600 mb-2">
+                    Holds this title, doesn&apos;t meet the requested skillset ({nonQualifyingOnSkill.length})
+                  </p>
+                  <RoleCandidateList candidates={nonQualifyingOnSkill} onOpen={onOpenProfile} />
+                </div>
+              )}
+            </div>
+          )}
+          {tab === "adjacent" && (
+            <RoleCandidateList
+              candidates={b.adjacent_level_candidates}
+              onOpen={onOpenProfile}
+              showQualifies
+              emptyText="No one one level away qualifies either."
+              note={b.adjacent_fill_count > 0 ? `${b.adjacent_fill_count} of these are counted toward the need above (verified skill match).` : undefined}
+            />
+          )}
+          {tab === "cross_role" && (
+            <SkillMatchCandidateList
+              candidates={b.cross_role_candidates}
+              onOpen={onOpenProfile}
+              emptyText="No cross-role skill matches found."
+              note="Real skill-record overlap from a different job title -- NOT counted toward the shortfall above. Judge case-by-case whether pulling someone off their current role is realistic."
+            />
+          )}
+          {tab === "trainable" && (
+            <SkillMatchCandidateList
+              candidates={b.training_candidates}
+              onOpen={onOpenProfile}
+              emptyText="No training candidates found."
+              note="Real skill gap -- could fill this role with training instead of hiring, not counted toward the shortfall above."
+              showMissingSkills
+            />
+          )}
+          {tab === "recommended_date" && (
+            <div>
+              {b.recommended_start_date ? (
+                <>
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 mb-3">
+                    <p className="text-xs text-amber-800">
+                      <strong>Recommended start date: {b.recommended_start_date}</strong> -- {b.recommended_start_date_proof}
+                    </p>
+                  </div>
+                  <RoleCandidateList candidates={b.recommended_available_then} onOpen={onOpenProfile} />
+                </>
+              ) : (
+                <p className="text-xs text-gray-400">
+                  No real date within 180 days resolves this with same-or-adjacent-level capacity -- hire signal stands.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -264,29 +659,37 @@ type ForecastMode = "spec" | "revenue";
 // Enabler + 1 Consultant per project.
 function RevenueTargetSection({
   onOpenProfile,
+  onSelectRole,
 }: {
   onOpenProfile: (sel: { employeeId: string; skillMatchContext?: SkillMatchContext }) => void;
+  onSelectRole: (b: ForecastBreakdownRow) => void;
 }) {
   const coeOptions = useQuery({ queryKey: ["role-mix-coes"], queryFn: api.roleMixCoes });
   const benchmarks = useQuery({ queryKey: ["revenue-benchmarks"], queryFn: api.revenueBenchmarks });
+  const durationBenchmarks = useQuery({ queryKey: ["duration-mix-benchmarks"], queryFn: api.durationMixBenchmarks });
 
   const [targetRevenue, setTargetRevenue] = useState("1000000");
   const [priorityCoes, setPriorityCoes] = useState<string[]>([]);
   const [startDate, setStartDate] = useState("");
   const [durationWeeks, setDurationWeeks] = useState("");
   const [typeOfProject, setTypeOfProject] = useState("");
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
-
-  const toggleExpanded = (rowKey: string) =>
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(rowKey)) next.delete(rowKey);
-      else next.add(rowKey);
-      return next;
-    });
+  const [mixOverride, setMixOverride] = useState<DurationMixPct | null>(null);
+  const [viewTab, setViewTab] = useState<"mix" | "financial">("mix");
+  const [targetDate, setTargetDate] = useState("");
 
   const togglePriorityCoe = (coe: string) =>
     setPriorityCoes((prev) => (prev.includes(coe) ? prev.filter((c) => c !== coe) : [...prev, coe]));
+
+  const durationBuckets = durationBenchmarks.data?.buckets;
+  const defaultDurationMix: DurationMixPct | null = durationBuckets
+    ? {
+        short: Math.round(durationBuckets.short?.historical_mix_pct ?? 0),
+        mid: Math.round(durationBuckets.mid?.historical_mix_pct ?? 0),
+        long: Math.round(durationBuckets.long?.historical_mix_pct ?? 0),
+      }
+    : null;
+  const durationMix = mixOverride ?? defaultDurationMix;
+  const isTypicalMix = mixOverride == null;
 
   const revenue = useMutation({
     mutationFn: () =>
@@ -296,7 +699,20 @@ function RevenueTargetSection({
         startDate: startDate || null,
         durationWeeks: durationWeeks ? Number(durationWeeks) : null,
         typeOfProject: typeOfProject || null,
+        durationMix: !durationWeeks && durationMix
+          ? { short: durationMix.short / 100, mid: durationMix.mid / 100, long: durationMix.long / 100 }
+          : null,
         include: DEFAULT_INCLUDE_PARAMS,
+      }),
+  });
+
+  const financialSummary = useMutation({
+    mutationFn: () =>
+      api.financialSummary({
+        targetRevenueUsd: Number(targetRevenue) || 0,
+        targetDate,
+        priorityCoes: priorityCoes.length > 0 ? priorityCoes : null,
+        durationWeeks: durationWeeks ? Number(durationWeeks) : null,
       }),
   });
 
@@ -378,28 +794,103 @@ function RevenueTargetSection({
           </div>
         </div>
 
+        {durationMix && (
+          <div>
+            <div className="flex items-center gap-1.5 mb-1">
+              <p className="text-[11px] text-gray-400">
+                Project duration mix{durationWeeks ? " (disabled -- manual duration set above)" : ""}
+              </p>
+              {durationBenchmarks.data && durationBenchmarks.data.total_sample_size < 20 && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-600 border border-amber-200">
+                  Low confidence (n={durationBenchmarks.data.total_sample_size})
+                </span>
+              )}
+              {!isTypicalMix && !durationWeeks && (
+                <button onClick={() => setMixOverride(null)} className="text-[10px] text-primary hover:underline ml-auto">
+                  Reset to typical mix
+                </button>
+              )}
+            </div>
+            <div className="flex items-center gap-3 flex-wrap">
+              {(["short", "mid", "long"] as const).map((bucket) => {
+                const b = durationBuckets?.[bucket];
+                const label = bucket === "short" ? "Short" : bucket === "mid" ? "Mid" : "Long";
+                return (
+                  <div key={bucket} className="flex-1 min-w-[140px]">
+                    <div className="flex items-center justify-between text-[10px] text-gray-500 mb-0.5">
+                      <span>{label}{b ? ` (~${b.avg_weeks}w)` : ""}</span>
+                      <span className="font-semibold text-gray-700">{durationMix[bucket]}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      value={durationMix[bucket]}
+                      disabled={!!durationWeeks}
+                      onChange={(e) => setMixOverride(adjustDurationMix(durationMix, bucket, Number(e.target.value)))}
+                      className="w-full accent-primary disabled:opacity-40"
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        <div className="flex items-center gap-1.5">
+          {(["mix", "financial"] as const).map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setViewTab(tab)}
+              className={cn(
+                "text-[11px] px-3 py-1.5 rounded-lg border transition",
+                viewTab === tab ? "bg-primary text-white border-primary" : "bg-white text-gray-600 border-gray-200 hover:border-primary hover:text-primary"
+              )}
+            >
+              {tab === "mix" ? "Project Mix" : "Financial Summary"}
+            </button>
+          ))}
+          {viewTab === "financial" && (
+            <div className="ml-2">
+              <label className="text-[11px] text-gray-400 block mb-0.5">Target by date</label>
+              <input
+                type="date"
+                value={targetDate}
+                onChange={(e) => setTargetDate(e.target.value)}
+                className="px-2.5 py-1.5 rounded-lg border border-gray-200 text-xs outline-none"
+              />
+            </div>
+          )}
+        </div>
+
         <div className="flex items-center justify-end">
           <button
-            onClick={() => revenue.mutate()}
-            disabled={revenue.isPending || !targetRevenue || Number(targetRevenue) <= 0}
+            onClick={() => (viewTab === "mix" ? revenue.mutate() : financialSummary.mutate())}
+            disabled={
+              viewTab === "mix"
+                ? revenue.isPending || !targetRevenue || Number(targetRevenue) <= 0
+                : financialSummary.isPending || !targetRevenue || Number(targetRevenue) <= 0 || !targetDate
+            }
             className="px-4 py-2 rounded-lg text-xs font-medium text-white disabled:opacity-50"
             style={{ backgroundColor: "hsl(var(--primary))" }}
           >
-            {revenue.isPending ? "Computing…" : "Run Revenue-Target Forecast"}
+            {viewTab === "mix"
+              ? revenue.isPending ? "Computing…" : "Run Revenue-Target Forecast"
+              : financialSummary.isPending ? "Computing…" : "Run Financial Summary"}
           </button>
         </div>
       </div>
 
-      {revenue.isPending && !revenue.data && (
+      {viewTab === "mix" && revenue.isPending && !revenue.data && (
         <div className="space-y-3">
           <Skeleton className="h-12 w-full rounded-xl" />
           <TableSkeleton columns={6} rows={5} />
         </div>
       )}
 
-      {revenue.data?.error && <ErrorState message={revenue.data.error} />}
+      {viewTab === "mix" && revenue.data?.error && <ErrorState message={revenue.data.error} />}
 
-      {revenue.data && !revenue.data.error && (
+      {viewTab === "mix" && revenue.data && !revenue.data.error && (
         <div className="space-y-3">
           <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-1">
             <p className="text-xs text-gray-700">
@@ -408,6 +899,9 @@ function RevenueTargetSection({
               {revenue.data.pct_of_target_covered != null && ` (${revenue.data.pct_of_target_covered}% of target)`}.
               {revenue.data.revenue_gap_usd > 0 && (
                 <span className="text-amber-600"> Gap of {formatUsd(revenue.data.revenue_gap_usd)} left uncovered by this mix.</span>
+              )}
+              {revenue.data.effective_duration_weeks != null && (
+                <span className="text-gray-400"> Effective duration: {revenue.data.effective_duration_weeks}w.</span>
               )}
             </p>
             {forecast && forecast.pct_achievable_with_current_headcount != null && (
@@ -479,7 +973,7 @@ function RevenueTargetSection({
                 <table className="w-full text-xs data-table">
                   <thead className="text-white" style={{ background: JMAN_HEADER_GRADIENT }}>
                     <tr>
-                      {["", "Designation", "Needed", "Covers", "Shortfall", "Signal"].map((h) => (
+                      {["", "Designation", "Needed", "Covers", "Hiring Gap", "Signal"].map((h) => (
                         <th key={h} className="text-left font-medium px-3 py-2 whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
@@ -487,100 +981,45 @@ function RevenueTargetSection({
                   <tbody>
                     {forecast.breakdown.map((b) => {
                       const rowKey = `${b.designation}__${b.start_date}`;
-                      const isOpen = expanded.has(rowKey);
-                      const hasDetail =
-                        b.redeploy_candidates.length > 0 || b.adjacent_level_candidates.length > 0 ||
-                        b.cross_role_candidates.length > 0 || b.training_candidates.length > 0;
                       return (
-                        <Fragment key={rowKey}>
-                          <tr className="border-b border-gray-50 last:border-0 hover:bg-gray-50/50">
-                            <td className="px-3 py-2">
-                              {hasDetail && (
-                                <button onClick={() => toggleExpanded(rowKey)} className="text-gray-400 hover:text-gray-600">
-                                  {isOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                                </button>
-                              )}
-                            </td>
-                            <td className="px-3 py-2 font-medium text-gray-700">{b.designation}</td>
-                            <td className="px-3 py-2 text-gray-500">{b.needed_headcount}</td>
-                            <td className="px-3 py-2 align-top">
-                              <span className="text-gray-700 font-semibold" title="Same-title + adjacent-title matches only -- what Shortfall is calculated against.">
-                                {b.qualifying_for_redeploy + b.adjacent_fill_count}
+                        <tr
+                          key={rowKey}
+                          onClick={() => onSelectRole(b)}
+                          className="border-b border-gray-50 last:border-0 hover:bg-gray-50/50 cursor-pointer"
+                        >
+                          <td className="px-3 py-2">
+                            <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
+                          </td>
+                          <td className="px-3 py-2 font-medium text-gray-700">{b.designation}</td>
+                          <td className="px-3 py-2 text-gray-500">{b.needed_headcount}</td>
+                          <td className="px-3 py-2 align-top">
+                            <span className="text-gray-700 font-semibold" title="Same-title + adjacent-title matches only -- what Shortfall is calculated against.">
+                              {b.qualifying_for_redeploy + b.adjacent_fill_count}
+                            </span>
+                            {b.cross_role_match_count > 0 && (
+                              <span className="block text-[10px] text-blue-600 font-normal">
+                                +{b.cross_role_match_count} cross-role match (not counted)
                               </span>
-                              {b.cross_role_match_count > 0 && (
-                                <span className="block text-[10px] text-blue-600 font-normal">
-                                  +{b.cross_role_match_count} cross-role match (not counted)
-                                </span>
-                              )}
-                              {b.training_candidates.length > 0 && (
-                                <span className="block text-[10px] text-purple-600 font-normal">
-                                  +{b.training_candidates.length} trainable
-                                </span>
-                              )}
-                            </td>
-                            <td className="px-3 py-2 text-gray-500">{b.shortfall}</td>
-                            <td className="px-3 py-2">{b.hire_signal ? <Badge variant="red">hire</Badge> : <Badge variant="green">covered</Badge>}</td>
-                          </tr>
-                          {isOpen && (
-                            <tr className="bg-gray-50/50 border-b border-gray-50">
-                              <td colSpan={6} className="px-3 py-2.5 space-y-3">
-                                <CandidateListSection
-                                  title="Who could free up for this role"
-                                  candidates={b.redeploy_candidates}
-                                  onOpen={onOpenProfile}
-                                  onShowAll={() => {}}
-                                  emptyText="No real spare capacity at this exact level."
-                                />
-                                <CandidateListSection
-                                  title="Flexible fit -- one level away"
-                                  candidates={b.adjacent_level_candidates}
-                                  onOpen={onOpenProfile}
-                                  onShowAll={() => {}}
-                                  showQualifies
-                                />
-                                {b.cross_role_candidates.length > 0 && (
-                                  <div>
-                                    <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 mb-1.5">
-                                      Cross-role match -- different title, real skill overlap (not counted toward shortfall)
-                                    </p>
-                                    <div className="flex flex-col gap-1">
-                                      {b.cross_role_candidates.slice(0, INLINE_CANDIDATE_LIMIT).map((c) => (
-                                        <div key={c.employee_id} className="flex items-center gap-2 text-[11px]">
-                                          <button onClick={() => onOpenProfile({ employeeId: c.employee_id })} className="font-medium text-primary hover:underline">
-                                            {c.employee_id}
-                                          </button>
-                                          <HoldDot onHold={c.on_hold} holdProjects={c.hold_projects} />
-                                          <span className="text-gray-500">{c.job_name}</span>
-                                          <span className="ml-auto font-semibold text-gray-500">skill match {Math.round(c.skill_score * 100)}%</span>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  </div>
-                                )}
-                                {b.training_candidates.length > 0 && (
-                                  <div>
-                                    <p className="text-[10px] font-semibold uppercase tracking-wide text-purple-500 mb-1.5">
-                                      Real skill gap -- could fill with training instead of hiring
-                                    </p>
-                                    <div className="flex flex-col gap-1">
-                                      {b.training_candidates.map((c) => (
-                                        <div key={c.employee_id} className="flex items-center gap-2 text-[11px] flex-wrap">
-                                          <button onClick={() => onOpenProfile({ employeeId: c.employee_id })} className="font-medium text-primary hover:underline">
-                                            {c.employee_id}
-                                          </button>
-                                          <span className="text-gray-500">{c.job_name}</span>
-                                          {c.missing_skills.length > 0 && (
-                                            <span className="text-purple-600">needs: {c.missing_skills.slice(0, 4).join(", ")}</span>
-                                          )}
-                                        </div>
-                                      ))}
-                                    </div>
-                                  </div>
-                                )}
-                              </td>
-                            </tr>
-                          )}
-                        </Fragment>
+                            )}
+                            {b.training_candidates.length > 0 && (
+                              <span className="block text-[10px] text-purple-600 font-normal">
+                                +{b.training_candidates.length} trainable
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2 text-gray-500">{b.shortfall > 0 ? b.shortfall : "-"}</td>
+                          <td className="px-3 py-2">
+                            {b.shortfall === 0 ? (
+                              <Badge variant="green">Covered</Badge>
+                            ) : b.recommended_start_date ? (
+                              <span title={b.recommended_start_date_proof ?? undefined}>
+                                <Badge variant="amber">At risk -- available {b.recommended_start_date}</Badge>
+                              </span>
+                            ) : (
+                              <Badge variant="red">Hiring needed</Badge>
+                            )}
+                          </td>
+                        </tr>
                       );
                     })}
                   </tbody>
@@ -590,6 +1029,87 @@ function RevenueTargetSection({
           )}
         </div>
       )}
+
+      {viewTab === "financial" && financialSummary.isPending && !financialSummary.data && (
+        <div className="space-y-3">
+          <Skeleton className="h-16 w-full rounded-xl" />
+          <Skeleton className="h-60 w-full rounded-xl" />
+        </div>
+      )}
+
+      {viewTab === "financial" && financialSummary.data?.error && <ErrorState message={financialSummary.data.error} />}
+
+      {viewTab === "financial" && financialSummary.data && !financialSummary.data.error && (() => {
+        const fs = financialSummary.data;
+        const chartData = [
+          ...fs.monthly_actual.map((p) => ({ x: p.month ?? "", actual: p.cumulative_revenue_usd, required: undefined as number | undefined })),
+          ...fs.required_line.map((p) => ({ x: p.date ?? "", actual: undefined as number | undefined, required: p.cumulative_revenue_usd })),
+        ].sort((a, b) => a.x.localeCompare(b.x));
+        const kpis: { label: string; value: string }[] = [
+          { label: "Current run-rate", value: `${formatUsd(fs.current_run_rate_monthly_usd)}/mo` },
+          { label: "Required run-rate", value: `${formatUsd(fs.required_run_rate_monthly_usd)}/mo` },
+          { label: "Velocity gap", value: `${fs.velocity_gap_monthly_usd >= 0 ? "+" : ""}${formatUsd(fs.velocity_gap_monthly_usd)}/mo` },
+          { label: "Productivity multiplier", value: fs.productivity_multiplier != null ? `${fs.productivity_multiplier}x` : "-" },
+          { label: "Projected attainment", value: fs.projected_attainment_date ?? "Not attainable at current pace" },
+        ];
+        return (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 flex-wrap">
+              {kpis.map((k) => (
+                <div key={k.label} className="rounded-xl border border-gray-200 bg-white px-3 py-2 min-w-[130px]">
+                  <p className="text-[10px] text-gray-400">{k.label}</p>
+                  <p className="text-sm font-semibold text-gray-700">{k.value}</p>
+                </div>
+              ))}
+              {fs.low_confidence && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-600 border border-amber-200 self-start mt-1">
+                  Low confidence (n={fs.sample_size} recent projects)
+                </span>
+              )}
+            </div>
+
+            <div className="rounded-xl bg-white p-3" style={{ border: `1px solid ${JMAN.emerald}40` }}>
+              <ResponsiveContainer width="100%" height={220}>
+                <LineChart data={chartData} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={CHART_CHROME.grid} />
+                  <XAxis dataKey="x" tick={{ fontSize: 10, fill: CHART_CHROME.axisText }} />
+                  <YAxis tick={{ fontSize: 10, fill: CHART_CHROME.axisText }} tickFormatter={(v) => formatUsd(v)} width={56} />
+                  <Tooltip formatter={(v: number) => formatUsd(v)} />
+                  <Legend wrapperStyle={{ fontSize: 11 }} />
+                  <ReferenceLine x={fs.required_line[0]?.date} stroke={CHART_CHROME.mutedText} strokeDasharray="4 3" label={{ value: "Today", fontSize: 9, fill: CHART_CHROME.mutedText, position: "insideTopRight" }} />
+                  <Line dataKey="actual" name="Actual / booked" stroke={JMAN.midnightBlue} strokeWidth={2} dot={false} connectNulls />
+                  <Line dataKey="required" name="Required" stroke={JMAN.emerald} strokeWidth={2} strokeDasharray="5 4" dot={false} connectNulls />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+
+            {fs.per_coe.length > 0 && (
+              <div className="rounded-xl bg-white overflow-hidden" style={{ border: `1px solid ${JMAN.emerald}40` }}>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs data-table">
+                    <thead className="text-white" style={{ background: JMAN_HEADER_GRADIENT }}>
+                      <tr>
+                        {["CoE", "Current run-rate/mo", "Sample size"].map((h) => (
+                          <th key={h} className="text-left font-medium px-3 py-2 whitespace-nowrap">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {fs.per_coe.map((c) => (
+                        <tr key={c.coe} className="border-b border-gray-50 last:border-0">
+                          <td className="px-3 py-2 font-medium text-gray-700">{c.coe}</td>
+                          <td className="px-3 py-2 text-gray-700">{formatUsd(c.current_run_rate_monthly_usd)}</td>
+                          <td className="px-3 py-2 text-gray-400">{c.sample_size} recent projects</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -602,12 +1122,11 @@ export default function NewProjectForecastPage() {
   const knownDesignations = new Set((designations.data ?? []).map((d) => d.toLowerCase()));
 
   const [specs, setSpecs] = useState<SpecState[]>([blankSpec()]);
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [rareRolesOpen, setRareRolesOpen] = useState(false);
   const [skillDrafts, setSkillDrafts] = useState<Record<number, string>>({});
   const [roleDrafts, setRoleDrafts] = useState<Record<number, { designation: string; headcount: string; pct: string }>>({});
   const [selectedEmployee, setSelectedEmployee] = useState<{ employeeId: string; skillMatchContext?: SkillMatchContext } | null>(null);
-  const [candidateModal, setCandidateModal] = useState<{ title: string; subtitle?: string; candidates: RedeployCandidate[]; showQualifies?: boolean } | null>(null);
+  const [detailRole, setDetailRole] = useState<ForecastBreakdownRow | null>(null);
   const forecast = useMutation({ mutationFn: () => api.newProjectForecast(specs.map(toForecastSpec), DEFAULT_INCLUDE_PARAMS) });
 
   if (coeOptions.isLoading || categories.isLoading) {
@@ -784,17 +1303,27 @@ export default function NewProjectForecastPage() {
     setSkillDrafts((prev) => ({ ...prev, [specIndex]: "" }));
   }
 
-  const toggleExpanded = (rowKey: string) =>
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      next.has(rowKey) ? next.delete(rowKey) : next.add(rowKey);
-      return next;
-    });
-
   const anyPreviewLoading = specs.some((s) => s.previewLoading);
 
   return (
-    <div className="p-4 sm:p-6 w-full space-y-5">
+    <div className="p-4 sm:p-6 w-full space-y-4">
+      {detailRole && (
+        <div className="space-y-4">
+          <div className="flex items-center gap-1.5 text-xs text-gray-500">
+            <button onClick={() => setDetailRole(null)} className="hover:text-primary hover:underline">
+              New Project Demand Forecast
+            </button>
+            <span>/</span>
+            <span className="text-gray-700 font-medium">{detailRole.designation}</span>
+          </div>
+          <RoleDetailPage breakdown={detailRole} onOpenProfile={setSelectedEmployee} />
+        </div>
+      )}
+      {/* Kept mounted (just hidden) rather than conditionally unmounted --
+          RevenueTargetSection owns its own form/mutation state internally, and
+          unmounting it every time a role detail is opened would wipe the
+          entered target revenue and fetched results on every "back" click. */}
+      <div className={cn("space-y-5", detailRole && "hidden")}>
       <div className="flex items-center gap-2">
         <button
           onClick={() => setMode("spec")}
@@ -817,7 +1346,7 @@ export default function NewProjectForecastPage() {
       </div>
 
       {mode === "revenue" && (
-        <RevenueTargetSection onOpenProfile={(sel) => setSelectedEmployee(sel)} />
+        <RevenueTargetSection onOpenProfile={(sel) => setSelectedEmployee(sel)} onSelectRole={setDetailRole} />
       )}
 
       {mode === "spec" && (
@@ -1161,161 +1690,55 @@ export default function NewProjectForecastPage() {
               <tbody>
                 {forecast.data.breakdown.map((b) => {
                   const rowKey = `${b.designation}__${b.start_date}`;
-                  const isOpen = expanded.has(rowKey);
                   return (
-                    <Fragment key={rowKey}>
-                      <tr className="border-b border-gray-50 last:border-0 hover:bg-gray-50/50">
-                        <td className="px-3 py-2">
-                          {(b.redeploy_candidates.length > 0 || b.adjacent_level_candidates.length > 0 || b.cross_role_candidates.length > 0 || b.training_candidates.length > 0 || b.recommended_start_date) && (
-                            <button onClick={() => toggleExpanded(rowKey)} className="text-gray-400 hover:text-gray-600">
-                              {isOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                            </button>
-                          )}
-                        </td>
-                        <td className="px-3 py-2 font-medium text-gray-700">{b.designation}</td>
-                        <td className="px-3 py-2 text-gray-500 whitespace-nowrap">
-                          {b.start_date}
-                          {b.duration_weeks != null && <span className="text-gray-300"> +{b.duration_weeks}w</span>}
-                        </td>
-                        <td className="px-3 py-2 text-gray-500">{b.needed_headcount}</td>
-                        <td className="px-3 py-2 align-top">
-                          <span
-                            className="text-gray-800 font-semibold"
-                            title="Same-title + adjacent-title matches only -- the only pool the Shortfall column trusts as a realistic redeployment."
-                          >
-                            {b.qualifying_for_redeploy + b.adjacent_fill_count} covers / {b.needed_headcount} needed
-                          </span>
-                          <div className="text-[10px] text-gray-500 mt-1 space-y-0.5">
-                            <div>
-                              {b.qualifying_for_redeploy} on-skill, same title
-                              {b.qualifying_for_redeploy < b.available_for_redeploy && (
-                                <span
-                                  className="text-amber-600"
-                                  title="Holds this title but doesn't meet the requested skillset"
-                                > ({b.available_for_redeploy} hold the title in total)</span>
-                              )}
-                            </div>
-                            {b.adjacent_fill_count > 0 && (
-                              <div className="text-emerald-600">+{b.adjacent_fill_count} adjacent-title, flexible fit</div>
-                            )}
-                            {b.cross_role_match_count > 0 && (
-                              <div className="text-blue-600" title="Real skill-record overlap from a different job title -- not counted toward Shortfall">
-                                {b.cross_role_match_count} cross-role match (not counted toward shortfall)
-                              </div>
-                            )}
-                            {b.training_candidates.length > 0 && (
-                              <div className="text-purple-600">{b.training_candidates.length} trainable (real skill gap)</div>
+                    <tr
+                      key={rowKey}
+                      onClick={() => setDetailRole(b)}
+                      className="border-b border-gray-50 last:border-0 hover:bg-gray-50/50 cursor-pointer"
+                    >
+                      <td className="px-3 py-2">
+                        <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
+                      </td>
+                      <td className="px-3 py-2 font-medium text-gray-700">{b.designation}</td>
+                      <td className="px-3 py-2 text-gray-500 whitespace-nowrap">
+                        {b.start_date}
+                        {b.duration_weeks != null && <span className="text-gray-300"> +{b.duration_weeks}w</span>}
+                      </td>
+                      <td className="px-3 py-2 text-gray-500">{b.needed_headcount}</td>
+                      <td className="px-3 py-2 align-top">
+                        <span
+                          className="text-gray-800 font-semibold"
+                          title="Same-title + adjacent-title matches only -- the only pool the Shortfall column trusts as a realistic redeployment."
+                        >
+                          {b.qualifying_for_redeploy + b.adjacent_fill_count} covers / {b.needed_headcount} needed
+                        </span>
+                        <div className="text-[10px] text-gray-500 mt-1 space-y-0.5">
+                          <div>
+                            {b.qualifying_for_redeploy} on-skill, same title
+                            {b.qualifying_for_redeploy < b.available_for_redeploy && (
+                              <span
+                                className="text-amber-600"
+                                title="Holds this title but doesn't meet the requested skillset"
+                              > ({b.available_for_redeploy} hold the title in total)</span>
                             )}
                           </div>
-                        </td>
-                        <td className="px-3 py-2 text-gray-500">{b.shortfall}</td>
-                        <td className="px-3 py-2 text-gray-500">{b.shortfall_value_usd > 0 ? formatUsd(b.shortfall_value_usd) : "-"}</td>
-                        <td className="px-3 py-2">{b.hire_signal ? <Badge variant="red">hire</Badge> : <Badge variant="green">covered</Badge>}</td>
-                      </tr>
-                      {isOpen && (
-                        <tr className="bg-gray-50/50 border-b border-gray-50">
-                          <td colSpan={8} className="px-3 py-2.5 space-y-3">
-                            <CandidateListSection
-                              title={`Who could free up for this role by ${b.start_date} -- click a name for their full profile`}
-                              candidates={b.redeploy_candidates}
-                              onOpen={setSelectedEmployee}
-                              onShowAll={() =>
-                                setCandidateModal({ title: `${b.designation} -- who could free up by ${b.start_date}`, candidates: b.redeploy_candidates })
-                              }
-                              emptyText="No real spare capacity at this exact level."
-                            />
-
-                            <CandidateListSection
-                              title={`Flexible fit -- one level away${
-                                b.adjacent_fill_count > 0 ? ` (${b.adjacent_fill_count} counted toward the need above, verified skill match)` : ""
-                              }`}
-                              candidates={b.adjacent_level_candidates}
-                              onOpen={setSelectedEmployee}
-                              onShowAll={() =>
-                                setCandidateModal({
-                                  title: `${b.designation} -- flexible fit, one level away`,
-                                  candidates: b.adjacent_level_candidates,
-                                  showQualifies: true,
-                                })
-                              }
-                              showQualifies
-                            />
-
-                            {b.cross_role_candidates.length > 0 && (
-                              <div>
-                                <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 mb-1.5">
-                                  Cross-role match -- different title, real skill overlap (not counted toward shortfall above)
-                                </p>
-                                <div className="flex flex-col gap-1">
-                                  {b.cross_role_candidates.slice(0, INLINE_CANDIDATE_LIMIT).map((c) => (
-                                    <div key={c.employee_id} className="flex items-center gap-2 text-[11px]">
-                                      <button onClick={() => setSelectedEmployee({ employeeId: c.employee_id })} className="font-medium text-primary hover:underline">
-                                        {c.employee_id}
-                                      </button>
-                                      <HoldDot onHold={c.on_hold} holdProjects={c.hold_projects} />
-                                      <span className="text-gray-500">{c.job_name}</span>
-                                      <span className="ml-auto font-semibold text-gray-500">skill match {Math.round(c.skill_score * 100)}%</span>
-                                    </div>
-                                  ))}
-                                  {b.cross_role_candidates.length > INLINE_CANDIDATE_LIMIT && (
-                                    <p className="text-[10px] text-gray-400">+{b.cross_role_candidates.length - INLINE_CANDIDATE_LIMIT} more</p>
-                                  )}
-                                </div>
-                              </div>
-                            )}
-
-                            {b.training_candidates.length > 0 && (
-                              <div>
-                                <p className="text-[10px] font-semibold uppercase tracking-wide text-purple-500 mb-1.5">
-                                  Real skill gap -- could fill this role with training instead of hiring
-                                </p>
-                                <div className="flex flex-col gap-1">
-                                  {b.training_candidates.map((c) => (
-                                    <div key={c.employee_id} className="flex items-center gap-2 text-[11px] flex-wrap">
-                                      <button onClick={() => setSelectedEmployee({ employeeId: c.employee_id })} className="font-medium text-primary hover:underline">
-                                        {c.employee_id}
-                                      </button>
-                                      <span className="text-gray-500">{c.job_name}</span>
-                                      <span className="text-gray-400">skill match {Math.round(c.skill_score * 100)}%</span>
-                                      {c.missing_skills.length > 0 && (
-                                        <span className="text-purple-600">needs: {c.missing_skills.slice(0, 4).join(", ")}</span>
-                                      )}
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-
-                            {b.recommended_start_date && (
-                              <div className="rounded-lg border border-amber-200 bg-amber-50 p-2.5">
-                                <p className="text-[11px] text-amber-800">
-                                  <strong>Recommended start date: {b.recommended_start_date}</strong> -- {b.recommended_start_date_proof}
-                                </p>
-                                <div className="mt-1.5">
-                                  <CandidateListSection
-                                    title=""
-                                    candidates={b.recommended_available_then}
-                                    onOpen={setSelectedEmployee}
-                                    onShowAll={() =>
-                                      setCandidateModal({
-                                        title: `${b.designation} -- available by ${b.recommended_start_date}`,
-                                        candidates: b.recommended_available_then,
-                                      })
-                                    }
-                                  />
-                                </div>
-                              </div>
-                            )}
-
-                            {b.shortfall > 0 && !b.recommended_start_date && (
-                              <p className="text-[11px] text-gray-400">
-                                No real date within {180} days resolves this with same-or-adjacent-level capacity -- hire signal stands.
-                              </p>
-                            )}
-                          </td>
-                        </tr>
-                      )}
-                    </Fragment>
+                          {b.adjacent_fill_count > 0 && (
+                            <div className="text-emerald-600">+{b.adjacent_fill_count} adjacent-title, flexible fit</div>
+                          )}
+                          {b.cross_role_match_count > 0 && (
+                            <div className="text-blue-600" title="Real skill-record overlap from a different job title -- not counted toward Shortfall">
+                              {b.cross_role_match_count} cross-role match (not counted toward shortfall)
+                            </div>
+                          )}
+                          {b.training_candidates.length > 0 && (
+                            <div className="text-purple-600">{b.training_candidates.length} trainable (real skill gap)</div>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 text-gray-500">{b.shortfall}</td>
+                      <td className="px-3 py-2 text-gray-500">{b.shortfall_value_usd > 0 ? formatUsd(b.shortfall_value_usd) : "-"}</td>
+                      <td className="px-3 py-2">{b.hire_signal ? <Badge variant="red">hire</Badge> : <Badge variant="green">covered</Badge>}</td>
+                    </tr>
                   );
                 })}
               </tbody>
@@ -1354,6 +1777,7 @@ export default function NewProjectForecastPage() {
       )}
       </>
       )}
+      </div>
 
       {selectedEmployee && (
         <EmployeeProfileModal
@@ -1362,22 +1786,6 @@ export default function NewProjectForecastPage() {
           skillMatchContext={selectedEmployee.skillMatchContext}
           onClose={() => setSelectedEmployee(null)}
         />
-      )}
-
-      {candidateModal && (
-        <Modal title={candidateModal.title} subtitle={`${candidateModal.candidates.length} total`} onClose={() => setCandidateModal(null)}>
-          <div className="flex flex-col gap-1.5 p-4">
-            {candidateModal.candidates.map((c) => (
-              <CandidateRow
-                key={c.employee_id}
-                c={c}
-                onOpen={setSelectedEmployee}
-                levelNote={levelNoteFor(c)}
-                qualifies={candidateModal.showQualifies && c.skill_score != null ? c.skill_score >= 0.6 : undefined}
-              />
-            ))}
-          </div>
-        </Modal>
       )}
     </div>
   );

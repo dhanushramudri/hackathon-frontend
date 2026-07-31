@@ -450,6 +450,8 @@ export interface RosterEntry {
   extended_end_date: string | null;
   extended_status: "BILLABLE" | "UNBILLABLE" | "SHADOW" | null;
   is_allocation_active: boolean;
+  shift_type: string | null;
+  reviewer_employee_id: string | null;
 }
 
 export interface ProjectRoster {
@@ -570,6 +572,7 @@ export interface WsrReportRow {
 }
 
 export interface WsrProof {
+  fired: boolean;
   fired_deteriorating: boolean;
   fired_critical: boolean;
   fired_long_term_decline: boolean;
@@ -651,6 +654,14 @@ export interface DevopsExtensionRiskProof {
   sprint_breakdown: SprintBreakdownRow[];
   tickets: DevopsTicketRow[];
   
+}
+
+export interface ProjectExtensionRecord {
+  project_code: string;
+  recorded_at: string;
+  from_end_date: string | null;
+  to_end_date: string | null;
+  status: string | null;
 }
 
 export interface ExtensionEstimate {
@@ -898,6 +909,11 @@ export interface RedeployCandidate {
   missing_skills?: string[];
   skill_confidence?: "observed" | "imputed" | "no_match" | "no_requirement";
   skill_bucket?: "eligible" | "trainable" | "gap" | "not_assessed";
+  // Authoritative flag from the backend for whether this candidate is inside
+  // qualifying_for_redeploy -- NOT re-derivable from skill_score alone
+  // client-side, since leadership designations (Manager/Principal/Associate
+  // Partner/Partner) are exempt from the skill-score threshold there.
+  meets_requested_skillset?: boolean;
   source_designation?: string;
   level_offset?: number;
   on_hold?: boolean;
@@ -1027,6 +1043,48 @@ export interface RevenueTargetForecastResult {
   pct_of_target_covered: number | null;
   forecast: NewProjectForecastResult | null;
   design_and_discovery: DesignAndDiscoveryInfo | null;
+  effective_duration_weeks: number | null;
+  error?: string;
+}
+
+export interface DurationBucket {
+  min_weeks: number | null;
+  max_weeks: number | null;
+  avg_weeks: number;
+  historical_mix_pct: number;
+  sample_size: number;
+}
+
+export interface DurationMixBenchmarks {
+  buckets: Record<"short" | "mid" | "long", DurationBucket>;
+  total_sample_size: number;
+}
+
+export interface FinancialSummaryMonthPoint {
+  month?: string;
+  date?: string;
+  cumulative_revenue_usd: number;
+}
+
+export interface FinancialSummaryCoeRow {
+  coe: string;
+  current_run_rate_monthly_usd: number;
+  sample_size: number;
+}
+
+export interface FinancialSummaryResult {
+  target_revenue_usd: number;
+  target_date: string;
+  current_run_rate_monthly_usd: number;
+  required_run_rate_monthly_usd: number;
+  velocity_gap_monthly_usd: number;
+  productivity_multiplier: number | null;
+  projected_attainment_date: string | null;
+  monthly_actual: FinancialSummaryMonthPoint[];
+  required_line: FinancialSummaryMonthPoint[];
+  per_coe: FinancialSummaryCoeRow[];
+  low_confidence: boolean;
+  sample_size: number;
   error?: string;
 }
 
@@ -1455,6 +1513,40 @@ export interface ProjectInfo {
   is_health_tracked: boolean;
 }
 
+// One row in the wizard's Step 3 "Professional Fees" table -- role/location
+// picked by the RM, rates looked up from this app's existing rate authority
+// (rate_card_service, designation-only/illustrative -- not JIN's real
+// location-adjusted rate card), everything else computed client-side.
+export interface BudgetLineItem {
+  designation: string;
+  location: string | null;
+  estimated_start_date: string | null;
+  hours_per_day: number;
+  allocation_pct: number;
+  working_days: number | null;
+  base_day_rate: number | null;
+  eff_day_rate: number | null;
+}
+
+export interface SowFile {
+  filename: string;
+  size_bytes: number;
+  uploaded_at: string;
+}
+
+// Ranked-by-real-availability shortlist for one designation (get_redeploy_candidates_as_of) --
+// used to pre-select a real "top guy" per budgeted role in the wizard's Resource Allocation step.
+export interface TopRoleCandidate {
+  employee_id: string;
+  job_name: string | null;
+  department_name: string | null;
+  location: string | null;
+  reason: "fully_free" | "under_utilized";
+  current_allocation_pct: number;
+  available_pct_as_of: number;
+  on_hold: boolean;
+}
+
 export interface EmployeeHeadcountSummary {
   total_ever: number;
   currently_active: number;
@@ -1542,6 +1634,7 @@ export const api = {
   assignAllocation: async (body: {
     employeeId: string; projectId: string; allocationPct: number;
     startDate: string; endDate: string; resourcingStatus?: string;
+    shiftType?: string | null; reviewerEmployeeId?: string | null;
   }): Promise<AssignAllocationResult> => {
     const res = await fetch(`${BASE}/allocations/assign`, {
       method: "POST",
@@ -1549,6 +1642,7 @@ export const api = {
       body: JSON.stringify({
         employee_id: body.employeeId, project_id: body.projectId, allocation_pct: body.allocationPct,
         start_date: body.startDate, end_date: body.endDate, resourcing_status: body.resourcingStatus ?? "BILLABLE",
+        shift_type: body.shiftType ?? null, reviewer_employee_id: body.reviewerEmployeeId ?? null,
       }),
     });
     if (!res.ok) {
@@ -1589,6 +1683,8 @@ export const api = {
     }
     return res.json();
   },
+  projectExtensionHistory: (projectCode: string) =>
+    getJSON<ProjectExtensionRecord[]>(`/allocations/projects/${encodeURIComponent(projectCode)}/extensions`),
   suggestProjectCode: (name: string) =>
     getJSON<{ suggested_code: string }>(`/projects/suggest-code?name=${encodeURIComponent(name)}`),
   projectCodeExists: (projectCode: string) =>
@@ -1596,7 +1692,8 @@ export const api = {
   createProject: async (body: {
     projectCode: string; clientId: string; typeOfProject: string;
     startDate: string; endDate: string; techCoe?: string | null; propositionCoe?: string | null;
-  }): Promise<{ project_code: string; client_id: string; project_start_date: string; project_end_date: string }> => {
+    projectStatus?: string;
+  }): Promise<{ project_code: string; client_id: string; project_start_date: string; project_end_date: string; project_status: string }> => {
     const res = await fetch(`${BASE}/projects/create`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1604,6 +1701,7 @@ export const api = {
         project_code: body.projectCode, client_id: body.clientId, type_of_project: body.typeOfProject,
         start_date: body.startDate, end_date: body.endDate,
         tech_coe: body.techCoe ?? null, proposition_coe: body.propositionCoe ?? null,
+        project_status: body.projectStatus ?? "ACTIVE",
       }),
     });
     if (!res.ok) {
@@ -1612,6 +1710,62 @@ export const api = {
     }
     return res.json();
   },
+  updateProject: async (projectCode: string, body: {
+    clientId?: string | null; typeOfProject?: string | null;
+    startDate?: string | null; endDate?: string | null;
+    techCoe?: string | null; propositionCoe?: string | null; projectStatus?: string | null;
+  }): Promise<{ project_code: string; client_id: string; project_start_date: string; project_end_date: string; project_status: string }> => {
+    const res = await fetch(`${BASE}/projects/${encodeURIComponent(projectCode)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        client_id: body.clientId ?? null, type_of_project: body.typeOfProject ?? null,
+        start_date: body.startDate ?? null, end_date: body.endDate ?? null,
+        tech_coe: body.techCoe ?? null, proposition_coe: body.propositionCoe ?? null,
+        project_status: body.projectStatus ?? null,
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => null);
+      throw new Error(err?.detail || `Update project failed: ${res.status}`);
+    }
+    return res.json();
+  },
+  listProjectClients: () => getJSON<string[]>("/projects/clients"),
+  getDealProjectLink: (dealKey: string) =>
+    getJSON<{ project_code: string | null }>(`/projects/deal-link?deal_key=${encodeURIComponent(dealKey)}`),
+  linkDealToProject: (dealKey: string, projectCode: string) =>
+    postJSON<{ deal_key: string; project_code: string }>(
+      `/projects/deal-link?deal_key=${encodeURIComponent(dealKey)}&project_code=${encodeURIComponent(projectCode)}`,
+      {}
+    ),
+  projectDayRate: (designation: string, hoursPerDay = 8) =>
+    getJSON<{ designation: string; base_day_rate: number | null }>(
+      `/projects/day-rate?designation=${encodeURIComponent(designation)}&hours_per_day=${hoursPerDay}`
+    ),
+  getProjectGdpr: (projectCode: string) => getJSON<Record<string, string | null> | null>(`/projects/${encodeURIComponent(projectCode)}/gdpr`),
+  saveProjectGdpr: (projectCode: string, fields: Record<string, string>) =>
+    postJSON<Record<string, string | null>>(`/projects/${encodeURIComponent(projectCode)}/gdpr`, { fields }),
+  getProjectBudget: (projectCode: string) =>
+    getJSON<{ line_items: BudgetLineItem[] } & Record<string, string | null> | null>(`/projects/${encodeURIComponent(projectCode)}/budget`),
+  saveProjectBudget: (projectCode: string, header: Record<string, string | boolean>, lineItems: BudgetLineItem[]) =>
+    postJSON<Record<string, unknown>>(`/projects/${encodeURIComponent(projectCode)}/budget`, { header, line_items: lineItems }),
+  listProjectSow: (projectCode: string) => getJSON<SowFile[]>(`/projects/${encodeURIComponent(projectCode)}/sow`),
+  uploadProjectSow: async (projectCode: string, file: File): Promise<SowFile> => {
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch(`${BASE}/projects/${encodeURIComponent(projectCode)}/sow`, { method: "POST", body: form });
+    if (!res.ok) {
+      const err = await res.json().catch(() => null);
+      throw new Error(err?.detail || `Upload failed: ${res.status}`);
+    }
+    return res.json();
+  },
+  projectSowDownloadUrl: (projectCode: string, filename: string) =>
+    `${BASE}/projects/${encodeURIComponent(projectCode)}/sow/${encodeURIComponent(filename)}`,
+  getProjectKickoff: (projectCode: string) => getJSON<Record<string, string | null> | null>(`/projects/${encodeURIComponent(projectCode)}/kickoff`),
+  saveProjectKickoff: (projectCode: string, fields: Record<string, string>) =>
+    postJSON<Record<string, string | null>>(`/projects/${encodeURIComponent(projectCode)}/kickoff`, { fields }),
   roleMixTemplates: () => getJSON<RoleMixTemplate[]>("/role-mix/templates"),
   roleMixCategories: () => getJSON<DocxCategoryRoleMix[]>("/role-mix/categories"),
   recommendationsForPipelineRow: (
@@ -1674,6 +1828,7 @@ export const api = {
     startDate?: string | null;
     durationWeeks?: number | null;
     typeOfProject?: string | null;
+    durationMix?: Record<string, number> | null;
     include?: IncludeParams;
   }) => {
     const include = opts.include ?? DEFAULT_INCLUDE_PARAMS;
@@ -1683,6 +1838,7 @@ export const api = {
       start_date: opts.startDate ?? null,
       duration_weeks: opts.durationWeeks ?? null,
       type_of_project: opts.typeOfProject ?? null,
+      duration_mix: opts.durationMix ?? null,
       include_skill: include.skill,
       include_competency: include.competency,
       include_availability: include.availability,
@@ -1690,7 +1846,24 @@ export const api = {
       include_project_count: include.project_count,
     });
   },
+  durationMixBenchmarks: () => getJSON<DurationMixBenchmarks>("/forecast/duration-mix-benchmarks"),
+  financialSummary: (opts: {
+    targetRevenueUsd: number;
+    targetDate: string;
+    priorityCoes?: string[] | null;
+    durationWeeks?: number | null;
+  }) =>
+    postJSON<FinancialSummaryResult>("/forecast/financial-summary", {
+      target_revenue_usd: opts.targetRevenueUsd,
+      target_date: opts.targetDate,
+      priority_coes: opts.priorityCoes ?? null,
+      duration_weeks: opts.durationWeeks ?? null,
+    }),
   roleMixCoes: () => getJSON<CoeOption[]>("/role-mix/coes"),
+  topCandidatesForRole: (designation: string, asOfDate: string, limit = 15) =>
+    getJSON<TopRoleCandidate[]>(
+      `/forecast/top-candidates-for-role?designation=${encodeURIComponent(designation)}&as_of_date=${asOfDate}&limit=${limit}`
+    ),
   roleMixCoeSkills: (coes: string[]) =>
     getJSON<CoeSkillsResult>(`/role-mix/coe-skills?coes=${encodeURIComponent(coes.join(","))}`),
   sixMonthOutlook: (startDate?: string, horizonMonths?: number, granularity?: "month" | "week") => {
