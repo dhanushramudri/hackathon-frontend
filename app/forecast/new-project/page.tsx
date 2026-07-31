@@ -2,16 +2,16 @@
 
 import { Fragment, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Plus, Trash2, AlertTriangle, ChevronDown, ChevronUp, X } from "lucide-react";
-import { api, DEFAULT_INCLUDE_PARAMS, type ForecastSpec, type IncludeParams, type RedeployCandidate } from "@/lib/api";
+import { Plus, Trash2, AlertTriangle, ChevronDown, ChevronUp, X, Search } from "lucide-react";
+import { api, DEFAULT_INCLUDE_PARAMS, type ForecastSpec, type RedeployCandidate } from "@/lib/api";
 import { ErrorState } from "@/components/shared/EmptyState";
 import { Skeleton, TableSkeleton } from "@/components/shared/Skeleton";
 import { Badge } from "@/components/shared/Badge";
-import { AdvancedFiltersButton, AdvancedFiltersPanel } from "@/components/shared/AdvancedFilters";
 import { HoldDot } from "@/components/shared/HoldFlag";
 import { EmployeeProfileModal, type SkillMatchContext } from "@/components/shared/EmployeeProfileModal";
 import { Modal } from "@/components/shared/Modal";
 import { cn, formatUsd } from "@/lib/utils";
+import { JMAN, JMAN_HEADER_GRADIENT } from "@/lib/brandColors";
 
 const INLINE_CANDIDATE_LIMIT = 5;
 
@@ -220,7 +220,7 @@ function formatRoleMixSource(source: string | null | undefined, sampleSize?: num
     case "manual_override":
       return "edited by you";
     case "docx_given":
-      return "standard template · D&D Tactical Build";
+      return scope ? `standard template · ${scope}` : "standard template";
     case "derived_empirical":
       return `based on ${sampleSize ?? 0} past project(s)${scope ? ` · ${scope}` : ""}`;
     case "derived_empirical_on_time_preferred":
@@ -240,9 +240,12 @@ function formatRoleMixSource(source: string | null | undefined, sampleSize?: num
 
 function roleMixSourceLabel(spec: SpecState): string {
   if (spec.roleMixEdited) return "edited by you";
-  const scope = spec.roleMixSource === "derived_empirical"
-    ? spec.typeOfProject || spec.coes.join(", ") || spec.category || "any project type"
-    : undefined;
+  const scope =
+    spec.roleMixSource === "derived_empirical"
+      ? spec.typeOfProject || spec.coes.join(", ") || spec.category || "any project type"
+      : spec.roleMixSource === "docx_given"
+      ? spec.category || undefined
+      : undefined;
   return formatRoleMixSource(spec.roleMixSource, spec.roleMixSampleSize, scope);
 }
 
@@ -252,11 +255,13 @@ type ForecastMode = "spec" | "revenue";
 // revenue target and work backwards -- how many projects of each CoE (weighted
 // toward the CoEs we're strongest/most proven in, Data Engineering first by
 // default) does that require, and does the same redeploy -> adjacent-title ->
-// cross-role skill match -> train -> hire pipeline used everywhere else in
-// Forecast actually cover it. Revenue figures are synthetic (see
-// app/engines/revenue_engine.py) -- there's no real revenue column in the
-// source data, so this is a defensible, consistently-ranked estimate for
-// driving the reverse math, not a claim of historical billing fact.
+// hire waterfall used everywhere else in Forecast actually cover it (cross-role
+// matches and trainable candidates are surfaced per role as extra context, not
+// counted toward whether a role is covered -- see ForecastBreakdownRow in
+// lib/api.ts). Revenue and role-mix figures are grounded in
+// real JMAN delivery-project economics (see app/engines/revenue_engine.py's
+// DELIVERY_TEMPLATE) -- ~$35k revenue, ~5 weeks, 2 engineers + 1 Solutions
+// Enabler + 1 Consultant per project.
 function RevenueTargetSection({
   onOpenProfile,
 }: {
@@ -270,8 +275,6 @@ function RevenueTargetSection({
   const [startDate, setStartDate] = useState("");
   const [durationWeeks, setDurationWeeks] = useState("");
   const [typeOfProject, setTypeOfProject] = useState("");
-  const [includeParams, setIncludeParams] = useState<IncludeParams>(DEFAULT_INCLUDE_PARAMS);
-  const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const toggleExpanded = (rowKey: string) =>
@@ -293,7 +296,7 @@ function RevenueTargetSection({
         startDate: startDate || null,
         durationWeeks: durationWeeks ? Number(durationWeeks) : null,
         typeOfProject: typeOfProject || null,
-        include: includeParams,
+        include: DEFAULT_INCLUDE_PARAMS,
       }),
   });
 
@@ -375,13 +378,7 @@ function RevenueTargetSection({
           </div>
         </div>
 
-        <div className="flex items-center justify-between">
-          <AdvancedFiltersButton
-            open={advancedFiltersOpen}
-            include={includeParams}
-            defaults={DEFAULT_INCLUDE_PARAMS}
-            onClick={() => setAdvancedFiltersOpen((v) => !v)}
-          />
+        <div className="flex items-center justify-end">
           <button
             onClick={() => revenue.mutate()}
             disabled={revenue.isPending || !targetRevenue || Number(targetRevenue) <= 0}
@@ -391,9 +388,6 @@ function RevenueTargetSection({
             {revenue.isPending ? "Computing…" : "Run Revenue-Target Forecast"}
           </button>
         </div>
-        {advancedFiltersOpen && (
-          <AdvancedFiltersPanel include={includeParams} onApply={setIncludeParams} />
-        )}
       </div>
 
       {revenue.isPending && !revenue.data && (
@@ -419,7 +413,8 @@ function RevenueTargetSection({
             {forecast && forecast.pct_achievable_with_current_headcount != null && (
               <p className="text-xs text-gray-700">
                 Of the resources this mix needs, <strong>{forecast.pct_achievable_with_current_headcount}%</strong> is achievable with
-                current headcount (redeploy + adjacent title + cross-role skill match + training candidates) before any hiring.
+                current headcount (same-title redeploy + adjacent-title flexible fit) before any hiring. Cross-role matches and
+                trainable candidates are shown per role as additional context, not counted here.
                 {forecast.total_shortfall_headcount > 0 && (
                   <span className="text-red-600"> Real shortfall: {forecast.total_shortfall_headcount} heads.</span>
                 )}
@@ -427,10 +422,10 @@ function RevenueTargetSection({
             )}
           </div>
 
-          <div className="rounded-xl border border-[hsl(var(--primary)/0.3)] bg-white overflow-hidden">
+          <div className="rounded-xl bg-white overflow-hidden" style={{ border: `1px solid ${JMAN.emerald}40` }}>
             <div className="overflow-x-auto">
               <table className="w-full text-xs data-table">
-                <thead className="bg-secondary text-secondary-foreground">
+                <thead className="text-white" style={{ background: JMAN_HEADER_GRADIENT }}>
                   <tr>
                     {["CoE", "Priority weight", "Projects", "Avg revenue/project", "Projected revenue", "Sample size"].map((h) => (
                       <th key={h} className="text-left font-medium px-3 py-2 whitespace-nowrap">{h}</th>
@@ -453,11 +448,36 @@ function RevenueTargetSection({
             </div>
           </div>
 
+          {revenue.data.design_and_discovery && (
+            <div className="rounded-xl bg-white p-4" style={{ border: `1px solid ${JMAN.emerald}40` }}>
+              <div className="flex items-center gap-2 mb-1">
+                <Search className="w-4 h-4" style={{ color: JMAN.emerald }} />
+                <p className="text-sm font-semibold text-gray-700">Design & Discovery (precursor phase)</p>
+              </div>
+              <p className="text-xs text-gray-600 mb-2">
+                Before these {revenue.data.design_and_discovery.engagements_needed} delivery project(s) can start, clients
+                typically commit via a paid D&D engagement first (~{revenue.data.design_and_discovery.duration_weeks} weeks,{" "}
+                {formatUsd(revenue.data.design_and_discovery.revenue_usd_low)}-{formatUsd(revenue.data.design_and_discovery.revenue_usd_high)}{" "}
+                each). Up to {revenue.data.design_and_discovery.engagements_needed} D&D engagement(s) ={" "}
+                {formatUsd(revenue.data.design_and_discovery.total_revenue_usd_low)}-{formatUsd(revenue.data.design_and_discovery.total_revenue_usd_high)}{" "}
+                of additional revenue, not counted in the totals above.
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {Object.entries(revenue.data.design_and_discovery.role_mix).map(([role, fte]) => (
+                  <span key={role} className="text-[11px] px-2 py-1 rounded-full" style={{ background: `${JMAN.emerald}0D`, color: "#374151" }}>
+                    {role} <strong>{Math.round(fte * 100)}%</strong>
+                  </span>
+                ))}
+              </div>
+              <p className="text-[10px] text-gray-400 mt-2">{revenue.data.design_and_discovery.note}</p>
+            </div>
+          )}
+
           {forecast && forecast.breakdown.length > 0 && (
-            <div className="rounded-xl border border-[hsl(var(--primary)/0.3)] bg-white overflow-hidden">
+            <div className="rounded-xl bg-white overflow-hidden" style={{ border: `1px solid ${JMAN.emerald}40` }}>
               <div className="overflow-x-auto">
                 <table className="w-full text-xs data-table">
-                  <thead className="bg-secondary text-secondary-foreground">
+                  <thead className="text-white" style={{ background: JMAN_HEADER_GRADIENT }}>
                     <tr>
                       {["", "Designation", "Needed", "Covers", "Shortfall", "Signal"].map((h) => (
                         <th key={h} className="text-left font-medium px-3 py-2 whitespace-nowrap">{h}</th>
@@ -483,8 +503,15 @@ function RevenueTargetSection({
                             </td>
                             <td className="px-3 py-2 font-medium text-gray-700">{b.designation}</td>
                             <td className="px-3 py-2 text-gray-500">{b.needed_headcount}</td>
-                            <td className="px-3 py-2 text-gray-700 font-semibold">
-                              {b.qualifying_for_redeploy + b.adjacent_fill_count + b.cross_role_fill_count}
+                            <td className="px-3 py-2 align-top">
+                              <span className="text-gray-700 font-semibold" title="Same-title + adjacent-title matches only -- what Shortfall is calculated against.">
+                                {b.qualifying_for_redeploy + b.adjacent_fill_count}
+                              </span>
+                              {b.cross_role_match_count > 0 && (
+                                <span className="block text-[10px] text-blue-600 font-normal">
+                                  +{b.cross_role_match_count} cross-role match (not counted)
+                                </span>
+                              )}
                               {b.training_candidates.length > 0 && (
                                 <span className="block text-[10px] text-purple-600 font-normal">
                                   +{b.training_candidates.length} trainable
@@ -514,7 +541,7 @@ function RevenueTargetSection({
                                 {b.cross_role_candidates.length > 0 && (
                                   <div>
                                     <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 mb-1.5">
-                                      Cross-role match -- different title, real skill overlap
+                                      Cross-role match -- different title, real skill overlap (not counted toward shortfall)
                                     </p>
                                     <div className="flex flex-col gap-1">
                                       {b.cross_role_candidates.slice(0, INLINE_CANDIDATE_LIMIT).map((c) => (
@@ -581,15 +608,11 @@ export default function NewProjectForecastPage() {
   const [roleDrafts, setRoleDrafts] = useState<Record<number, { designation: string; headcount: string; pct: string }>>({});
   const [selectedEmployee, setSelectedEmployee] = useState<{ employeeId: string; skillMatchContext?: SkillMatchContext } | null>(null);
   const [candidateModal, setCandidateModal] = useState<{ title: string; subtitle?: string; candidates: RedeployCandidate[]; showQualifies?: boolean } | null>(null);
-  // Same ranking-parameter flexibility as the main Recommendations engine --
-  // one selection for the whole forecast run (all role/spec rows share it).
-  const [includeParams, setIncludeParams] = useState<IncludeParams>(DEFAULT_INCLUDE_PARAMS);
-  const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
-  const forecast = useMutation({ mutationFn: () => api.newProjectForecast(specs.map(toForecastSpec), includeParams) });
+  const forecast = useMutation({ mutationFn: () => api.newProjectForecast(specs.map(toForecastSpec), DEFAULT_INCLUDE_PARAMS) });
 
   if (coeOptions.isLoading || categories.isLoading) {
     return (
-      <div className="p-4 sm:p-6 max-w-4xl mx-auto space-y-5">
+      <div className="p-4 sm:p-6 w-full space-y-5">
         <Skeleton className="h-3 w-64" />
         <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
           <div className="flex items-center justify-between">
@@ -771,7 +794,7 @@ export default function NewProjectForecastPage() {
   const anyPreviewLoading = specs.some((s) => s.previewLoading);
 
   return (
-    <div className="p-4 sm:p-6 max-w-4xl mx-auto space-y-5">
+    <div className="p-4 sm:p-6 w-full space-y-5">
       <div className="flex items-center gap-2">
         <button
           onClick={() => setMode("spec")}
@@ -1061,26 +1084,15 @@ export default function NewProjectForecastPage() {
           >
             <Plus className="w-3.5 h-3.5" /> Add project
           </button>
-          <div className="flex items-center gap-2">
-            <AdvancedFiltersButton
-              open={advancedFiltersOpen}
-              include={includeParams}
-              defaults={DEFAULT_INCLUDE_PARAMS}
-              onClick={() => setAdvancedFiltersOpen((v) => !v)}
-            />
-            <button
-              onClick={() => forecast.mutate()}
-              disabled={forecast.isPending || anyPreviewLoading}
-              className="px-4 py-2 rounded-lg text-xs font-medium text-white disabled:opacity-50"
-              style={{ backgroundColor: "hsl(var(--primary))" }}
-            >
-              {forecast.isPending ? "Computing…" : "Run Forecast"}
-            </button>
-          </div>
+          <button
+            onClick={() => forecast.mutate()}
+            disabled={forecast.isPending || anyPreviewLoading}
+            className="px-4 py-2 rounded-lg text-xs font-medium text-white disabled:opacity-50"
+            style={{ backgroundColor: "hsl(var(--primary))" }}
+          >
+            {forecast.isPending ? "Computing…" : "Run Forecast"}
+          </button>
         </div>
-        {advancedFiltersOpen && (
-          <AdvancedFiltersPanel include={includeParams} onApply={setIncludeParams} />
-        )}
       </div>
 
       {forecast.isPending && !forecast.data && (
@@ -1102,7 +1114,7 @@ export default function NewProjectForecastPage() {
               <p key={i} className="text-[11px] text-gray-500">
                 Spec {i + 1}: {rs.spec.count}x {rs.spec.coes?.join(", ") || rs.spec.category || "manual role-mix"}
                 {rs.spec.type_of_project ? ` (${rs.spec.type_of_project})` : ""} -- role-mix:{" "}
-                {formatRoleMixSource(rs.source, rs.sample_size, rs.spec.type_of_project)}
+                {formatRoleMixSource(rs.source, rs.sample_size, rs.source === "docx_given" ? rs.spec.category : rs.spec.type_of_project)}
               </p>
             ))}
             {forecast.data.required_skills.length > 0 && (
@@ -1136,10 +1148,10 @@ export default function NewProjectForecastPage() {
             </div>
           )}
 
-          <div className="rounded-xl border border-[hsl(var(--primary)/0.3)] bg-white overflow-hidden">
+          <div className="rounded-xl bg-white overflow-hidden" style={{ border: `1px solid ${JMAN.emerald}40` }}>
             <div className="overflow-x-auto">
             <table className="w-full text-xs data-table">
-              <thead className="bg-secondary text-secondary-foreground">
+              <thead className="text-white" style={{ background: JMAN_HEADER_GRADIENT }}>
                 <tr>
                   {["", "Designation", "Needed By", "Needed Headcount", "Covers This Role", "Shortfall", "Shortfall $/mo", "Signal"].map((h) => (
                     <th key={h} className="text-left font-medium px-3 py-2 whitespace-nowrap">{h}</th>
@@ -1166,33 +1178,35 @@ export default function NewProjectForecastPage() {
                           {b.duration_weeks != null && <span className="text-gray-300"> +{b.duration_weeks}w</span>}
                         </td>
                         <td className="px-3 py-2 text-gray-500">{b.needed_headcount}</td>
-                        <td className="px-3 py-2">
+                        <td className="px-3 py-2 align-top">
                           <span
                             className="text-gray-800 font-semibold"
-                            title="The number that actually covers this role -- skill-matched, plus anyone one level away or from a different track who flexes in. This is what Shortfall is calculated against."
+                            title="Same-title + adjacent-title matches only -- the only pool the Shortfall column trusts as a realistic redeployment."
                           >
-                            {b.qualifying_for_redeploy + b.adjacent_fill_count + b.cross_role_fill_count} qualify
+                            {b.qualifying_for_redeploy + b.adjacent_fill_count} covers / {b.needed_headcount} needed
                           </span>
-                          {(b.adjacent_fill_count > 0 || b.cross_role_fill_count > 0) && (
-                            <span className="text-gray-400">
-                              {" "}({b.qualifying_for_redeploy} on-skill
-                              {b.adjacent_fill_count > 0 && <span className="text-emerald-600"> +{b.adjacent_fill_count} flexible fit</span>}
-                              {b.cross_role_fill_count > 0 && <span className="text-blue-600"> +{b.cross_role_fill_count} cross-role match</span>})
-                            </span>
-                          )}
-                          {b.qualifying_for_redeploy < b.available_for_redeploy && (
-                            <span
-                              className="block text-[10px] text-amber-600 mt-0.5"
-                              title="Holds the title but doesn't meet the requested skillset, so doesn't count toward covering this role"
-                            >
-                              {b.available_for_redeploy} hold this title in total
-                            </span>
-                          )}
-                          {b.training_candidates.length > 0 && (
-                            <span className="block text-[10px] text-purple-600 mt-0.5">
-                              {b.training_candidates.length} more could fill this with training
-                            </span>
-                          )}
+                          <div className="text-[10px] text-gray-500 mt-1 space-y-0.5">
+                            <div>
+                              {b.qualifying_for_redeploy} on-skill, same title
+                              {b.qualifying_for_redeploy < b.available_for_redeploy && (
+                                <span
+                                  className="text-amber-600"
+                                  title="Holds this title but doesn't meet the requested skillset"
+                                > ({b.available_for_redeploy} hold the title in total)</span>
+                              )}
+                            </div>
+                            {b.adjacent_fill_count > 0 && (
+                              <div className="text-emerald-600">+{b.adjacent_fill_count} adjacent-title, flexible fit</div>
+                            )}
+                            {b.cross_role_match_count > 0 && (
+                              <div className="text-blue-600" title="Real skill-record overlap from a different job title -- not counted toward Shortfall">
+                                {b.cross_role_match_count} cross-role match (not counted toward shortfall)
+                              </div>
+                            )}
+                            {b.training_candidates.length > 0 && (
+                              <div className="text-purple-600">{b.training_candidates.length} trainable (real skill gap)</div>
+                            )}
+                          </div>
                         </td>
                         <td className="px-3 py-2 text-gray-500">{b.shortfall}</td>
                         <td className="px-3 py-2 text-gray-500">{b.shortfall_value_usd > 0 ? formatUsd(b.shortfall_value_usd) : "-"}</td>
@@ -1230,18 +1244,16 @@ export default function NewProjectForecastPage() {
                             {b.cross_role_candidates.length > 0 && (
                               <div>
                                 <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 mb-1.5">
-                                  Cross-role match -- different title, real skill overlap
-                                  {b.cross_role_fill_count > 0 && ` (${b.cross_role_fill_count} counted toward the need above)`}
+                                  Cross-role match -- different title, real skill overlap (not counted toward shortfall above)
                                 </p>
                                 <div className="flex flex-col gap-1">
-                                  {b.cross_role_candidates.slice(0, INLINE_CANDIDATE_LIMIT).map((c, idx) => (
+                                  {b.cross_role_candidates.slice(0, INLINE_CANDIDATE_LIMIT).map((c) => (
                                     <div key={c.employee_id} className="flex items-center gap-2 text-[11px]">
                                       <button onClick={() => setSelectedEmployee({ employeeId: c.employee_id })} className="font-medium text-primary hover:underline">
                                         {c.employee_id}
                                       </button>
                                       <HoldDot onHold={c.on_hold} holdProjects={c.hold_projects} />
                                       <span className="text-gray-500">{c.job_name}</span>
-                                      {idx < b.cross_role_fill_count && <Badge variant="green">counted</Badge>}
                                       <span className="ml-auto font-semibold text-gray-500">skill match {Math.round(c.skill_score * 100)}%</span>
                                     </div>
                                   ))}

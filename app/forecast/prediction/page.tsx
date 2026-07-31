@@ -10,6 +10,7 @@ import { TrendingUp, Info, AlertTriangle } from "lucide-react";
 import { api, type PredictionHistoryRow, type PredictionForecastRow } from "@/lib/api";
 import { Skeleton } from "@/components/shared/Skeleton";
 import { cn } from "@/lib/utils";
+import { JMAN, CHART_CHROME } from "@/lib/brandColors";
 
 const HORIZONS = [12, 24, 36] as const;
 type Horizon = typeof HORIZONS[number];
@@ -68,18 +69,18 @@ function ForecastChart({ data, boundaryMonth, yLabel, color, formatter }: ChartP
   return (
     <ResponsiveContainer width="100%" height={240}>
       <ComposedChart data={data} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+        <CartesianGrid strokeDasharray="3 3" stroke={CHART_CHROME.grid} />
         <XAxis
           dataKey="month"
           tickFormatter={formatMonth}
-          tick={{ fontSize: 10, fill: "#64748b" }}
+          tick={{ fontSize: 10, fill: CHART_CHROME.axisText }}
           interval={5}
         />
         <YAxis
-          tick={{ fontSize: 10, fill: "#64748b" }}
+          tick={{ fontSize: 10, fill: CHART_CHROME.axisText }}
           tickFormatter={fmt}
           width={52}
-          label={{ value: yLabel, angle: -90, position: "insideLeft", offset: 12, style: { fontSize: 10, fill: "#64748b" } }}
+          label={{ value: yLabel, angle: -90, position: "insideLeft", offset: 12, style: { fontSize: 10, fill: CHART_CHROME.axisText } }}
         />
         <Tooltip
           content={({ active, payload, label }) => {
@@ -91,27 +92,27 @@ function ForecastChart({ data, boundaryMonth, yLabel, color, formatter }: ChartP
             const isPredicted = hasForecast && !hasActual;
             const histLabel   = yLabel === "Win %" ? "Actual win rate" : yLabel === "Revenue" ? "Actual revenue" : "Actual demand";
             return (
-              <div style={{ background: "#0f172a", border: "1px solid #334155", borderRadius: 8, padding: "10px 14px", fontSize: 12, minWidth: 200 }}>
-                <p style={{ color: "#94a3b8", marginBottom: 8, fontWeight: 700, fontSize: 13 }}>{formatMonth(label as string)}</p>
+              <div style={{ background: CHART_CHROME.tooltipBg, border: `1px solid ${CHART_CHROME.tooltipBorder}`, borderRadius: 8, padding: "10px 14px", fontSize: 12, minWidth: 200, boxShadow: "0 4px 16px rgba(25,16,91,0.12)" }}>
+                <p style={{ color: CHART_CHROME.labelText, marginBottom: 8, fontWeight: 700, fontSize: 13 }}>{formatMonth(label as string)}</p>
                 {hasActual && (
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 24, marginBottom: 4 }}>
-                    <span style={{ color: "#94a3b8" }}>{histLabel}</span>
-                    <strong style={{ color: "#e2e8f0" }}>{fmt(byName["Actual"])}</strong>
+                    <span style={{ color: CHART_CHROME.mutedText }}>{histLabel}</span>
+                    <strong style={{ color: JMAN.midnightBlue }}>{fmt(byName["Actual"])}</strong>
                   </div>
                 )}
                 {hasForecast && (
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 24, marginBottom: 4 }}>
-                    <span style={{ color: "#94a3b8" }}>Forecast</span>
+                    <span style={{ color: CHART_CHROME.mutedText }}>Forecast</span>
                     <strong style={{ color: color }}>{fmt(byName["Forecast"])}</strong>
                   </div>
                 )}
                 {hasCI && (
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 24, marginBottom: 4 }}>
-                    <span style={{ color: "#64748b", fontSize: 11 }}>90% range</span>
-                    <span style={{ color: "#64748b", fontSize: 11 }}>{fmt(byName["Lower 90%"])} – {fmt(byName["Upper 90%"])}</span>
+                    <span style={{ color: CHART_CHROME.mutedText, fontSize: 11 }}>90% range</span>
+                    <span style={{ color: CHART_CHROME.mutedText, fontSize: 11 }}>{fmt(byName["Lower 90%"])} – {fmt(byName["Upper 90%"])}</span>
                   </div>
                 )}
-                <p style={{ color: "#475569", fontSize: 10, marginTop: 6, borderTop: "1px solid #1e293b", paddingTop: 5 }}>
+                <p style={{ color: CHART_CHROME.mutedText, fontSize: 10, marginTop: 6, borderTop: `1px solid ${CHART_CHROME.grid}`, paddingTop: 5 }}>
                   {isPredicted ? "Predicted period" : "Historical period"}
                 </p>
               </div>
@@ -120,14 +121,14 @@ function ForecastChart({ data, boundaryMonth, yLabel, color, formatter }: ChartP
         />
         <Legend wrapperStyle={{ fontSize: 11 }} />
         {/* Actual history */}
-        <Line dataKey="actual" stroke={color} strokeWidth={2} dot={false} connectNulls name="Actual" />
+        <Line dataKey="actual" stroke={JMAN.midnightBlue} strokeWidth={2} dot={false} connectNulls name="Actual" />
         {/* CI band — upper stroke only, lower stroke only, no fill */}
         <Line dataKey="upper" stroke={color} strokeWidth={1} strokeDasharray="2 3" dot={false} connectNulls strokeOpacity={0.35} legendType="none" name="Upper 90%" />
         <Line dataKey="lower" stroke={color} strokeWidth={1} strokeDasharray="2 3" dot={false} connectNulls strokeOpacity={0.35} legendType="none" name="Lower 90%" />
         {/* Forecast */}
         <Line dataKey="forecast" stroke={color} strokeWidth={2} strokeDasharray="5 4" dot={false} connectNulls name="Forecast" />
         {/* Boundary marker */}
-        <ReferenceLine x={boundaryMonth} stroke="#334155" strokeDasharray="4 3" label={{ value: "Today", fontSize: 9, fill: "#64748b", position: "insideTopRight" }} />
+        <ReferenceLine x={boundaryMonth} stroke={CHART_CHROME.mutedText} strokeDasharray="4 3" label={{ value: "Today", fontSize: 9, fill: CHART_CHROME.mutedText, position: "insideTopRight" }} />
       </ComposedChart>
     </ResponsiveContainer>
   );
@@ -158,7 +159,7 @@ export default function PredictionPage() {
   const winrateData = data ? buildChartData(data.history, data.winrate_forecast, "win_rate_pct") : [];
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-6">
+    <div className="p-4 sm:p-6 w-full space-y-6">
 
       {/* Header */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -230,21 +231,21 @@ export default function PredictionPage() {
           <div className="bg-card border border-border rounded-xl p-5">
             <p className="text-sm font-semibold text-foreground mb-1">Monthly Headcount Demand</p>
             <p className="text-xs text-muted-foreground mb-4">Total roles requested per month — history (solid) + forecast (dashed) with 90% CI band</p>
-            <ForecastChart data={demandData} boundaryMonth={boundaryMonth} yLabel="Roles" color="#818cf8" />
+            <ForecastChart data={demandData} boundaryMonth={boundaryMonth} yLabel="Roles" color={JMAN.trypanBlue} />
           </div>
 
           {/* Revenue */}
           <div className="bg-card border border-border rounded-xl p-5">
             <p className="text-sm font-semibold text-foreground mb-1">Monthly Revenue Projection</p>
             <p className="text-xs text-muted-foreground mb-4">Illustrative revenue based on confirmed headcount × rate card. Not real financial data.</p>
-            <ForecastChart data={revenueData} boundaryMonth={boundaryMonth} yLabel="Revenue" color="#34d399" formatter={formatUsd} />
+            <ForecastChart data={revenueData} boundaryMonth={boundaryMonth} yLabel="Revenue" color={JMAN.emerald} formatter={formatUsd} />
           </div>
 
           {/* Win rate */}
           <div className="bg-card border border-border rounded-xl p-5">
             <p className="text-sm font-semibold text-foreground mb-1">Deal Win Rate (%)</p>
             <p className="text-xs text-muted-foreground mb-4">% of pipeline deals confirmed (SOW signed). Synthetic historical trend only.</p>
-            <ForecastChart data={winrateData} boundaryMonth={boundaryMonth} yLabel="Win %" color="#f59e0b" formatter={(v) => `${v.toFixed(1)}%`} />
+            <ForecastChart data={winrateData} boundaryMonth={boundaryMonth} yLabel="Win %" color={JMAN.amber} formatter={(v) => `${v.toFixed(1)}%`} />
           </div>
 
           {/* Model info */}

@@ -913,14 +913,16 @@ export interface ForecastBreakdownRow {
   adjacent_level_candidates: RedeployCandidate[];
   adjacent_fill_count: number;
   // Cross-role tier: same org-wide skill/competency/availability search the
-  // main Recommendations page uses, unrestricted by designation -- catches
-  // "no Solutions Enabler free, but a Senior Software Engineer's actual
-  // skills fit" cases that title-ladder adjacency above can't. `eligible`
-  // bucket candidates count toward cross_role_fill_count; `trainable` bucket
-  // candidates are a real skill gap, surfaced as upskill candidates, and
-  // never assumed to fill a seat automatically.
+  // main Recommendations page uses, unrestricted by designation -- surfaces
+  // real skill-tag matches from OTHER job titles (e.g. a Consultant whose
+  // actual skill record matches a Data Engineering build). Shown as context
+  // only -- does NOT reduce shortfall or the hire signal, since a skill-tag
+  // match alone isn't the same as a realistic redeployment; same-title +
+  // adjacent-title candidates are the only pool the shortfall math trusts.
+  // `trainable` bucket candidates are a real skill gap, surfaced as upskill
+  // candidates, and never assumed to fill a seat automatically.
   cross_role_candidates: RecommendationCandidate[];
-  cross_role_fill_count: number;
+  cross_role_match_count: number;
   training_candidates: RecommendationCandidate[];
   shortfall: number;
   shortfall_value_usd: number;
@@ -983,6 +985,17 @@ export interface ProjectMixRow {
   sample_size: number;
 }
 
+export interface DesignAndDiscoveryInfo {
+  engagements_needed: number;
+  duration_weeks: number;
+  revenue_usd_low: number;
+  revenue_usd_high: number;
+  total_revenue_usd_low: number;
+  total_revenue_usd_high: number;
+  role_mix: Record<string, number>;
+  note: string;
+}
+
 export interface RevenueTargetForecastResult {
   target_revenue_usd: number;
   priority_coes: string[];
@@ -991,6 +1004,7 @@ export interface RevenueTargetForecastResult {
   revenue_gap_usd: number;
   pct_of_target_covered: number | null;
   forecast: NewProjectForecastResult | null;
+  design_and_discovery: DesignAndDiscoveryInfo | null;
   error?: string;
 }
 
@@ -1676,6 +1690,10 @@ export const api = {
     getJSON<PredictionForecastResult>(`/forecast/prediction?horizon_months=${horizonMonths}`),
   headcountPrediction: (horizonMonths: number = 12) =>
     getJSON<HeadcountPredictionResult>(`/forecast/headcount-prediction?horizon_months=${horizonMonths}`),
+  headcountPredictionTables: () =>
+    getJSON<HeadcountRawTableSummary[]>("/forecast/headcount-prediction/tables"),
+  headcountPredictionRawData: (table: string) =>
+    getJSON<HeadcountRawTable>(`/forecast/headcount-prediction/raw-data?table=${encodeURIComponent(table)}`),
 };
 
 // ── Prediction Forecast ────────────────────────────────────────────────────
@@ -1721,6 +1739,9 @@ export interface PredictionForecastResult {
 export interface HeadcountHistoryRow {
   month: string;
   total_active_headcount: number;
+  new_hires_chennai: number;
+  new_hires_uk: number;
+  new_hires_usa: number;
 }
 
 export interface HeadcountForecastRow {
@@ -1731,12 +1752,74 @@ export interface HeadcountForecastRow {
   is_validated_horizon: boolean;
 }
 
+export interface HeadcountRiskFlag {
+  severity: "info" | "warning" | "critical";
+  message: string;
+}
+
+export interface HeadcountCoeMixRow {
+  coe: string;
+  fte: number;
+  share_pct: number;
+}
+
+export interface HeadcountCoeForecastRow {
+  month: string;
+  by_coe: Record<string, number>;
+}
+
+export interface HeadcountHiresVsResignationsRow {
+  month: string;
+  new_hires: number;
+  resignations: number;
+  net: number;
+}
+
+export interface HeadcountUtilizationRow {
+  month: string;
+  free_pool: number;
+  over_allocated: number;
+  under_allocated: number;
+}
+
+export interface HeadcountInsights {
+  executive_summary: string[];
+  risk_flags: HeadcountRiskFlag[];
+  headcount_change_pct_3mo: number;
+  forecast_change_pct: number | null;
+  productivity: {
+    current_revenue_per_head_usd: number;
+    history: { month: string; value: number }[];
+    current_ebitda_margin_pct: number;
+    ebitda_margin_history: { month: string; value: number }[];
+  };
+  coe_breakdown: {
+    latest_month: string;
+    mix: HeadcountCoeMixRow[];
+    forecast: HeadcountCoeForecastRow[];
+  };
+  attrition: {
+    notice_period_current: number;
+    notice_period_by_coe: { coe: string; count: number }[];
+    notice_period_by_coe_as_of_month: string | null;
+    hires_vs_resignations: HeadcountHiresVsResignationsRow[];
+    flight_risk_note: string | null;
+  };
+  utilization: {
+    free_pool_current: number;
+    over_allocated_current: number;
+    under_allocated_current: number;
+    history: HeadcountUtilizationRow[];
+  };
+}
+
 export interface HeadcountPredictionResult {
   history: HeadcountHistoryRow[];
   training_period: string;
   horizon_months: number;
   validated_horizon_months: number;
   forecast: HeadcountForecastRow[];
+  insights: HeadcountInsights;
   model_info: {
     type: string;
     formula: string;
@@ -1752,4 +1835,18 @@ export interface HeadcountPredictionResult {
     confidence_interval: string;
     note: string;
   };
+}
+
+export type HeadcountRawCellValue = string | number | boolean | null;
+
+export interface HeadcountRawTableSummary {
+  table: string;
+  label: string;
+  description: string;
+}
+
+export interface HeadcountRawTable extends HeadcountRawTableSummary {
+  columns: string[];
+  rows: Record<string, HeadcountRawCellValue>[];
+  row_count: number;
 }
