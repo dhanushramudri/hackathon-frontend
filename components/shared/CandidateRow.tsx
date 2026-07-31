@@ -101,6 +101,7 @@ export function CandidateRow({
   onToggleExpand,
   onOpenProfile,
   includeParams = DEFAULT_INCLUDE_PARAMS,
+  onAssign,
 }: {
   candidate: RecommendationCandidate;
   rank: number;
@@ -109,6 +110,7 @@ export function CandidateRow({
   onToggleExpand: () => void;
   onOpenProfile: (tab: ProfileTab, skillMatchContext?: SkillMatchContext) => void;
   includeParams?: IncludeParams;
+  onAssign?: () => void;
 }) {
   const [aiProofOpen, setAiProofOpen] = useState(false);
   const [projectHistoryFilter, setProjectHistoryFilter] = useState<{ category?: string } | null>(null);
@@ -192,6 +194,16 @@ export function CandidateRow({
           <ChevronDown className={cn("w-3.5 h-3.5 transition-transform", isExpanded && "rotate-180")} />
         </span>
       </button>
+      {onAssign && (
+        <div className="px-3.5 pb-2.5 -mt-1">
+          <button
+            onClick={(e) => { e.stopPropagation(); onAssign(); }}
+            className="text-[11px] px-2 py-1 rounded-lg bg-primary text-white hover:opacity-90"
+          >
+            Assign
+          </button>
+        </div>
+      )}
       {isExpanded && (
         <div className="border-t border-gray-100 px-3.5 py-3 space-y-2.5">
           <div className="grid grid-cols-3 gap-3 text-xs">

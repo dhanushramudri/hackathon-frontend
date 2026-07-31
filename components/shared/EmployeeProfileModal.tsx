@@ -522,6 +522,8 @@ function ReplacementTab({
           employeeId={assignEmployeeId}
           projectId={projectId}
           defaultAllocationPct={allocPct}
+          defaultStartDate={data?.backfill_context?.vacated_start_date}
+          defaultEndDate={data?.backfill_context?.vacated_end_date}
           onClose={() => setAssignEmployeeId(null)}
           onAssigned={handleAssigned}
         />
@@ -1150,6 +1152,14 @@ function AllocationsTab({
   );
 }
 
+const PULSE_QUESTION_LABELS: Record<string, string> = {
+  q1_inspired_motivated: "Inspired/motivated",
+  q2_valued_supported: "Valued/supported",
+  q3_feedback_growth: "Feedback & growth",
+  q4_cdm_guidance: "CDM guidance",
+  q5_workload_sustainable: "Workload sustainable",
+};
+
 function OvertimeTab({ profile }: { profile: EmployeeProfile }) {
   const r = profile.overtime_risk;
   return (
@@ -1180,6 +1190,41 @@ function OvertimeTab({ profile }: { profile: EmployeeProfile }) {
           ))}
         </div>
       )}
+
+      <div className="pt-2 border-t border-gray-100 space-y-2">
+        <div className="flex items-center gap-2">
+          <p className="text-xs font-semibold text-gray-700">Weekly Pulse - Not happy</p>
+          <FiredBadge fired={profile.pulse?.is_not_happy ?? false} />
+        </div>
+        {!profile.pulse || profile.pulse.responses.length === 0 ? (
+          <p className="text-xs text-gray-400 italic">No weekly pulse responses in the trailing window.</p>
+        ) : (
+          <div className="space-y-2">
+            {profile.pulse.responses.map((resp) => (
+              <div key={resp.week_start_date + resp.project_id} className="rounded-lg border border-gray-100 p-2">
+                <p className="text-[11px] text-gray-400 mb-1">
+                  {resp.week_start_date} · {resp.project_id}
+                </p>
+                <div className="flex gap-1 flex-wrap">
+                  {Object.entries(resp.answers).map(([q, a]) => (
+                    <span
+                      key={q}
+                      className={cn(
+                        "text-[10px] px-1.5 py-0.5 rounded-full border whitespace-nowrap",
+                        a.is_not_happy_question && a.score <= 2
+                          ? "bg-red-50 border-red-200 text-red-700"
+                          : "bg-gray-50 border-gray-200 text-gray-500"
+                      )}
+                    >
+                      {PULSE_QUESTION_LABELS[q] ?? q}: {a.meaning}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

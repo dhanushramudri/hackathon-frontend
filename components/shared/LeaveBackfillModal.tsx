@@ -181,6 +181,8 @@ export function LeaveBackfillModal({
           employeeId={assignEmployeeId}
           projectId={impact.project_id}
           defaultAllocationPct={impact.allocation_by_percentage}
+          defaultStartDate={impact.leave_start_date}
+          defaultEndDate={impact.leave_end_date}
           onClose={() => setAssignEmployeeId(null)}
           onAssigned={() => { setAssignEmployeeId(null); onAssigned?.(); }}
         />
