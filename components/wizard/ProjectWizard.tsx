@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { Modal } from "@/components/shared/Modal";
 import { Stepper, type StepDef } from "@/components/shared/Stepper";
 import { Step1ProjectInformation, type WizardProject } from "@/components/wizard/Step1ProjectInformation";
 import { Step2ProjectGDPR } from "@/components/wizard/Step2ProjectGDPR";
@@ -55,6 +56,11 @@ export function ProjectWizard({
   const [isBillableDefault, setIsBillableDefault] = useState(true);
   const [savedSteps, setSavedSteps] = useState<Set<number>>(new Set());
   const [resolvedInitial, setResolvedInitial] = useState(false);
+  // Set when Step 1 saves a real end-date change on an already-existing project
+  // -- prompts whether to carry its active allocations forward into the new
+  // period (Step 5 does the actual cloning once `cloneSignal` is set).
+  const [pendingExtension, setPendingExtension] = useState<{ oldEndDate: string; newEndDate: string } | null>(null);
+  const [cloneSignal, setCloneSignal] = useState<{ oldEndDate: string; newEndDate: string } | null>(null);
 
   useEffect(() => {
     if (resolvedInitial) return;
@@ -128,6 +134,7 @@ export function ProjectWizard({
             markSaved(1);
           }}
           onNext={() => setWizardStep(2)}
+          onExtended={(oldEndDate, newEndDate) => setPendingExtension({ oldEndDate, newEndDate })}
         />
       </div>
 
@@ -160,6 +167,8 @@ export function ProjectWizard({
           projectDates={projectDates}
           deal={deal}
           onOpenProfile={onOpenProfile}
+          cloneSignal={cloneSignal}
+          onCloneApplied={() => setCloneSignal(null)}
         />
         <div className="flex justify-end">
           <button onClick={() => next(5)} className="text-xs px-4 py-2 rounded-lg text-white font-medium" style={{ backgroundColor: "hsl(var(--primary))" }}>
@@ -171,6 +180,33 @@ export function ProjectWizard({
       <div className={cn(wizardStep === 6 ? "" : "hidden")}>
         <Step6ProjectKickOff projectCode={wizardProject?.code ?? null} onSave={() => markSaved(6)} />
       </div>
+
+      {pendingExtension && (
+        <Modal title="Extend allocations too?" onClose={() => setPendingExtension(null)} widthClassName="max-w-md">
+          <div className="p-5 space-y-4">
+            <p className="text-xs text-gray-600">
+              This project&apos;s end date changed to <strong>{pendingExtension.newEndDate}</strong>. Clone its
+              currently active allocations forward to cover the extended period? You&apos;ll still be able to
+              review and edit every row (or dismiss it) in Resource Allocation before assigning.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setPendingExtension(null)}
+                className="text-xs px-3.5 py-2 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50"
+              >
+                Skip
+              </button>
+              <button
+                onClick={() => { setCloneSignal(pendingExtension); setPendingExtension(null); }}
+                className="text-xs px-3.5 py-2 rounded-lg text-white font-medium"
+                style={{ backgroundColor: "hsl(var(--primary))" }}
+              >
+                Clone allocations
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

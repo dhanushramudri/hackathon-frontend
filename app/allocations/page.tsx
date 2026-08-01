@@ -456,7 +456,6 @@ function AllocationsPageInner() {
                           </span>
                         )}
                         {health.wsr_trend && <span>Trend: {health.wsr_trend}</span>}
-                        {health.overrun_days != null && health.overrun_days > 0 && <span className="text-amber-600">{health.overrun_days}d overrun</span>}
                         {health.root_causes.length > 0 && (
                           <span className="text-gray-400">Root causes: {health.root_causes.join(", ")}</span>
                         )}

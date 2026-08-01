@@ -48,11 +48,13 @@ export function Step1ProjectInformation({
   wizardProject,
   onLinked,
   onNext,
+  onExtended,
 }: {
   initialDealKey: string | null;
   wizardProject: WizardProject | null;
   onLinked: (project: WizardProject, meta: { dealKey: string | null; isBillable: boolean }) => void;
   onNext: () => void;
+  onExtended?: (oldEndDate: string, newEndDate: string) => void;
 }) {
   const deals = useQuery({ queryKey: ["deals"], queryFn: api.listDeals });
   const clients = useQuery({ queryKey: ["project-clients"], queryFn: api.listProjectClients });
@@ -84,6 +86,11 @@ export function Step1ProjectInformation({
   const [propositionCoes, setPropositionCoes] = useState<string[]>([]);
   const [startDate, setStartDate] = useState(selectedDeal?.earliest_start ?? todayStr());
   const [endDate, setEndDate] = useState(addWeeksToDate(selectedDeal?.earliest_start ?? todayStr(), 12));
+  // Snapshot of the end date as last loaded from the server -- compared against
+  // the editable `endDate` on save to detect a real extension (not set until the
+  // sync-once effect below actually loads a saved project, so an empty value
+  // never falsely looks like an extension).
+  const [initialEndDate, setInitialEndDate] = useState("");
   const [projectNameA, setProjectNameA] = useState("");
   const [projectNameB, setProjectNameB] = useState("");
   const [accountManagers, setAccountManagers] = useState<string[]>([]);
@@ -109,7 +116,7 @@ export function Step1ProjectInformation({
     setPropositionCoes(info.proposition_coe ? info.proposition_coe.split("; ").filter(Boolean) : []);
     if (info.client_id) setManualClientIds([info.client_id]);
     if (info.project_start_date) setStartDate(info.project_start_date);
-    if (info.project_end_date) setEndDate(info.project_end_date);
+    if (info.project_end_date) { setEndDate(info.project_end_date); setInitialEndDate(info.project_end_date); }
     setCode(wizardProject.code);
     setCodeTouched(true);
     setLoadedForCode(wizardProject.code);
@@ -152,6 +159,7 @@ export function Step1ProjectInformation({
           { code: updated.project_code, clientId: updated.client_id, startDate: updated.project_start_date, endDate: updated.project_end_date },
           { dealKey: selectedDealKey, isBillable }
         );
+        if (initialEndDate && endDate !== initialEndDate) onExtended?.(initialEndDate, endDate);
         onNext();
       } else {
         const finalCode = await ensureCode();

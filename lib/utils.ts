@@ -13,7 +13,6 @@ export function formatUsd(value: number): string {
 }
 
 export const ROOT_CAUSE_LABEL: Record<string, string> = {
-  overrunning: "Overrunning",
   shadow_heavy: "Shadow-heavy",
   high_churn: "High churn",
   understaffed: "Understaffed",

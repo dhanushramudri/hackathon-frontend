@@ -160,7 +160,6 @@ export function EmployeeProfileModal({
 
 // ── Replacement Tab ────────────────────────────────────────────────────────────
 
-type BucketFilter = "all" | "eligible" | "trainable" | "gap";
 type ReplacementSort = "composite_desc" | "skill_desc" | "available_desc" | "competency_desc";
 
 function ReplacementTab({
@@ -171,9 +170,9 @@ function ReplacementTab({
   allocPct: number;
   onClose: () => void;
 }) {
-  const [bucketFilter, setBucketFilter] = useState<BucketFilter>("all");
-  const [coeFilter, setCoeFilter] = useState("all");
-  const [roleFilter, setRoleFilter] = useState("all");
+  const [bucketFilter, setBucketFilter] = useState<string[]>([]);
+  const [coeFilter, setCoeFilter] = useState<string[]>([]);
+  const [roleFilter, setRoleFilter] = useState<string[]>([]);
   const [sort, setSort] = useState<ReplacementSort>("composite_desc");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [bestFitOpen, setBestFitOpen] = useState(false);
@@ -199,9 +198,9 @@ function ReplacementTab({
   const allCandidates = data?.candidates ?? [];
 
   let candidates = allCandidates;
-  if (bucketFilter !== "all") candidates = candidates.filter((c) => c.bucket === bucketFilter);
-  if (coeFilter !== "all") candidates = candidates.filter((c) => c.coe === coeFilter);
-  if (roleFilter !== "all") candidates = candidates.filter((c) => c.job_name === roleFilter);
+  if (bucketFilter.length > 0) candidates = candidates.filter((c) => bucketFilter.includes(c.bucket));
+  if (coeFilter.length > 0) candidates = candidates.filter((c) => c.coe != null && coeFilter.includes(c.coe));
+  if (roleFilter.length > 0) candidates = candidates.filter((c) => c.job_name != null && roleFilter.includes(c.job_name));
   candidates = [...candidates];
   switch (sort) {
     case "composite_desc": candidates.sort((a, b) => b.composite_score - a.composite_score); break;
@@ -217,7 +216,7 @@ function ReplacementTab({
   const fallback     = data?.fallback_candidates;
   const fallbackCount = (fallback?.same_grade?.length ?? 0) + (fallback?.adjacent_level?.length ?? 0);
   const ctx          = data?.backfill_context;
-  const isTopPick    = bucketFilter === "all" && sort === "composite_desc";
+  const isTopPick    = bucketFilter.length === 0 && sort === "composite_desc";
 
   if (isLoading) return <div className="space-y-3"><TableSkeleton columns={7} rows={5} /></div>;
   if (isError)   return <ErrorState message="Could not load replacement candidates." />;
@@ -294,40 +293,49 @@ function ReplacementTab({
               onApplyNearCapacityTolerancePct={setNearCapacityTolerancePct}
             />
           )}
-          <TableControls
-            filters={[
-              {
-                value: bucketFilter,
-                onChange: (v) => setBucketFilter(v as BucketFilter),
-                options: [
-                  ["all", "All tiers"],
-                  ["eligible", "Eligible — ready now"],
-                  ["trainable", "Trainable — some gap"],
-                  ["gap", "Gap — significant training"],
-                ],
-              },
-              {
-                value: coeFilter,
-                onChange: setCoeFilter,
-                options: [["all", "All CoEs"], ...coeOptions.map((c) => [c, c] as [string, string])],
-              },
-              {
-                value: roleFilter,
-                onChange: setRoleFilter,
-                options: [["all", "All roles"], ...roleOptions.map((r) => [r, r] as [string, string])],
-              },
-            ]}
-            sort={{
-              value: sort,
-              onChange: (v) => setSort(v as ReplacementSort),
-              options: [
-                ["composite_desc", "Best overall fit ↓"],
-                ["skill_desc", "Skill match ↓"],
-                ["available_desc", "Availability ↓"],
-                ["competency_desc", "Competency ↓"],
-              ],
-            }}
-          />
+          <div className="flex items-center gap-1.5 flex-wrap mb-2">
+            <SearchableSelect
+              options={[
+                { value: "eligible", label: "Eligible — ready now" },
+                { value: "trainable", label: "Trainable — some gap" },
+                { value: "gap", label: "Gap — significant training" },
+              ]}
+              value={bucketFilter}
+              onChange={setBucketFilter}
+              multi
+              placeholder="All tiers"
+              size="sm"
+              className="w-40"
+            />
+            <SearchableSelect
+              options={coeOptions.map((c) => ({ value: c, label: c }))}
+              value={coeFilter}
+              onChange={setCoeFilter}
+              multi
+              placeholder="All CoEs"
+              size="sm"
+              className="w-40"
+            />
+            <SearchableSelect
+              options={roleOptions.map((r) => ({ value: r, label: r }))}
+              value={roleFilter}
+              onChange={setRoleFilter}
+              multi
+              placeholder="All roles"
+              size="sm"
+              className="w-44"
+            />
+            <select
+              value={sort}
+              onChange={(e) => setSort(e.target.value as ReplacementSort)}
+              className="text-[11px] px-1.5 py-1 rounded-lg border border-gray-200 bg-white text-gray-600 cursor-pointer hover:border-gray-300 ml-auto"
+            >
+              <option value="composite_desc">Best overall fit ↓</option>
+              <option value="skill_desc">Skill match ↓</option>
+              <option value="available_desc">Availability ↓</option>
+              <option value="competency_desc">Competency ↓</option>
+            </select>
+          </div>
 
           {/* Candidate table */}
           {candidates.length === 0 ? (

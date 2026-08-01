@@ -440,21 +440,6 @@ export interface ProjectRoster {
   distinct_employees: number;
 }
 
-export interface OverrunProof {
-  fired: boolean;
-  threshold_days: number;
-  overrun_days: number | null;
-  project_end_date: string | null;
-  qualifying_allocations: {
-    employee_id: string;
-    job_name: string | null;
-    resourcing_status: string;
-    allocated_end_date: string | null;
-    days_past_project_end: number;
-    is_allocation_active: boolean;
-  }[];
-}
-
 export interface ShadowHeavyProof {
   fired: boolean;
   threshold_share: number;
@@ -675,7 +660,6 @@ export interface ProjectHealthDetail {
   risk_score: number;
   risk_band: "high" | "medium" | "low";
   root_causes: string[];
-  overrun: OverrunProof;
   shadow_heavy: ShadowHeavyProof;
   high_churn: HighChurnProof;
   understaffed: UnderstaffedProof;
@@ -926,8 +910,10 @@ export interface ForecastBreakdownRow {
   needed_fte: number;
   needed_headcount: number;
   available_for_redeploy: number;
-  // <= available_for_redeploy when skills were requested -- only those who actually meet the
-  // skill threshold (not just hold the title) count toward covering the need.
+  // Same as available_for_redeploy -- holding the exact requested title, with
+  // real availability, is itself what counts toward covering the need here
+  // (a skill gap on one specific required skill is trainable, not a hire
+  // signal, for a headcount forecast).
   qualifying_for_redeploy: number;
   redeploy_candidates: RedeployCandidate[];
   adjacent_level_candidates: RedeployCandidate[];
@@ -949,9 +935,6 @@ export interface ForecastBreakdownRow {
   full_role_monthly_value_usd: number;
   achievable_monthly_value_usd: number;
   hire_signal: boolean;
-  recommended_start_date: string | null;
-  recommended_start_date_proof: string | null;
-  recommended_available_then: RedeployCandidate[];
 }
 
 export interface ForecastSpec {
@@ -1166,8 +1149,6 @@ export interface OutlookRoleDemandRow {
   needed_headcount: number;
   available_headcount: number | null;
   shortfall: number | null;
-  shortfall_value_usd: number;
-  value_usd: number | null;
   is_confirmed: boolean;
 }
 
@@ -1234,7 +1215,6 @@ export interface OutlookDrilldownDeal {
   is_confirmed: boolean;
   notice_days: number | null;
   is_late_notice: boolean | null;
-  hourly_rate_usd: number | null;
   value_usd: number | null;
 }
 
@@ -2089,15 +2069,20 @@ export const api = {
     getJSON<HeadcountRawTableSummary[]>("/forecast/headcount-prediction/tables"),
   headcountPredictionRawData: (table: string) =>
     getJSON<HeadcountRawTable>(`/forecast/headcount-prediction/raw-data?table=${encodeURIComponent(table)}`),
+  headcountPredictionSimulate: (horizonMonths: number, history: Record<string, HeadcountRawCellValue>[]) =>
+    postJSON<HeadcountPredictionResult>("/forecast/headcount-prediction/simulate", { horizon_months: horizonMonths, history }),
 };
 
-// ── Headcount Prediction ───────────────────────────────────────────────────
+// ── Headcount Prediction (rebuilt on real employee data -- see
+// backend/app/engines/headcount_prediction_engine.py) ──────────────────────
 export interface HeadcountHistoryRow {
   month: string;
   total_active_headcount: number;
-  new_hires_chennai: number;
-  new_hires_uk: number;
-  new_hires_usa: number;
+  new_hires: number;
+  resignations: number;
+  hires_by_location: Record<string, number>;
+  hires_estimated: boolean;
+  note: string | null;
 }
 
 export interface HeadcountForecastRow {
@@ -2105,7 +2090,8 @@ export interface HeadcountForecastRow {
   forecast: number;
   lower: number;
   upper: number;
-  is_validated_horizon: boolean;
+  sample_months: number;
+  low_confidence: boolean;
 }
 
 export interface HeadcountRiskFlag {
@@ -2115,13 +2101,8 @@ export interface HeadcountRiskFlag {
 
 export interface HeadcountCoeMixRow {
   coe: string;
-  fte: number;
+  headcount: number;
   share_pct: number;
-}
-
-export interface HeadcountCoeForecastRow {
-  month: string;
-  by_coe: Record<string, number>;
 }
 
 export interface HeadcountHiresVsResignationsRow {
@@ -2131,41 +2112,40 @@ export interface HeadcountHiresVsResignationsRow {
   net: number;
 }
 
-export interface HeadcountUtilizationRow {
+export interface HeadcountProductivityPoint {
   month: string;
-  free_pool: number;
-  over_allocated: number;
-  under_allocated: number;
+  value: number;
+  revenue_ltm_gbp_000: number;
+  headcount: number;
+  is_real_revenue_anchor: boolean;
 }
 
 export interface HeadcountInsights {
   executive_summary: string[];
   risk_flags: HeadcountRiskFlag[];
-  headcount_change_pct_3mo: number;
+  headcount_change_pct_3mo: number | null;
   forecast_change_pct: number | null;
   productivity: {
-    current_revenue_per_head_usd: number;
-    history: { month: string; value: number }[];
+    current_revenue_per_head_gbp: number;
+    predicted_revenue_per_head_gbp_3mo: number | null;
+    history: HeadcountProductivityPoint[];
+    forecast: HeadcountProductivityPoint[];
     current_ebitda_margin_pct: number;
+    predicted_ebitda_margin_pct_3mo: number | null;
     ebitda_margin_history: { month: string; value: number }[];
+    ebitda_margin_forecast: { month: string; value: number }[];
   };
   coe_breakdown: {
     latest_month: string;
     mix: HeadcountCoeMixRow[];
-    forecast: HeadcountCoeForecastRow[];
   };
   attrition: {
-    notice_period_current: number;
-    notice_period_by_coe: { coe: string; count: number }[];
-    notice_period_by_coe_as_of_month: string | null;
     hires_vs_resignations: HeadcountHiresVsResignationsRow[];
-    flight_risk_note: string | null;
   };
   utilization: {
     free_pool_current: number;
     over_allocated_current: number;
     under_allocated_current: number;
-    history: HeadcountUtilizationRow[];
   };
 }
 
@@ -2173,22 +2153,13 @@ export interface HeadcountPredictionResult {
   history: HeadcountHistoryRow[];
   training_period: string;
   horizon_months: number;
-  validated_horizon_months: number;
   forecast: HeadcountForecastRow[];
   insights: HeadcountInsights;
   model_info: {
     type: string;
-    formula: string;
+    sample_months: number;
+    low_confidence: boolean;
     trained_on: string;
-    training_rows_used: number;
-    features_used: string[];
-    validated_forecast_horizon_months: number;
-    holdout_mape_pct: number;
-    walk_forward_avg_mape_pct: number;
-    acceptance_threshold_mape_pct: number;
-    other_candidates_evaluated: Record<string, { holdout_mape_pct: number; walk_forward_avg_mape_pct: number }>;
-    recommendation_rationale: string;
-    confidence_interval: string;
     note: string;
   };
 }

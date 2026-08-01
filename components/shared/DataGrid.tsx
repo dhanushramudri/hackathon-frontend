@@ -52,15 +52,26 @@ export function DataGrid({
   rows,
   exportFilename = "data.csv",
   maxHeight = 480,
+  rowKey,
+  editableColumns,
+  onCellEdit,
 }: {
   columns: string[];
   rows: Record<string, HeadcountRawCellValue>[];
   exportFilename?: string;
   maxHeight?: number;
+  /** Column used to identify a row back to the caller when a cell is edited (e.g. "month"). Required if editableColumns is set. */
+  rowKey?: string;
+  /** Columns the user can edit inline (double-click a cell). Omit for a fully read-only grid. */
+  editableColumns?: string[];
+  /** Called with (rowKeyValue, column, newNumericValue) when an edit is committed. */
+  onCellEdit?: (rowKeyValue: string, column: string, value: number) => void;
 }) {
   const [search, setSearch] = useState("");
   const [sortCol, setSortCol] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<SortDir>(null);
+  const [editingCell, setEditingCell] = useState<{ row: string; col: string } | null>(null);
+  const [draft, setDraft] = useState("");
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -154,26 +165,67 @@ export function DataGrid({
             </tr>
           </thead>
           <tbody>
-            {sorted.map((row, ri) => (
+            {sorted.map((row, ri) => {
+              const rowKeyValue = rowKey ? cellToDisplay(row[rowKey]) : String(ri);
+              return (
               <tr key={ri} className={ri % 2 === 0 ? "bg-background" : ""} style={ri % 2 !== 0 ? { background: `${JMAN.turquoise}0D` } : undefined}>
                 {columns.map((col, ci) => {
                   const value = row[col];
+                  const isEditable = !!(editableColumns?.includes(col) && rowKey && onCellEdit);
+                  const isEditing = editingCell?.row === rowKeyValue && editingCell?.col === col;
+                  const commit = () => {
+                    const parsed = Number(draft);
+                    if (draft.trim() !== "" && !Number.isNaN(parsed)) onCellEdit!(rowKeyValue, col, parsed);
+                    setEditingCell(null);
+                  };
                   return (
                     <td
                       key={col}
+                      onDoubleClick={
+                        isEditable
+                          ? () => {
+                              setEditingCell({ row: rowKeyValue, col });
+                              setDraft(value === null || value === undefined ? "" : String(value));
+                            }
+                          : undefined
+                      }
                       className={cn(
                         "px-2.5 py-1 whitespace-nowrap text-foreground",
                         isNumeric(value) ? "text-right tabular-nums" : "text-left",
-                        ci === 0 && "sticky left-0 z-[5] bg-inherit font-medium"
+                        ci === 0 && "sticky left-0 z-[5] bg-inherit font-medium",
+                        isEditable && !isEditing && "cursor-text hover:ring-1 hover:ring-inset"
                       )}
-                      style={{ borderBottom: `1px solid ${JMAN.emerald}1F`, borderRight: `1px solid ${JMAN.emerald}1F` }}
+                      style={{
+                        borderBottom: `1px solid ${JMAN.emerald}1F`,
+                        borderRight: `1px solid ${JMAN.emerald}1F`,
+                        ...(isEditable && !isEditing ? { boxShadow: `inset 0 0 0 9999px ${JMAN.amber}0D` } : {}),
+                      }}
+                      title={isEditable ? "Double-click to edit" : undefined}
                     >
-                      {value === null || value === undefined ? <span className="text-muted-foreground/40">—</span> : cellToDisplay(value)}
+                      {isEditing ? (
+                        <input
+                          autoFocus
+                          value={draft}
+                          onChange={(e) => setDraft(e.target.value)}
+                          onBlur={commit}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") commit();
+                            if (e.key === "Escape") setEditingCell(null);
+                          }}
+                          className="w-16 text-right bg-background border rounded px-1 py-0.5 text-[11px]"
+                          style={{ borderColor: JMAN.emerald }}
+                        />
+                      ) : value === null || value === undefined ? (
+                        <span className="text-muted-foreground/40">—</span>
+                      ) : (
+                        cellToDisplay(value)
+                      )}
                     </td>
                   );
                 })}
               </tr>
-            ))}
+              );
+            })}
             {sorted.length === 0 && (
               <tr>
                 <td colSpan={columns.length} className="px-4 py-6 text-center text-muted-foreground italic">

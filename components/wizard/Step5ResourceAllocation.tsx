@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Check, X, Sparkles } from "lucide-react";
+import { Plus, Check, X, Sparkles, RefreshCw } from "lucide-react";
 import { api, type AllocationRow, type DealSummary, type RosterEntry, DEFAULT_INCLUDE_PARAMS } from "@/lib/api";
 import { SearchableSelect } from "@/components/shared/SearchableSelect";
 import { AssignWithOverAllocationCheck, OverAllocationWarningModal } from "@/components/shared/OverAllocationWarningModal";
@@ -12,6 +12,12 @@ import type { ProfileTab, SkillMatchContext } from "@/components/shared/Employee
 
 function todayStr(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+function addDaysToDateStr(dateStr: string, days: number): string {
+  const d = new Date(dateStr);
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
 }
 
 interface DraftRow {
@@ -24,6 +30,7 @@ interface DraftRow {
   shiftType: string;
   reviewerEmployeeId: string;
   allocationPct: number;
+  source: "budget" | "cloned";
 }
 
 export function Step5ResourceAllocation({
@@ -31,11 +38,15 @@ export function Step5ResourceAllocation({
   projectDates,
   deal,
   onOpenProfile,
+  cloneSignal,
+  onCloneApplied,
 }: {
   projectCode: string | null;
   projectDates: { startDate: string; endDate: string } | null;
   deal: DealSummary | null;
   onOpenProfile: (employeeId: string, tab: ProfileTab, skillMatchContext?: SkillMatchContext) => void;
+  cloneSignal?: { oldEndDate: string; newEndDate: string } | null;
+  onCloneApplied?: () => void;
 }) {
   const qc = useQueryClient();
   const roster = useQuery({
@@ -144,6 +155,7 @@ export function Step5ResourceAllocation({
           shiftType: "General",
           reviewerEmployeeId: "",
           allocationPct: item.allocation_pct || 100,
+          source: "budget",
         });
       });
 
@@ -151,6 +163,37 @@ export function Step5ResourceAllocation({
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectCode, budget.data, roster.data, topCandidatesLoading]);
+
+  // When a project's end date is extended (see ProjectWizard's confirm modal),
+  // carry every currently-active real allocation forward into the new period --
+  // pre-filled, fully editable, using the same draft mechanism as budget
+  // suggestions above. Runs once per `cloneSignal` (cleared via onCloneApplied
+  // right after), and keys are stable per allocation_id so a stray re-fire
+  // before the signal clears can't duplicate rows.
+  useEffect(() => {
+    if (!cloneSignal || roster.isLoading) return;
+    const activeRows = (roster.data?.roster ?? []).filter((r) => r.is_allocation_active);
+    setDrafts((prevDrafts) => {
+      const existingKeys = new Set(prevDrafts.map((d) => d.key));
+      const additions: DraftRow[] = activeRows
+        .filter((r) => !existingKeys.has(`cloned-${r.allocation_id}`))
+        .map((r) => ({
+          key: `cloned-${r.allocation_id}`,
+          designation: r.job_name ?? "",
+          employeeId: r.employee_id,
+          startDate: r.allocated_end_date ? addDaysToDateStr(r.allocated_end_date, 1) : cloneSignal.oldEndDate,
+          endDate: cloneSignal.newEndDate,
+          resourcingStatus: r.resourcing_status,
+          shiftType: r.shift_type ?? "General",
+          reviewerEmployeeId: r.reviewer_employee_id ?? "",
+          allocationPct: r.allocation_by_percentage,
+          source: "cloned",
+        }));
+      return additions.length > 0 ? [...prevDrafts, ...additions] : prevDrafts;
+    });
+    onCloneApplied?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cloneSignal, roster.data, roster.isLoading]);
 
   function updateDraft(key: string, patch: Partial<DraftRow>) {
     setDrafts((prev) => prev.map((d) => (d.key === key ? { ...d, ...patch } : d)));
@@ -190,7 +233,7 @@ export function Step5ResourceAllocation({
       )}
       <div>
         <p className="text-sm font-semibold text-gray-800 mb-2">
-          Resource Allocations ({rows.length}{drafts.length > 0 && ` + ${drafts.length} suggested from Budget`})
+          Resource Allocations ({rows.length}{drafts.length > 0 && ` + ${drafts.length} draft${drafts.length > 1 ? "s" : ""}`})
         </p>
         <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
           <div className="overflow-x-auto">
@@ -220,9 +263,15 @@ export function Step5ResourceAllocation({
                   <tr key={d.key} className="border-b border-gray-50 last:border-0 bg-[hsl(var(--primary)/0.04)]">
                     <td className="px-2.5 py-1.5">
                       <div className="flex items-center gap-1.5">
-                        <span title="Suggested from Budget" className="flex-shrink-0 inline-flex">
-                          <Sparkles size={13} className="text-amber-500" />
-                        </span>
+                        {d.source === "cloned" ? (
+                          <span title="Cloned from a prior allocation -- continuing into the extended project period" className="flex-shrink-0 inline-flex">
+                            <RefreshCw size={13} className="text-blue-500" />
+                          </span>
+                        ) : (
+                          <span title="Suggested from Budget" className="flex-shrink-0 inline-flex">
+                            <Sparkles size={13} className="text-amber-500" />
+                          </span>
+                        )}
                         <SearchableSelect
                           size="sm"
                           className="flex-1"

@@ -200,8 +200,7 @@ export function PipelineOutlookTab() {
             {data.first_shortfall_roles.map((r, i) => (
               <span key={r.role}>
                 {i > 0 && " and "}
-                <strong>{r.role}</strong> (need {r.needed_headcount}, {r.available_headcount} available
-                {r.shortfall_value_usd > 0 && `, ${formatUsd(r.shortfall_value_usd)}/mo unstaffable`})
+                <strong>{r.role}</strong> (need {r.needed_headcount}, {r.available_headcount} available)
               </span>
             ))}
             {" "}-- redeploy or hire before then.
@@ -375,7 +374,7 @@ export function PipelineOutlookTab() {
           <table className="w-full text-xs data-table">
             <thead className="bg-secondary text-secondary-foreground">
               <tr>
-                {["Period", "Role", "Needed", "Available", "Shortfall", "Shortfall $", "Value $"].map((h) => (
+                {["Period", "Role", "Needed", "Available", "Shortfall"].map((h) => (
                   <th key={h} className="text-left font-medium px-3 py-2 whitespace-nowrap">{h}</th>
                 ))}
               </tr>
@@ -420,8 +419,6 @@ export function PipelineOutlookTab() {
                       <span className="text-gray-400" title="Can't be assessed -- this resource code has no internal designation to check a roster against">-</span>
                     )}
                   </td>
-                  <td className="px-3 py-2 text-gray-500">{r.shortfall_value_usd > 0 ? formatUsd(r.shortfall_value_usd) : "-"}</td>
-                  <td className="px-3 py-2 text-gray-400">{r.value_usd ? formatUsd(r.value_usd) : "-"}</td>
                 </tr>
               ))}
             </tbody>
@@ -592,7 +589,10 @@ function DrilldownContent({
       </div>
     );
   }
-  const totalValue = result.deals.reduce((s, d) => s + (d.value_usd ?? 0), 0);
+  // Multiple rows can belong to the same real deal_id (one row per requested role) --
+  // dedupe before summing so a project's flat value isn't counted once per role.
+  const uniqueDeals = [...new Map(result.deals.map((d) => [d.deal_id, d])).values()];
+  const totalValue = uniqueDeals.reduce((s, d) => s + (d.value_usd ?? 0), 0);
   return (
     <div className="p-4 space-y-4 max-h-[75vh] overflow-y-auto">
       {result.deals.length > 0 && (
@@ -659,9 +659,11 @@ function DealRow({ deal: d }: { deal: OutlookDrilldownDeal }) {
       </button>
       {open && (
         <div className="mt-2 ml-5 space-y-2">
-          {d.value_usd != null && d.hourly_rate_usd != null && (
+          {d.value_usd != null && (
             <p className="text-gray-500 bg-gray-50 rounded-lg px-2 py-1.5">
-              ${d.hourly_rate_usd}/hr × 160 standard monthly hours × {d.requested_pct ?? 100}% requested = <strong>{formatUsd(d.value_usd)}</strong>
+              Illustrative project value -- anchored to the real ~$35K / 5-week delivery benchmark (same
+              as the Revenue Target tab), flat per project regardless of role mix. Requested %/duration
+              data is too sparse in this source to scale further.
             </p>
           )}
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-3 gap-y-1">

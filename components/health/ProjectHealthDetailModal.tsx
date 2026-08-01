@@ -160,15 +160,6 @@ function OverviewTab({ d }: { d: ProjectHealthDetail }) {
 
   const rows: { key: string; label: string; fired: boolean; detail: string }[] = [
     {
-      key: "overrunning",
-      label: "Overrunning",
-      fired: d.overrun.fired,
-      detail:
-        d.overrun.overrun_days != null && d.overrun.overrun_days > 0
-          ? `${d.overrun.overrun_days}d past the currently-resourced end date (${d.overrun.project_end_date ?? "?"}) with nothing further booked — threshold >${d.overrun.threshold_days}d`
-          : `resourced (via active allocations) through ${d.overrun.project_end_date ?? "the project end date"} — no current gap`,
-    },
-    {
       key: "shadow_heavy",
       label: "Shadow-heavy",
       fired: d.shadow_heavy.fired,
@@ -235,7 +226,7 @@ function OverviewTab({ d }: { d: ProjectHealthDetail }) {
 
         let capacityText: string;
         if (dv.is_overdue) {
-          capacityText = `Currently-resourced end date (${d.effective_end_date ?? d.project_end_date ?? "?"}) has passed with ${dv.open_ticket_count} open ticket(s), ${dv.remaining_effort_hours}h remaining`;
+          capacityText = `${dv.open_ticket_count} open ticket(s), ${dv.remaining_effort_hours}h remaining`;
         } else if (dv.within_risk_window) {
           const shortfall = dv.capacity_surplus_hours ?? 0;
           capacityText = shortfall >= 0
@@ -303,12 +294,6 @@ function OverviewTab({ d }: { d: ProjectHealthDetail }) {
       {d.is_extension_risk && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-1">
           <p className="text-xs font-semibold text-amber-800">Extension outlook</p>
-          <p className="text-xs text-gray-700">
-            Resourced through <strong>{d.extension_estimate.currently_resourced_through_date ?? "?"}</strong>
-            {d.extension_estimate.committed_overrun_days > 0 && (
-              <> — already <strong>{d.extension_estimate.committed_overrun_days}d</strong> past that, with nothing further booked.</>
-            )}
-          </p>
           {d.extension_estimate.projected_additional_days != null && (() => {
             // If the project is already overdue, the remaining-work clock can't
             // start from the old resourced-through date -- adding the estimate
@@ -1287,7 +1272,6 @@ function DevopsTab({ d }: { d: ProjectHealthDetail }) {
 
         {devops.is_overdue ? (
           <p className="text-sm text-gray-700">
-            End date <strong>{d.effective_end_date ?? d.project_end_date ?? "?"}</strong> passed —{" "}
             <span className="text-red-700 font-semibold">{devops.remaining_effort_hours}h</span> still open
             {d.extension_estimate.projected_additional_days != null && (
               <>

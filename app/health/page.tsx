@@ -6,13 +6,12 @@ import { useSearchParams } from "next/navigation";
 import { Users, DollarSign, Clock, AlertTriangle, ChevronRight } from "lucide-react";
 import { api, type HealthProject } from "@/lib/api";
 import { Badge } from "@/components/shared/Badge";
-import { StatCard } from "@/components/shared/StatCard";
 import { LoadingState, ErrorState } from "@/components/shared/EmptyState";
 import { StatCardGridSkeleton, TableSkeleton } from "@/components/shared/Skeleton";
 import { Modal } from "@/components/shared/Modal";
 import { ProjectHealthDetailContent } from "@/components/health/ProjectHealthDetailModal";
 import { EmployeeProfileModal } from "@/components/shared/EmployeeProfileModal";
-import { cn, formatUsd, rootCauseLabel, ROOT_CAUSE_LABEL } from "@/lib/utils";
+import { cn, formatUsd, ROOT_CAUSE_LABEL } from "@/lib/utils";
 
 type RiskFilter = "all" | "high" | "medium" | "low";
 type WsrFilter = "all" | "RED" | "AMBER" | "GREEN" | "no_report" | "has_report";
@@ -170,7 +169,7 @@ function DevopsBoardCell({ p, onOpenProject }: { p: HealthProject; onOpenProject
     >
       {p.devops_extension_risk ? (
         <span className="inline-flex flex-col gap-0.5">
-          <span className="text-[11px] text-amber-700 font-medium">
+          <span className="text-[11px] text-gray-600 font-medium">
             {p.devops_is_overdue
               ? `overdue · ${p.devops_remaining_effort_hours}h left`
               : p.devops_capacity_surplus_hours != null && p.devops_capacity_surplus_hours < 0
@@ -201,6 +200,12 @@ export default function HealthPage() {
 }
 
 // ── MetricCard — shared visual language for the stat row ───────────────────
+// Deliberately restrained: a plain white card with a small tinted icon chip is
+// the only color accent -- the big number stays neutral dark gray rather than
+// a full red/amber card wash, so this row of KPI tiles doesn't read as alarms.
+// The two real severity signals on this page (the per-row Risk badge and WSR
+// badge, which mirror the actual risk score / real weekly status report) keep
+// their real red/amber/green -- these 4 summary tiles are just counts.
 function MetricCard({
   icon: Icon, label, value, sub, active, onClick, tone = "amber",
 }: {
@@ -213,32 +218,63 @@ function MetricCard({
   tone?: "amber" | "red";
 }) {
   const hasSignal = value > 0;
-  const palette = tone === "red"
-    ? { chip: "bg-red-50 text-red-600", value: "text-red-700", card: "bg-red-50/40 border-red-200", ring: "ring-red-300" }
-    : { chip: "bg-amber-50 text-amber-600", value: "text-amber-700", card: "bg-amber-50/40 border-amber-200", ring: "ring-amber-300" };
+  const chip = tone === "red" ? "bg-rose-50 text-rose-500" : "bg-amber-50 text-amber-600";
 
   return (
     <button
       type="button"
       onClick={onClick}
       className={cn(
-        "group relative text-left rounded-2xl border p-4 transition-all duration-200",
+        "group relative text-left rounded-2xl border p-4 transition-all duration-200 bg-white",
         "hover:shadow-md hover:-translate-y-0.5",
-        hasSignal ? palette.card : "bg-white border-gray-200 hover:border-gray-300",
-        active && cn("ring-2", palette.ring)
+        active ? "border-gray-400 ring-2 ring-gray-200" : "border-gray-200 hover:border-gray-300"
       )}
     >
       <div className="flex items-center justify-between mb-3">
-        <span className={cn("inline-flex h-8 w-8 items-center justify-center rounded-lg", hasSignal ? palette.chip : "bg-gray-100 text-gray-400")}>
+        <span className={cn("inline-flex h-8 w-8 items-center justify-center rounded-lg", hasSignal ? chip : "bg-gray-100 text-gray-400")}>
           <Icon className="h-4 w-4" />
         </span>
         <ChevronRight className={cn("h-4 w-4 text-gray-300 transition-transform", active && "rotate-90 text-gray-400")} />
       </div>
-      <p className={cn("text-[28px] leading-none font-bold tracking-tight", hasSignal ? palette.value : "text-gray-900")}>
+      <p className="text-[28px] leading-none font-bold tracking-tight text-gray-900">
         {value}
       </p>
       <p className="mt-1.5 text-[11px] font-medium uppercase tracking-wide text-gray-400">{label}</p>
       <p className="mt-0.5 text-[11px] text-gray-500 leading-snug">{sub}</p>
+    </button>
+  );
+}
+
+// ── RiskCountCard — the 3 headline High/Medium/Low tiles ───────────────────
+// A plain white card with a thin colored left accent + colored label is
+// enough to convey which band is which -- a full solid-color card fill for
+// all 3 (including "High") made the very top of the page read as one big red
+// block before any real per-project detail was even visible.
+function RiskCountCard({
+  label, value, tone, active, onClick,
+}: {
+  label: string;
+  value: number;
+  tone: "red" | "amber" | "green";
+  active: boolean;
+  onClick: () => void;
+}) {
+  const dot = { red: "bg-rose-400", amber: "bg-amber-400", green: "bg-emerald-400" }[tone];
+  const text = { red: "text-rose-600", amber: "text-amber-600", green: "text-emerald-600" }[tone];
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "text-left rounded-xl border bg-white p-4 transition-all duration-200 hover:shadow-sm",
+        active ? "border-gray-400 ring-2 ring-gray-200" : "border-gray-200"
+      )}
+    >
+      <p className={cn("flex items-center gap-1.5 text-xs font-semibold", text)}>
+        <span className={cn("h-1.5 w-1.5 rounded-full", dot)} />
+        {label}
+      </p>
+      <p className="text-2xl font-bold text-gray-900 mt-0.5">{value}</p>
     </button>
   );
 }
@@ -452,24 +488,24 @@ const [escalationRiskOnly, setEscalationRiskOnly] = useState(false);
 
       {/* ── Row 1: three separate risk cards (High/Medium/Low), each independently clickable ── */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <StatCard
+        <RiskCountCard
           label="High Risk"
           value={counts.high}
-          color="red"
+          tone="red"
           active={riskFilter === "high"}
           onClick={() => toggleRiskFilter("high")}
         />
-        <StatCard
+        <RiskCountCard
           label="Medium Risk"
           value={counts.medium}
-          color="amber"
+          tone="amber"
           active={riskFilter === "medium"}
           onClick={() => toggleRiskFilter("medium")}
         />
-        <StatCard
+        <RiskCountCard
           label="Low Risk"
           value={counts.low}
-          color="green"
+          tone="green"
           active={riskFilter === "low"}
           onClick={() => toggleRiskFilter("low")}
         />
@@ -505,7 +541,7 @@ const [escalationRiskOnly, setEscalationRiskOnly] = useState(false);
           icon={Clock}
           label="Extension Risk"
           value={extensionRiskCount}
-          sub="overrunning, or DevOps work won't finish in time"
+          sub="DevOps ticket work forecast to run past the project's end date"
           tone="amber"
           active={extensionRiskOnly}
           onClick={() => setExtensionRiskOnly((v) => !v)}
@@ -514,13 +550,13 @@ const [escalationRiskOnly, setEscalationRiskOnly] = useState(false);
 
 {/* ── Revenue breakdown panel ── */}
       {revenueBreakdownOpen && (
-        <div className="rounded-xl border border-red-200 bg-red-50/40 p-3.5 space-y-2.5">
-          <div className="flex items-center gap-1 bg-white/70 rounded-lg p-0.5 w-fit border border-red-200">
+        <div className="rounded-xl border border-gray-200 bg-gray-50/60 p-3.5 space-y-2.5">
+          <div className="flex items-center gap-1 bg-white rounded-lg p-0.5 w-fit border border-gray-200">
             <button
               onClick={() => setRevenueBreakdownTab("unbillable")}
               className={cn(
                 "text-[11px] px-2.5 py-1 rounded-md font-medium transition",
-                revenueBreakdownTab === "unbillable" ? "bg-red-600 text-white" : "text-red-700 hover:bg-red-100"
+                revenueBreakdownTab === "unbillable" ? "bg-primary text-white" : "text-gray-600 hover:bg-gray-100"
               )}
             >
               Unbillable work
@@ -529,7 +565,7 @@ const [escalationRiskOnly, setEscalationRiskOnly] = useState(false);
               onClick={() => setRevenueBreakdownTab("extension")}
               className={cn(
                 "text-[11px] px-2.5 py-1 rounded-md font-medium transition",
-                revenueBreakdownTab === "extension" ? "bg-red-600 text-white" : "text-red-700 hover:bg-red-100"
+                revenueBreakdownTab === "extension" ? "bg-primary text-white" : "text-gray-600 hover:bg-gray-100"
               )}
             >
               Extension overrun
@@ -632,7 +668,7 @@ const [escalationRiskOnly, setEscalationRiskOnly] = useState(false);
                             {(p.predicted_extension_revenue_loss_usd ?? 0) > 0 ? (
                               <button
                                 onClick={() => setExtensionProofProject({ code: p.project_code, client: p.client_id })}
-                                className="text-amber-700 font-medium hover:underline"
+                                className="text-gray-700 font-medium hover:underline hover:text-primary"
                                 title={`${p.projected_extension_duration_label ?? `${p.projected_extension_days}d`} · ${p.projected_extension_confidence} confidence — click to see breakdown`}
                               >
                                 {formatUsd(p.predicted_extension_revenue_loss_usd ?? 0)}
@@ -778,7 +814,7 @@ const [escalationRiskOnly, setEscalationRiskOnly] = useState(false);
             className={cn(
               "text-[11px] px-2 py-1 rounded-lg border whitespace-nowrap transition-colors",
               understaffedOnly
-                ? "bg-amber-50 border-amber-300 text-amber-700 font-semibold"
+                ? "bg-primary/10 border-primary/40 text-primary font-semibold"
                 : "border-gray-200 text-gray-500 hover:border-gray-300"
             )}
           >
@@ -790,7 +826,7 @@ const [escalationRiskOnly, setEscalationRiskOnly] = useState(false);
             className={cn(
               "text-[11px] px-2 py-1 rounded-lg border whitespace-nowrap transition-colors",
               rampDownOnly
-                ? "bg-amber-50 border-amber-300 text-amber-700 font-semibold"
+                ? "bg-primary/10 border-primary/40 text-primary font-semibold"
                 : "border-gray-200 text-gray-500 hover:border-gray-300"
             )}
           >
@@ -825,7 +861,7 @@ const [escalationRiskOnly, setEscalationRiskOnly] = useState(false);
   className={cn(
     "text-[11px] px-2 py-1 rounded-lg border whitespace-nowrap transition-colors",
     extensionRiskOnly
-      ? "bg-amber-50 border-amber-300 text-amber-700 font-semibold"
+      ? "bg-primary/10 border-primary/40 text-primary font-semibold"
       : "border-gray-200 text-gray-500 hover:border-gray-300"
   )}
 >
@@ -833,7 +869,7 @@ const [escalationRiskOnly, setEscalationRiskOnly] = useState(false);
   {extensionRiskCount > 0 && (
     <span className={cn(
       "ml-1 inline-flex items-center justify-center rounded-full px-1 text-[9px] font-bold leading-none",
-      extensionRiskOnly ? "bg-amber-500 text-white" : "bg-gray-200 text-gray-600"
+      extensionRiskOnly ? "bg-primary text-white" : "bg-gray-200 text-gray-600"
     )}>
       {extensionRiskCount}
     </span>
@@ -845,7 +881,7 @@ const [escalationRiskOnly, setEscalationRiskOnly] = useState(false);
   className={cn(
     "text-[11px] px-2 py-1 rounded-lg border whitespace-nowrap transition-colors",
     escalationRiskOnly
-      ? "bg-red-50 border-red-300 text-red-700 font-semibold"
+      ? "bg-primary/10 border-primary/40 text-primary font-semibold"
       : "border-gray-200 text-gray-500 hover:border-gray-300"
   )}
 >
@@ -853,7 +889,7 @@ const [escalationRiskOnly, setEscalationRiskOnly] = useState(false);
   {escalationRiskCount > 0 && (
     <span className={cn(
       "ml-1 inline-flex items-center justify-center rounded-full px-1 text-[9px] font-bold leading-none",
-      escalationRiskOnly ? "bg-red-500 text-white" : "bg-gray-200 text-gray-600"
+      escalationRiskOnly ? "bg-primary text-white" : "bg-gray-200 text-gray-600"
     )}>
       {escalationRiskCount}
     </span>
@@ -865,7 +901,7 @@ const [escalationRiskOnly, setEscalationRiskOnly] = useState(false);
   className={cn(
     "text-[11px] px-2 py-1 rounded-lg border whitespace-nowrap transition-colors",
     pulseRiskOnly
-      ? "bg-purple-50 border-purple-300 text-purple-700 font-semibold"
+      ? "bg-primary/10 border-primary/40 text-primary font-semibold"
       : "border-gray-200 text-gray-500 hover:border-gray-300"
   )}
 >
@@ -873,7 +909,7 @@ const [escalationRiskOnly, setEscalationRiskOnly] = useState(false);
   {pulseRiskCount > 0 && (
     <span className={cn(
       "ml-1 inline-flex items-center justify-center rounded-full px-1 text-[9px] font-bold leading-none",
-      pulseRiskOnly ? "bg-purple-500 text-white" : "bg-gray-200 text-gray-600"
+      pulseRiskOnly ? "bg-primary text-white" : "bg-gray-200 text-gray-600"
     )}>
       {pulseRiskCount}
     </span>
@@ -917,7 +953,7 @@ const [escalationRiskOnly, setEscalationRiskOnly] = useState(false);
                   {/* Team */}
                   <td className="px-3 py-2 text-gray-500 whitespace-nowrap">
                     {p.n_employees} / {p.expected_headcount ?? "?"}
-                    {p.is_understaffed && <Badge variant="amber">understaffed</Badge>}
+                    {p.is_understaffed && <Badge variant="default">understaffed</Badge>}
                   </td>
 
                   {/* Risk */}
@@ -925,13 +961,18 @@ const [escalationRiskOnly, setEscalationRiskOnly] = useState(false);
                     <Badge variant={p.risk_band}>{p.risk_band}</Badge>
                   </td>
 
-                  {/* Root causes */}
+                  {/* Root causes -- kept neutral/outlined rather than solid red/amber/purple
+                      pills: the Risk badge and WSR badge (below) are the two real severity
+                      signals on this row, these are just which real factors fed into that
+                      score, so they don't need to shout too. The full root-causes text list
+                      is dropped here -- it's redundant with the Overview tab in the project
+                      detail (opened via the Project link), which already shows it. */}
                   <td className="px-3 py-2 text-gray-500 whitespace-nowrap">
                     <div className="flex items-center gap-1 flex-wrap">
-                      {p.is_extension_risk && <Badge variant="amber">extension</Badge>}
-                      {p.is_escalation_risk && <Badge variant="red">escalation</Badge>}
-                      {p.is_pulse_risk && <Badge variant="purple">pulse {p.pulse_avg_score}/4</Badge>}
-                      <span>{p.root_causes.map(rootCauseLabel).join(", ") || (!p.is_extension_risk && !p.is_escalation_risk && !p.is_pulse_risk ? "-" : "")}</span>
+                      {p.is_extension_risk && <Badge variant="default">extension</Badge>}
+                      {p.is_escalation_risk && <Badge variant="default">escalation</Badge>}
+                      {p.is_pulse_risk && <Badge variant="default">pulse {p.pulse_avg_score}/4</Badge>}
+                      {!p.is_extension_risk && !p.is_escalation_risk && !p.is_pulse_risk && <span className="text-gray-300">-</span>}
                     </div>
                   </td>
 
@@ -978,7 +1019,7 @@ const [escalationRiskOnly, setEscalationRiskOnly] = useState(false);
                   {/* Ramp-down */}
                   <td className="px-3 py-2 whitespace-nowrap">
                     {p.is_ramp_down_candidate && (
-                      <Badge variant="amber">{p.days_to_ramp_down}d</Badge>
+                      <Badge variant="default">{p.days_to_ramp_down}d</Badge>
                     )}
                   </td>
                 </tr>
@@ -1219,7 +1260,7 @@ function ExtensionRevenueProofModal({
                           <td className="py-1.5 text-right text-gray-500">
                             {r.hourly_rate_usd != null ? `$${r.hourly_rate_usd}` : "-"}
                           </td>
-                          <td className="py-1.5 text-right text-amber-700 font-medium">
+                          <td className="py-1.5 text-right text-gray-700 font-medium">
                             {formatUsd(r.predicted_additional_usd)}
                           </td>
                         </tr>
@@ -1260,14 +1301,13 @@ function UnbilledValueCard({
   return (
     <div
       className={cn(
-        "group relative rounded-2xl border p-4 transition-all duration-200",
+        "group relative rounded-2xl border p-4 transition-all duration-200 bg-white",
         "hover:shadow-md hover:-translate-y-0.5",
-        hasSignal ? "bg-red-50/40 border-red-200" : "bg-white border-gray-200 hover:border-gray-300",
-        active && "ring-2 ring-red-300"
+        active ? "border-gray-400 ring-2 ring-gray-200" : "border-gray-200 hover:border-gray-300"
       )}
     >
       <div className="flex items-center justify-between mb-3">
-        <span className={cn("inline-flex h-8 w-8 items-center justify-center rounded-lg", hasSignal ? "bg-red-50 text-red-600" : "bg-gray-100 text-gray-400")}>
+        <span className={cn("inline-flex h-8 w-8 items-center justify-center rounded-lg", hasSignal ? "bg-blue-50 text-blue-600" : "bg-gray-100 text-gray-400")}>
           <DollarSign className="h-4 w-4" />
         </span>
         <div className="inline-flex items-center gap-0.5 rounded-full bg-gray-100 p-0.5">
@@ -1286,7 +1326,7 @@ function UnbilledValueCard({
         </div>
       </div>
       <button type="button" onClick={onClick} className="w-full text-left">
-        <p className={cn("text-[28px] leading-none font-bold tracking-tight", hasSignal ? "text-red-700" : "text-gray-900")}>
+        <p className="text-[28px] leading-none font-bold tracking-tight text-gray-900">
           {formatUsd(value)}
         </p>
         <p className="mt-1.5 text-[11px] font-medium uppercase tracking-wide text-gray-400">Unbilled Value at Risk</p>

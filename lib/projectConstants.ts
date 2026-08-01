@@ -8,10 +8,12 @@ export const PROJECT_STATUS_OPTIONS = [
   "SOW PENDING SIGNATURE", "SCOPING APPROVAL",
 ];
 
+// The 6 real, canonical proposition CoEs (RM-confirmed) -- historical project records carry
+// extra messy variants/typos ("Managed Service", "Data and Reporting", "PE Services", etc.)
+// which stay as-is on existing rows, but only these 6 are offered when setting the field
+// going forward.
 export const PROPOSITION_COE_OPTIONS = [
-  "Due Diligence", "Managed Service", "Managed Services", "Core Reporting", "Value Creation",
-  "Data Advisory", "Exit Support", "Data and Reporting", "PE Services", "Snowball Reporting",
-  "TechOps And MS", "Pricing", "Other",
+  "Managed Services", "Exit Support", "Due Diligence", "Data Advisory", "Core Reporting", "Value Creation",
 ];
 
 // This app has no data at all for these 3 JIN fields -- omitted from Step 1

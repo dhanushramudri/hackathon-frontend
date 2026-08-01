@@ -306,10 +306,16 @@ function RoleCandidateList({
   showQualifies,
   emptyText,
   note,
+  disableTopPick,
 }: {
   candidates: RedeployCandidate[];
   onOpen: (sel: { employeeId: string; skillMatchContext?: SkillMatchContext; tab?: ProfileTab }) => void;
   showQualifies?: boolean;
+  // Suppress the "Top pick" badge entirely -- used for lists that are shown
+  // for reference only and never actually count toward filling the role
+  // (e.g. same-title-but-below-skill-threshold), where highlighting a "best"
+  // candidate would wrongly imply they're competing with the real shortlist.
+  disableTopPick?: boolean;
   emptyText?: string;
   note?: string;
 }) {
@@ -365,7 +371,7 @@ function RoleCandidateList({
               onOpen={onOpen}
               levelNote={levelNoteFor(c)}
               qualifies={showQualifies ? isQualifying(c) : undefined}
-              isTopPick={i === 0 && sort === "composite_desc" && !q && coeFilter.size === 0 && reasonFilter.size === 0}
+              isTopPick={!disableTopPick && i === 0 && sort === "composite_desc" && !q && coeFilter.size === 0 && reasonFilter.size === 0}
             />
           ))}
         </div>
@@ -641,7 +647,7 @@ function SkillMatchCandidateList({
   );
 }
 
-type RoleDetailTabKey = "on_skill" | "adjacent" | "cross_role" | "trainable" | "recommended_date";
+type RoleDetailTabKey = "on_skill" | "adjacent" | "cross_role" | "trainable";
 
 // Trust the backend's own gating decision (meets_requested_skillset) rather
 // than reimplementing "skill_score >= threshold" here -- leadership
@@ -650,6 +656,22 @@ type RoleDetailTabKey = "on_skill" | "adjacent" | "cross_role" | "trainable" | "
 // "doesn't qualify" even though the backend counts them as qualifying.
 function isQualifying(c: RedeployCandidate): boolean {
   return c.meets_requested_skillset ?? true;
+}
+
+// Real frequency count of missing skills across the trainable pool -- the
+// concrete "what to actually run a KT/JIT session on" signal, not prose.
+function aggregateMissingSkills(candidates: RecommendationCandidate[]): { skill: string; count: number }[] {
+  const counts = new Map<string, number>();
+  for (const c of candidates) {
+    for (const raw of c.missing_skills) {
+      const skill = cleanSkillLabel(raw);
+      if (!skill) continue;
+      counts.set(skill, (counts.get(skill) ?? 0) + 1);
+    }
+  }
+  return Array.from(counts.entries())
+    .map(([skill, count]) => ({ skill, count }))
+    .sort((a, b) => b.count - a.count);
 }
 
 // Per-role detail: instead of dumping every category into one long inline
@@ -668,7 +690,6 @@ function RoleDetailPage({
     { key: "adjacent", label: "Adjacent Title", count: b.adjacent_level_candidates.length },
     { key: "cross_role", label: "Cross-Role Match", count: b.cross_role_candidates.length },
     { key: "trainable", label: "Trainable", count: b.training_candidates.length },
-    { key: "recommended_date", label: "Recommended Date", count: b.recommended_start_date ? 1 : 0 },
   ];
   const [tab, setTab] = useState<RoleDetailTabKey>(tabs.find((t) => t.count > 0)?.key ?? "on_skill");
 
@@ -713,11 +734,19 @@ function RoleDetailPage({
                 emptyText="No one holding this title meets the requested skillset."
               />
               {nonQualifyingOnSkill.length > 0 && (
-                <div className="pt-4 border-t border-gray-100">
-                  <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-600 mb-2">
-                    Holds this title, doesn&apos;t meet the requested skillset ({nonQualifyingOnSkill.length})
-                  </p>
-                  <RoleCandidateList candidates={nonQualifyingOnSkill} onOpen={onOpenProfile} />
+                <div className="pt-4 border-t border-gray-100 space-y-3">
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5">
+                    <p className="text-xs font-semibold text-amber-800">
+                      {nonQualifyingOnSkill.length} more hold this exact title, but not counted above
+                    </p>
+                    <p className="text-[11px] text-amber-700 mt-0.5">
+                      Their skill match for this specific role's required skills is below the 60% bar this app uses
+                      to call someone "eligible" -- even though some may still show a decent overall fit score from
+                      competency/availability/track record. Reference only; these people do NOT count toward the{" "}
+                      {b.qualifying_for_redeploy} covers / {b.needed_headcount} needed above.
+                    </p>
+                  </div>
+                  <RoleCandidateList candidates={nonQualifyingOnSkill} onOpen={onOpenProfile} disableTopPick />
                 </div>
               )}
             </div>
@@ -728,7 +757,7 @@ function RoleDetailPage({
               onOpen={onOpenProfile}
               showQualifies
               emptyText="No one one level away qualifies either."
-              note={b.adjacent_fill_count > 0 ? `${b.adjacent_fill_count} of these are counted toward the need above (verified skill match).` : undefined}
+              note={b.adjacent_fill_count > 0 ? `${b.adjacent_fill_count} counted toward the need above.` : undefined}
             />
           )}
           {tab === "cross_role" && (
@@ -736,34 +765,29 @@ function RoleDetailPage({
               candidates={b.cross_role_candidates}
               onOpen={onOpenProfile}
               emptyText="No cross-role skill matches found."
-              note="Real skill-record overlap from a different job title -- NOT counted toward the shortfall above. Judge case-by-case whether pulling someone off their current role is realistic."
+              note="Different job title -- not counted toward shortfall."
             />
           )}
           {tab === "trainable" && (
-            <SkillMatchCandidateList
-              candidates={b.training_candidates}
-              onOpen={onOpenProfile}
-              emptyText="No training candidates found."
-              note="Real skill gap -- could fill this role with training instead of hiring, not counted toward the shortfall above."
-              showMissingSkills
-            />
-          )}
-          {tab === "recommended_date" && (
-            <div>
-              {b.recommended_start_date ? (
-                <>
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 mb-3">
-                    <p className="text-xs text-amber-800">
-                      <strong>Recommended start date: {b.recommended_start_date}</strong> -- {b.recommended_start_date_proof}
-                    </p>
-                  </div>
-                  <RoleCandidateList candidates={b.recommended_available_then} onOpen={onOpenProfile} />
-                </>
-              ) : (
-                <p className="text-xs text-gray-400">
-                  No real date within 180 days resolves this with same-or-adjacent-level capacity -- hire signal stands.
-                </p>
+            <div className="space-y-3">
+              {b.training_candidates.length > 0 && (
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {aggregateMissingSkills(b.training_candidates).map(({ skill, count }) => (
+                    <span
+                      key={skill}
+                      className="text-[11px] px-2 py-1 rounded-full border border-purple-200 bg-purple-50 text-purple-700 whitespace-nowrap"
+                    >
+                      {skill} <span className="font-semibold">×{count}</span>
+                    </span>
+                  ))}
+                </div>
               )}
+              <SkillMatchCandidateList
+                candidates={b.training_candidates}
+                onOpen={onOpenProfile}
+                emptyText="No training candidates found."
+                showMissingSkills
+              />
             </div>
           )}
         </div>
@@ -1256,15 +1280,7 @@ function RevenueTargetSection({
                           </td>
                           <td className="px-3 py-2 text-gray-500">{b.shortfall > 0 ? b.shortfall : "-"}</td>
                           <td className="px-3 py-2">
-                            {b.shortfall === 0 ? (
-                              <Badge variant="green">Covered</Badge>
-                            ) : b.recommended_start_date ? (
-                              <span title={b.recommended_start_date_proof ?? undefined}>
-                                <Badge variant="amber">At risk -- available {b.recommended_start_date}</Badge>
-                              </span>
-                            ) : (
-                              <Badge variant="red">Hiring needed</Badge>
-                            )}
+                            {b.shortfall === 0 ? <Badge variant="green">Covered</Badge> : <Badge variant="red">Hiring needed</Badge>}
                           </td>
                         </tr>
                       );
