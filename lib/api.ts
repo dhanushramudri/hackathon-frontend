@@ -17,26 +17,6 @@ async function postJSON<T>(path: string, body: unknown): Promise<T> {
   return res.json();
 }
 
-export interface AvailabilityProjectRow {
-  project_id: string;
-  type_of_project: string | null;
-  allocation_by_percentage: number;
-  resourcing_status: string;
-}
-
-export interface AvailabilityRow {
-  employee_id: string;
-  job_name: string | null;
-  department_name: string | null;
-  location: string | null;
-  total_allocated_pct: number;
-  client_allocated_pct: number;
-  available_pct: number;
-  is_fully_free: boolean;
-  as_of_date: string;
-   current_projects: AvailabilityProjectRow[];
-}
-
 export interface AllocationRow {
   allocation_id: string;
   employee_id: string;
@@ -681,6 +661,8 @@ export interface ExtensionEstimate {
 }
 export interface ProjectHealthDetail {
   project_code: string;
+  is_health_tracked: boolean;
+  project_status: string | null;
   client_id: string | null;
   type_of_project: string;
   tech_coe: string | null;
@@ -1138,6 +1120,30 @@ export interface LeaveImpact {
   required_skill_source: "project_roster" | "own_skills" | "none";
 }
 
+export interface ProjectAlumniStint {
+  allocated_start_date: string | null;
+  allocated_end_date: string | null;
+  resourcing_status: string;
+  allocation_by_percentage: number | null;
+  is_allocation_active: boolean;
+}
+
+export interface ProjectAlumniCurrentProject {
+  project_id: string;
+  allocation_by_percentage: number | null;
+  resourcing_status: string;
+}
+
+export interface ProjectAlumniCandidate {
+  employee_id: string;
+  job_name: string | null;
+  location: string | null;
+  is_currently_free: boolean;
+  current_projects: ProjectAlumniCurrentProject[];
+  past_stints: ProjectAlumniStint[];
+  most_recent_end_date: string | null;
+}
+
 export interface OutlookMonth {
   month: string;
   confirmed_demand_count: number;
@@ -1332,32 +1338,59 @@ export interface BuddyStreamEvent {
  * as Buddy works, instead of waiting for the full answer. Uses fetch() directly since
  * the structured-final-answer JSON only arrives once on the "done" event, not streamed
  * token-by-token (the backend's final answer is parsed JSON, not free prose). */
+// 60s of total silence (no new SSE bytes at all -- tool_call/tool_result events reset this
+// on every real turn) aborts the connection with a clear, catchable error instead of leaving
+// the caller awaiting forever. This is a real recovery path, not just a defensive nicety: an
+// in-flight request whose backend worker gets killed mid-stream (e.g. uvicorn --reload
+// restarting while a request is in flight) never sends a clean close, so without this the
+// browser's fetch reader can hang indefinitely with no way for the UI to recover on its own.
+const STREAM_INACTIVITY_TIMEOUT_MS = 60000;
+
 export async function* buddyAskStream(
   message: string,
   history: { role: "user" | "assistant"; content: string }[] = [],
   priorContext?: string
 ): AsyncGenerator<BuddyStreamEvent> {
-  const res = await fetch(`${BASE}/buddy/ask/stream`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message, history, prior_context: priorContext }),
-  });
-  if (!res.ok || !res.body) {
-    throw new Error(`/buddy/ask/stream failed: ${res.status}`);
-  }
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const chunks = buffer.split("\n\n");
-    buffer = chunks.pop() ?? "";
-    for (const chunk of chunks) {
-      const line = chunk.split("\n").find((l) => l.startsWith("data: "));
-      if (line) yield JSON.parse(line.slice(6));
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const armTimeout = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => controller.abort(), STREAM_INACTIVITY_TIMEOUT_MS);
+  };
+
+  armTimeout();
+  try {
+    const res = await fetch(`${BASE}/buddy/ask/stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message, history, prior_context: priorContext }),
+      signal: controller.signal,
+    });
+    if (!res.ok || !res.body) {
+      throw new Error(`/buddy/ask/stream failed: ${res.status}`);
     }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (true) {
+      armTimeout();
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const chunks = buffer.split("\n\n");
+      buffer = chunks.pop() ?? "";
+      for (const chunk of chunks) {
+        const line = chunk.split("\n").find((l) => l.startsWith("data: "));
+        if (line) yield JSON.parse(line.slice(6));
+      }
+    }
+  } catch (err) {
+    if (controller.signal.aborted) {
+      throw new Error("Buddy didn't respond in time -- the connection was reset. Please try again.");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -1481,13 +1514,66 @@ export interface EmployeePulseResponse {
 
 export interface EmployeePulseDetail {
   is_not_happy: boolean;
+  response_count: number;
+  avg_score: number;
+  scores: Record<string, number>;
+  worst_question: string;
   responses: EmployeePulseResponse[];
   window_weeks: number;
+}
+
+// One real HR/PM performance-review check-in on a real (employee, project)
+// engagement, written by a real reviewing employee -- manual "proof" surface
+// only, never an input to recommendation scoring.
+export interface EmployeeFeedbackEntry {
+  feedback_id: string;
+  project_id: string;
+  client_id: string | null;
+  coe: string | null;
+  feedback_date: string | null;
+  reviewer_employee_id: string;
+  reviewer_role: string;
+  rating: number;
+  would_recommend: boolean;
+  themes: string[];
+  summary_comment: string;
+  full_text: string;
+}
+
+export interface EmployeeFeedbackReviewer {
+  employee_id: string;
+  role: string;
+}
+
+export interface EmployeeFeedbackResult {
+  employee_id: string;
+  total_response_count: number;
+  response_count: number;
+  distinct_project_count: number;
+  avg_rating: number | null;
+  would_recommend_pct: number | null;
+  rating_breakdown: Record<string, number>;
+  theme_averages: Record<string, number>;
+  available_coes: string[];
+  available_projects: string[];
+  available_themes: string[];
+  available_reviewers: EmployeeFeedbackReviewer[];
+  entries: EmployeeFeedbackEntry[];
 }
 
 export interface AllocationTimesheet extends AllocationRow {
   hours_window_end: string;
   daily_hours: { date: string; hours: number | null; expected_hours: number; utilization_pct: number | null; is_missing: boolean }[];
+}
+
+export interface UpdateAllocationResult {
+  allocation_id: string;
+  allocation_by_percentage: number;
+  allocated_start_date: string;
+  allocated_end_date: string;
+  resourcing_status: string;
+  shift_type: string | null;
+  reviewer_employee_id: string | null;
 }
 
 export interface AssignAllocationResult {
@@ -1612,6 +1698,18 @@ export interface DigestSendResult {
   high_risk_total_count: number;
 }
 
+// Sent to a backfill candidate asking for their availability -- CC's the
+// project's real manager and the candidate's real reporting manager (CDM
+// proxy, no distinct CDM field exists in the data). No allocation is created;
+// purely an outreach nudge the RM can follow up on manually.
+export interface SupportRequestResult {
+  sent_to: string;
+  cc: string[];
+  project_manager_employee_id: string | null;
+  cdm_employee_id: string | null;
+  subject: string;
+}
+
 export const api = {
   tables: () => getJSON<Record<string, number>>("/meta/tables"),
   sendDigestNow: () => postJSON<DigestSendResult>(`/digest/send?period_label=${encodeURIComponent("right now")}`, {}),
@@ -1622,13 +1720,25 @@ export const api = {
     getJSON<EmployeeProjectHistoryRow[]>(
       `/employees/${encodeURIComponent(employeeId)}/project-history${category ? `?category=${encodeURIComponent(category)}` : ""}`
     ),
+  employeeFeedback: (
+    employeeId: string,
+    filters: { weeksBack?: number; coe?: string; projectId?: string; reviewerEmployeeId?: string; theme?: string; ratings?: number[] } = {}
+  ) => {
+    const params = new URLSearchParams();
+    if (filters.weeksBack) params.set("weeks_back", String(filters.weeksBack));
+    if (filters.coe) params.set("coe", filters.coe);
+    if (filters.projectId) params.set("project_id", filters.projectId);
+    if (filters.reviewerEmployeeId) params.set("reviewer_employee_id", filters.reviewerEmployeeId);
+    if (filters.theme) params.set("theme", filters.theme);
+    for (const r of filters.ratings ?? []) params.append("ratings", String(r));
+    const qs = params.toString();
+    return getJSON<EmployeeFeedbackResult>(`/employees/${encodeURIComponent(employeeId)}/feedback${qs ? `?${qs}` : ""}`);
+  },
   employeeHeadcountSummary: () => getJSON<EmployeeHeadcountSummary>("/employees/headcount-summary"),
   overtimeRiskSummary: () => getJSON<OvertimeRiskSummary>("/employees/overtime-risk-summary"),
   employeesList: () => getJSON<EmployeeListRow[]>("/employees"),
   employeeDesignations: () => getJSON<string[]>("/employees/designations"),
   allocations: () => getJSON<AllocationRow[]>("/allocations/current"),
-  availability: (asOfDate?: string) =>
-    getJSON<AvailabilityRow[]>(`/allocations/availability${asOfDate ? `?as_of_date=${asOfDate}` : ""}`),
   allocationTimesheet: (employeeId: string, projectId: string) =>
     getJSON<AllocationTimesheet>(`/allocations/timesheet?employee_id=${encodeURIComponent(employeeId)}&project_id=${encodeURIComponent(projectId)}`),
   assignAllocation: async (body: {
@@ -1664,6 +1774,43 @@ export const api = {
     if (!res.ok) {
       const err = await res.json().catch(() => null);
       throw new Error(err?.detail || `Extend failed: ${res.status}`);
+    }
+    return res.json();
+  },
+  updateAllocation: async (
+    allocationId: string,
+    body: {
+      allocationPct: number;
+      startDate: string;
+      endDate: string;
+      resourcingStatus: string;
+      shiftType?: string | null;
+      reviewerEmployeeId?: string | null;
+    }
+  ): Promise<UpdateAllocationResult> => {
+    const res = await fetch(`${BASE}/allocations/${encodeURIComponent(allocationId)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        allocation_pct: body.allocationPct,
+        start_date: body.startDate,
+        end_date: body.endDate,
+        resourcing_status: body.resourcingStatus,
+        shift_type: body.shiftType ?? null,
+        reviewer_employee_id: body.reviewerEmployeeId ?? null,
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => null);
+      throw new Error(err?.detail || `Update failed: ${res.status}`);
+    }
+    return res.json();
+  },
+  deleteAllocation: async (allocationId: string): Promise<{ allocation_id: string; deleted: boolean; employee_id: string; project_id: string }> => {
+    const res = await fetch(`${BASE}/allocations/${encodeURIComponent(allocationId)}`, { method: "DELETE" });
+    if (!res.ok) {
+      const err = await res.json().catch(() => null);
+      throw new Error(err?.detail || `Delete failed: ${res.status}`);
     }
     return res.json();
   },
@@ -1926,8 +2073,15 @@ export const api = {
         `&include_coe_affinity=${include.coe_affinity}&include_cost_efficiency=${include.cost_efficiency}` +
         `&include_below_capacity=${includeBelowCapacity}&near_capacity_tolerance_pct=${nearCapacityTolerancePct}`
     ),
-  predictionForecast: (horizonMonths: number = 24) =>
-    getJSON<PredictionForecastResult>(`/forecast/prediction?horizon_months=${horizonMonths}`),
+  projectAlumniCandidates: (projectCode: string, excludeEmployeeId?: string) =>
+    getJSON<ProjectAlumniCandidate[]>(
+      `/leave/project-alumni?project_code=${encodeURIComponent(projectCode)}` +
+        (excludeEmployeeId ? `&exclude_employee_id=${encodeURIComponent(excludeEmployeeId)}` : "")
+    ),
+  requestSupport: (employeeId: string, projectId: string, startDate: string, endDate: string) =>
+    postJSON<SupportRequestResult>("/leave/request-support", {
+      employee_id: employeeId, project_id: projectId, start_date: startDate, end_date: endDate,
+    }),
   headcountPrediction: (horizonMonths: number = 12) =>
     getJSON<HeadcountPredictionResult>(`/forecast/headcount-prediction?horizon_months=${horizonMonths}`),
   headcountPredictionTables: () =>
@@ -1935,45 +2089,6 @@ export const api = {
   headcountPredictionRawData: (table: string) =>
     getJSON<HeadcountRawTable>(`/forecast/headcount-prediction/raw-data?table=${encodeURIComponent(table)}`),
 };
-
-// ── Prediction Forecast ────────────────────────────────────────────────────
-export interface PredictionHistoryRow {
-  month: string;
-  total_headcount_demand: number;
-  confirmed_headcount: number;
-  win_rate_pct: number;
-  revenue_usd: number;
-}
-
-export interface PredictionForecastRow {
-  month: string;
-  forecast: number;
-  lower: number;
-  upper: number;
-}
-
-export interface PredictionForecastResult {
-  history: PredictionHistoryRow[];
-  horizon_months: number;
-  demand_forecast: PredictionForecastRow[];
-  revenue_forecast: PredictionForecastRow[];
-  winrate_forecast: PredictionForecastRow[];
-  summary: {
-    peak_demand_month: string;
-    peak_demand_headcount: number;
-    total_forecast_headcount: number;
-    total_forecast_revenue_usd: number;
-    demand_monthly_growth_rate: number;
-  };
-  model_info: {
-    type: string;
-    formula: string;
-    training_months: number;
-    training_period: string;
-    confidence_interval: string;
-    note: string;
-  };
-}
 
 // ── Headcount Prediction ───────────────────────────────────────────────────
 export interface HeadcountHistoryRow {

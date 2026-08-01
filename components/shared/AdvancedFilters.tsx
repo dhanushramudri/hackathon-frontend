@@ -112,9 +112,9 @@ export function AdvancedFiltersPanel({
             <span className="flex-1">
               <span className="text-sm font-medium text-gray-800">{p.label}</span>
               <span className="text-[10px] text-gray-400 ml-1.5">
-                (base weight {p.weightPct}%{draft[p.key] && totalWeight > 0 ? ` → ${Math.round((p.weightPct / totalWeight) * 100)}% of ranking` : ""})
+                ({draft[p.key] && totalWeight > 0 ? `${Math.round((p.weightPct / totalWeight) * 100)}% of ranking` : `base ${p.weightPct}%`})
               </span>
-              <span className="block text-[11px] text-gray-400 mt-0.5">{p.description}</span>
+              {p.description && <span className="block text-[11px] text-gray-400 mt-0.5">{p.description}</span>}
             </span>
           </label>
         ))}
@@ -125,7 +125,6 @@ export function AdvancedFiltersPanel({
           <div>
             <label className="text-[11px] text-gray-500 block mb-1">
               Near-capacity tolerance: <span className="font-semibold text-gray-700">{draftTolerance} points</span>
-              <span className="text-gray-400"> — someone this many points short of the requested % still shows in Candidates</span>
             </label>
             <input
               type="range"
@@ -146,10 +145,6 @@ export function AdvancedFiltersPanel({
             />
             <span className="flex-1">
               <span className="text-sm font-medium text-gray-800">Include candidates below requested capacity</span>
-              <span className="block text-[11px] text-gray-400 mt-0.5">
-                Ignores the tolerance above entirely and shows everyone regardless of shortfall — they'll show with a
-                "below requested %" tag.
-              </span>
             </span>
           </label>
         </div>

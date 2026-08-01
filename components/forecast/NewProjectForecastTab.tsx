@@ -14,7 +14,8 @@ import { ErrorState } from "@/components/shared/EmptyState";
 import { Skeleton, TableSkeleton } from "@/components/shared/Skeleton";
 import { Badge } from "@/components/shared/Badge";
 import { HoldDot } from "@/components/shared/HoldFlag";
-import { EmployeeProfileModal, type SkillMatchContext } from "@/components/shared/EmployeeProfileModal";
+import { EmployeeProfileModal, cleanSkillLabel, SkillSection, type SkillMatchContext, type ProfileTab } from "@/components/shared/EmployeeProfileModal";
+import { Metric, ProjectHistoryModal } from "@/components/shared/CandidateRow";
 import { cn, formatUsd } from "@/lib/utils";
 import { JMAN, JMAN_HEADER_GRADIENT, CHART_CHROME } from "@/lib/brandColors";
 
@@ -70,42 +71,143 @@ function CandidateRow({
   onOpen,
   levelNote,
   qualifies,
+  isTopPick,
 }: {
   c: RedeployCandidate;
-  onOpen: (sel: { employeeId: string; skillMatchContext?: SkillMatchContext }) => void;
+  onOpen: (sel: { employeeId: string; skillMatchContext?: SkillMatchContext; tab?: ProfileTab }) => void;
   levelNote?: string;
   qualifies?: boolean;
+  isTopPick?: boolean;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const [showAllMatched, setShowAllMatched] = useState(false);
+  const [showAllMissing, setShowAllMissing] = useState(false);
+  const [historyFilter, setHistoryFilter] = useState<{ category?: string } | null>(null);
   const reasonDetail =
     c.reason === "ending_soon" && c.days_to_end != null
       ? `${REASON_LABEL[c.reason]} · ${c.days_to_end}d left`
       : c.reason !== "fully_free" && c.current_allocation_pct != null
       ? `${REASON_LABEL[c.reason]} · ${c.current_allocation_pct}% allocated`
       : REASON_LABEL[c.reason];
+  const matchedLabels = (c.matched_skills ?? []).map(cleanSkillLabel).filter(Boolean);
+  const missingLabels = (c.missing_skills ?? []).map(cleanSkillLabel).filter(Boolean);
+  const open = (sel: { employeeId: string; skillMatchContext?: SkillMatchContext; tab?: ProfileTab }) => onOpen(sel);
+
   return (
-    <div className="flex items-center gap-2 text-[11px]">
-      <button
-        onClick={() =>
-          onOpen({
-            employeeId: c.employee_id,
-            skillMatchContext: c.matched_skills || c.missing_skills ? { matchedSkills: c.matched_skills ?? [], missingSkills: c.missing_skills ?? [] } : undefined,
-          })
-        }
-        className="font-medium text-primary hover:underline"
-      >
-        {c.employee_id}
-      </button>
-      <HoldDot onHold={c.on_hold} holdProjects={c.hold_projects} />
-      {c.coe && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-violet-50 border border-violet-200 text-violet-600">{c.coe}</span>}
-      {levelNote && <Badge variant={qualifies ? "green" : "amber"}>{levelNote}</Badge>}
-      <Badge variant={c.reason === "ending_soon" ? "amber" : c.reason === "fully_free" ? "green" : "under_utilized"}>{reasonDetail}</Badge>
-      {c.total_projects != null && c.total_projects > 0 && (
-        <span className="text-gray-400">{c.relevant_project_count}/{c.total_projects} relevant</span>
+    <div
+      className={cn(
+        "rounded-xl border overflow-hidden transition",
+        isTopPick ? "border-primary/40 bg-primary/[0.03]" : "border-gray-100 hover:border-gray-200"
       )}
-      <span className="ml-auto flex items-center gap-2 flex-shrink-0">
-        {c.skill_score != null && <span className="text-gray-400">skill {Math.round(c.skill_score * 100)}%</span>}
-        {c.composite_score != null && <span className="font-semibold text-gray-600">{Math.round(c.composite_score * 100)}% overall fit</span>}
-      </span>
+    >
+      <button onClick={() => setExpanded((v) => !v)} className="w-full text-left p-3 space-y-2">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex items-center gap-2 min-w-0">
+            {isTopPick && <span className="text-[10px] font-semibold text-primary whitespace-nowrap">Top pick</span>}
+            <span
+              role="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                open({
+                  employeeId: c.employee_id,
+                  skillMatchContext: c.matched_skills || c.missing_skills ? { matchedSkills: c.matched_skills ?? [], missingSkills: c.missing_skills ?? [] } : undefined,
+                });
+              }}
+              className="font-semibold text-sm text-primary hover:underline truncate"
+            >
+              {c.employee_id}
+            </span>
+            <span className="text-xs text-gray-500 truncate">{c.job_name}</span>
+            <HoldDot onHold={c.on_hold} holdProjects={c.hold_projects} />
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {c.composite_score != null && (
+              <span className="text-sm font-bold text-gray-700 whitespace-nowrap">
+                {Math.round(c.composite_score * 100)}% <span className="text-[10px] font-normal text-gray-400">overall fit</span>
+              </span>
+            )}
+            <ChevronDown className={cn("w-3.5 h-3.5 text-gray-400 transition-transform flex-shrink-0", expanded && "rotate-180")} />
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5 flex-wrap text-[11px]">
+          {c.coe && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-violet-50 border border-violet-200 text-violet-600 whitespace-nowrap">{c.coe}</span>}
+          {levelNote && <Badge variant={qualifies ? "green" : "amber"}>{levelNote}</Badge>}
+          <Badge variant={c.reason === "ending_soon" ? "amber" : c.reason === "fully_free" ? "green" : "under_utilized"}>{reasonDetail}</Badge>
+          {c.skill_score != null && <span className="text-gray-400 whitespace-nowrap">skill {Math.round(c.skill_score * 100)}%</span>}
+          {c.total_projects != null && c.total_projects > 0 && (
+            <span className="text-gray-400 whitespace-nowrap ml-auto">{c.relevant_project_count}/{c.total_projects} relevant projects</span>
+          )}
+        </div>
+      </button>
+
+      {expanded && (
+        <div className="border-t border-gray-100 px-3.5 py-3 space-y-3">
+          <div className="grid grid-cols-3 gap-3 text-xs">
+            <Metric
+              label="Skill"
+              value={c.skill_score ?? 0}
+              suffix={`${Math.round((c.skill_score ?? 0) * 100)}%`}
+              onClick={() => open({ employeeId: c.employee_id, tab: "skills", skillMatchContext: { matchedSkills: c.matched_skills ?? [], missingSkills: c.missing_skills ?? [] } })}
+            />
+            <Metric
+              label="Competency"
+              value={c.competency_score ?? 0}
+              suffix={`${Math.round((c.competency_score ?? 0) * 100)}%`}
+              onClick={() => open({ employeeId: c.employee_id, tab: "competency" })}
+            />
+            <Metric
+              label="Available"
+              value={(c.available_pct_as_of ?? 0) / 100}
+              suffix={`${c.available_pct_as_of ?? 0}%`}
+              onClick={() => open({ employeeId: c.employee_id, tab: "allocations" })}
+            />
+          </div>
+
+          {(matchedLabels.length > 0 || missingLabels.length > 0) && (
+            <div className="space-y-1.5">
+              {matchedLabels.length > 0 && (
+                <SkillSection labels={matchedLabels} variant="matched" showAll={showAllMatched} onToggle={(e) => { e.stopPropagation(); setShowAllMatched((v) => !v); }} />
+              )}
+              {missingLabels.length > 0 && (
+                <SkillSection labels={missingLabels} variant="missing" showAll={showAllMissing} onToggle={(e) => { e.stopPropagation(); setShowAllMissing((v) => !v); }} />
+              )}
+            </div>
+          )}
+
+          {c.total_projects != null && c.total_projects > 0 && (
+            <div className="flex items-center gap-1.5 text-[11px] flex-wrap pt-1 border-t border-gray-100">
+              <span className="text-gray-400 font-medium flex-shrink-0">Track record</span>
+              <button
+                onClick={(e) => { e.stopPropagation(); setHistoryFilter({}); }}
+                className="px-1.5 py-0.5 rounded-full border border-gray-200 bg-white text-gray-600 hover:border-primary hover:text-primary"
+              >
+                {c.total_projects} projects ↗
+              </button>
+              {c.distinct_clients != null && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); setHistoryFilter({}); }}
+                  className="px-1.5 py-0.5 rounded-full border border-gray-200 bg-white text-gray-600 hover:border-primary hover:text-primary"
+                >
+                  {c.distinct_clients} clients ↗
+                </button>
+              )}
+              {(c.top_categories ?? []).map((tc) => (
+                <button
+                  key={tc.category}
+                  onClick={(e) => { e.stopPropagation(); setHistoryFilter({ category: tc.category }); }}
+                  className="px-1.5 py-0.5 rounded-full border border-gray-200 bg-white text-gray-500 hover:border-primary hover:text-primary"
+                >
+                  {tc.category} ({tc.count}) ↗
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {historyFilter && (
+        <ProjectHistoryModal employeeId={c.employee_id} category={historyFilter.category} onClose={() => setHistoryFilter(null)} />
+      )}
     </div>
   );
 }
@@ -206,7 +308,7 @@ function RoleCandidateList({
   note,
 }: {
   candidates: RedeployCandidate[];
-  onOpen: (sel: { employeeId: string; skillMatchContext?: SkillMatchContext }) => void;
+  onOpen: (sel: { employeeId: string; skillMatchContext?: SkillMatchContext; tab?: ProfileTab }) => void;
   showQualifies?: boolean;
   emptyText?: string;
   note?: string;
@@ -255,14 +357,15 @@ function RoleCandidateList({
       {filtered.length === 0 ? (
         <p className="text-xs text-gray-400 italic py-4 text-center">No candidates match the current filters.</p>
       ) : (
-        <div className="flex flex-col gap-1.5">
-          {filtered.map((c) => (
+        <div className="flex flex-col gap-2">
+          {filtered.map((c, i) => (
             <CandidateRow
               key={c.employee_id}
               c={c}
               onOpen={onOpen}
               levelNote={levelNoteFor(c)}
               qualifies={showQualifies ? isQualifying(c) : undefined}
+              isTopPick={i === 0 && sort === "composite_desc" && !q && coeFilter.size === 0 && reasonFilter.size === 0}
             />
           ))}
         </div>
@@ -279,30 +382,168 @@ function SkillMatchCandidateRow({
   c,
   onOpen,
   showMissingSkills,
+  isTopPick,
 }: {
   c: RecommendationCandidate;
-  onOpen: (sel: { employeeId: string; skillMatchContext?: SkillMatchContext }) => void;
+  onOpen: (sel: { employeeId: string; skillMatchContext?: SkillMatchContext; tab?: ProfileTab }) => void;
   showMissingSkills?: boolean;
+  isTopPick?: boolean;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const [showAllMatched, setShowAllMatched] = useState(false);
+  const [showAllMissing, setShowAllMissing] = useState(false);
+  const [aiProofOpen, setAiProofOpen] = useState(false);
+  const [historyFilter, setHistoryFilter] = useState<{ category?: string } | null>(null);
+  const matchedLabels = c.matched_skills.map(cleanSkillLabel).filter(Boolean);
+  const missingLabels = c.missing_skills.map(cleanSkillLabel).filter(Boolean);
+  const open = (sel: { employeeId: string; skillMatchContext?: SkillMatchContext; tab?: ProfileTab }) => onOpen(sel);
+
   return (
-    <div className="flex items-center gap-2 text-[11px] flex-wrap">
-      <button
-        onClick={() =>
-          onOpen({
-            employeeId: c.employee_id,
-            skillMatchContext: { matchedSkills: c.matched_skills ?? [], missingSkills: c.missing_skills ?? [] },
-          })
-        }
-        className="font-medium text-primary hover:underline"
-      >
-        {c.employee_id}
-      </button>
-      <HoldDot onHold={c.on_hold} holdProjects={c.hold_projects} />
-      <span className="text-gray-500">{c.job_name}</span>
-      {showMissingSkills && c.missing_skills.length > 0 && (
-        <span className="text-purple-600">needs: {c.missing_skills.slice(0, 4).join(", ")}</span>
+    <div
+      className={cn(
+        "rounded-xl border overflow-hidden transition",
+        isTopPick ? "border-primary/40 bg-primary/[0.03]" : "border-gray-100 hover:border-gray-200"
       )}
-      <span className="ml-auto font-semibold text-gray-500">skill match {Math.round(c.skill_score * 100)}%</span>
+    >
+      <button onClick={() => setExpanded((v) => !v)} className="w-full text-left p-3 space-y-2">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex items-center gap-2 min-w-0">
+            {isTopPick && <span className="text-[10px] font-semibold text-primary whitespace-nowrap">Top pick</span>}
+            <span
+              role="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                open({ employeeId: c.employee_id, skillMatchContext: { matchedSkills: c.matched_skills ?? [], missingSkills: c.missing_skills ?? [] } });
+              }}
+              className="font-semibold text-sm text-primary hover:underline truncate"
+            >
+              {c.employee_id}
+            </span>
+            <span className="text-xs text-gray-500 truncate">{c.job_name}</span>
+            <HoldDot onHold={c.on_hold} holdProjects={c.hold_projects} />
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <span className="text-sm font-bold text-gray-700 whitespace-nowrap">
+              {Math.round(c.skill_score * 100)}% <span className="text-[10px] font-normal text-gray-400">skill match</span>
+            </span>
+            <ChevronDown className={cn("w-3.5 h-3.5 text-gray-400 transition-transform flex-shrink-0", expanded && "rotate-180")} />
+          </div>
+        </div>
+        {showMissingSkills && c.missing_skills.length > 0 && (
+          <p className="text-[11px] text-purple-600">
+            Needs: {c.missing_skills.slice(0, 4).join(", ")}
+            {c.missing_skills.length > 4 && <span className="text-gray-400"> +{c.missing_skills.length - 4} more</span>}
+          </p>
+        )}
+      </button>
+
+      {expanded && (
+        <div className="border-t border-gray-100 px-3.5 py-3 space-y-3">
+          <div className="grid grid-cols-3 gap-3 text-xs">
+            <Metric
+              label="Skill"
+              value={c.skill_score}
+              suffix={`${Math.round(c.skill_score * 100)}%`}
+              onClick={() => open({ employeeId: c.employee_id, tab: "skills", skillMatchContext: { matchedSkills: c.matched_skills, missingSkills: c.missing_skills } })}
+            />
+            <Metric
+              label="Competency"
+              value={c.competency_score}
+              suffix={`${Math.round(c.competency_score * 100)}%`}
+              onClick={() => open({ employeeId: c.employee_id, tab: "competency" })}
+            />
+            <Metric
+              label="Available"
+              value={c.available_pct / 100}
+              suffix={`${c.available_pct}%`}
+              onClick={() => open({ employeeId: c.employee_id, tab: "allocations" })}
+            />
+          </div>
+
+          {(c.matched_skills.length + c.missing_skills.length > 0 || c.semantic_score != null) && (
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-3 text-[11px] bg-gray-50 rounded-lg px-3 py-2 border border-gray-100 flex-wrap">
+                <span className="text-gray-400 font-medium flex-shrink-0">Match method</span>
+                <span className="flex items-center gap-1">
+                  <span className="text-gray-500">Word:</span>
+                  <span className={cn("font-semibold", c.matched_skills.length > 0 ? "text-emerald-600" : "text-gray-300")}>
+                    {c.matched_skills.length}/{c.matched_skills.length + c.missing_skills.length}
+                  </span>
+                </span>
+                <span className="text-gray-200">·</span>
+                {c.semantic_score != null ? (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setAiProofOpen((v) => !v); }}
+                    className="flex items-center gap-1 hover:underline group"
+                  >
+                    <span className="text-gray-500">AI:</span>
+                    <span className={cn("font-semibold", c.semantic_score >= 0.5 ? "text-blue-600" : c.semantic_score >= 0.3 ? "text-blue-400" : "text-gray-400")}>
+                      {Math.round(c.semantic_score * 100)}% similarity
+                    </span>
+                    <span className="text-gray-400 group-hover:text-gray-600">↗</span>
+                  </button>
+                ) : (
+                  <span className="flex items-center gap-1">
+                    <span className="text-gray-500">AI:</span>
+                    <span className="text-gray-300">—</span>
+                  </span>
+                )}
+              </div>
+              {aiProofOpen && c.semantic_score != null && (
+                <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2.5 text-[11px] space-y-1.5">
+                  <p className="text-blue-700">
+                    Score: <span className="font-semibold">{Math.round(c.semantic_score * 100)}%</span> — semantic similarity between this employee's skill profile and the role requirement.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {matchedLabels.length > 0 && (
+            <SkillSection labels={matchedLabels} variant="matched" showAll={showAllMatched} onToggle={(e) => { e.stopPropagation(); setShowAllMatched((v) => !v); }} />
+          )}
+          {missingLabels.length > 0 && (
+            <SkillSection labels={missingLabels} variant="missing" showAll={showAllMissing} onToggle={(e) => { e.stopPropagation(); setShowAllMissing((v) => !v); }} />
+          )}
+
+          {c.total_projects > 0 && (
+            <div className="flex items-center gap-1.5 text-[11px] flex-wrap pt-1 border-t border-gray-100">
+              <span className="text-gray-400 font-medium flex-shrink-0">Track record</span>
+              <button
+                onClick={(e) => { e.stopPropagation(); setHistoryFilter({}); }}
+                className="px-1.5 py-0.5 rounded-full border border-gray-200 bg-white text-gray-600 hover:border-primary hover:text-primary"
+              >
+                {c.total_projects} projects ↗
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); setHistoryFilter({}); }}
+                className="px-1.5 py-0.5 rounded-full border border-gray-200 bg-white text-gray-600 hover:border-primary hover:text-primary"
+              >
+                {c.distinct_clients} clients ↗
+              </button>
+              {c.top_categories.map((tc) => (
+                <button
+                  key={tc.category}
+                  onClick={(e) => { e.stopPropagation(); setHistoryFilter({ category: tc.category }); }}
+                  className="px-1.5 py-0.5 rounded-full border border-gray-200 bg-white text-gray-500 hover:border-primary hover:text-primary"
+                >
+                  {tc.category} ({tc.count}) ↗
+                </button>
+              ))}
+            </div>
+          )}
+
+          {c.earliest_available_date && (
+            <p className="text-[11px] text-blue-600">
+              Free from <strong>{c.earliest_available_date}</strong>{c.earliest_available_proof ? ` — ${c.earliest_available_proof}` : ""}
+            </p>
+          )}
+        </div>
+      )}
+
+      {historyFilter && (
+        <ProjectHistoryModal employeeId={c.employee_id} category={historyFilter.category} onClose={() => setHistoryFilter(null)} />
+      )}
     </div>
   );
 }
@@ -335,7 +576,7 @@ function SkillMatchCandidateList({
   showMissingSkills,
 }: {
   candidates: RecommendationCandidate[];
-  onOpen: (sel: { employeeId: string; skillMatchContext?: SkillMatchContext }) => void;
+  onOpen: (sel: { employeeId: string; skillMatchContext?: SkillMatchContext; tab?: ProfileTab }) => void;
   emptyText?: string;
   note?: string;
   showMissingSkills?: boolean;
@@ -384,9 +625,15 @@ function SkillMatchCandidateList({
       {filtered.length === 0 ? (
         <p className="text-xs text-gray-400 italic py-4 text-center">No candidates match the current filters.</p>
       ) : (
-        <div className="flex flex-col gap-1.5">
-          {filtered.map((c) => (
-            <SkillMatchCandidateRow key={c.employee_id} c={c} onOpen={onOpen} showMissingSkills={showMissingSkills} />
+        <div className="flex flex-col gap-2">
+          {filtered.map((c, i) => (
+            <SkillMatchCandidateRow
+              key={c.employee_id}
+              c={c}
+              onOpen={onOpen}
+              showMissingSkills={showMissingSkills}
+              isTopPick={i === 0 && sort === "composite_desc" && !q && coeFilter.size === 0 && roleFilter.size === 0}
+            />
           ))}
         </div>
       )}
@@ -414,7 +661,7 @@ function RoleDetailPage({
   onOpenProfile,
 }: {
   breakdown: ForecastBreakdownRow;
-  onOpenProfile: (sel: { employeeId: string; skillMatchContext?: SkillMatchContext }) => void;
+  onOpenProfile: (sel: { employeeId: string; skillMatchContext?: SkillMatchContext; tab?: ProfileTab }) => void;
 }) {
   const tabs: { key: RoleDetailTabKey; label: string; count: number }[] = [
     { key: "on_skill", label: "On-Skill", count: b.qualifying_for_redeploy },
@@ -661,7 +908,7 @@ function RevenueTargetSection({
   onOpenProfile,
   onSelectRole,
 }: {
-  onOpenProfile: (sel: { employeeId: string; skillMatchContext?: SkillMatchContext }) => void;
+  onOpenProfile: (sel: { employeeId: string; skillMatchContext?: SkillMatchContext; tab?: ProfileTab }) => void;
   onSelectRole: (b: ForecastBreakdownRow) => void;
 }) {
   const coeOptions = useQuery({ queryKey: ["role-mix-coes"], queryFn: api.roleMixCoes });
@@ -1114,7 +1361,7 @@ function RevenueTargetSection({
   );
 }
 
-export default function NewProjectForecastPage() {
+export function NewProjectForecastTab() {
   const [mode, setMode] = useState<ForecastMode>("spec");
   const coeOptions = useQuery({ queryKey: ["role-mix-coes"], queryFn: api.roleMixCoes });
   const categories = useQuery({ queryKey: ["role-mix-categories"], queryFn: api.roleMixCategories });
@@ -1125,13 +1372,13 @@ export default function NewProjectForecastPage() {
   const [rareRolesOpen, setRareRolesOpen] = useState(false);
   const [skillDrafts, setSkillDrafts] = useState<Record<number, string>>({});
   const [roleDrafts, setRoleDrafts] = useState<Record<number, { designation: string; headcount: string; pct: string }>>({});
-  const [selectedEmployee, setSelectedEmployee] = useState<{ employeeId: string; skillMatchContext?: SkillMatchContext } | null>(null);
+  const [selectedEmployee, setSelectedEmployee] = useState<{ employeeId: string; skillMatchContext?: SkillMatchContext; tab?: ProfileTab } | null>(null);
   const [detailRole, setDetailRole] = useState<ForecastBreakdownRow | null>(null);
   const forecast = useMutation({ mutationFn: () => api.newProjectForecast(specs.map(toForecastSpec), DEFAULT_INCLUDE_PARAMS) });
 
   if (coeOptions.isLoading || categories.isLoading) {
     return (
-      <div className="p-4 sm:p-6 w-full space-y-5">
+      <div className="w-full space-y-5">
         <Skeleton className="h-3 w-64" />
         <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
           <div className="flex items-center justify-between">
@@ -1306,7 +1553,7 @@ export default function NewProjectForecastPage() {
   const anyPreviewLoading = specs.some((s) => s.previewLoading);
 
   return (
-    <div className="p-4 sm:p-6 w-full space-y-4">
+    <div className="w-full space-y-4">
       {detailRole && (
         <div className="space-y-4">
           <div className="flex items-center gap-1.5 text-xs text-gray-500">
@@ -1782,7 +2029,7 @@ export default function NewProjectForecastPage() {
       {selectedEmployee && (
         <EmployeeProfileModal
           employeeId={selectedEmployee.employeeId}
-          initialTab="allocations"
+          initialTab={selectedEmployee.tab ?? "allocations"}
           skillMatchContext={selectedEmployee.skillMatchContext}
           onClose={() => setSelectedEmployee(null)}
         />

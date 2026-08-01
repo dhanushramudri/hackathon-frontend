@@ -3,8 +3,7 @@
 import { useEffect, useState } from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Check, X, Sparkles } from "lucide-react";
-import { api, type AllocationRow, type DealSummary, DEFAULT_INCLUDE_PARAMS } from "@/lib/api";
-import { Badge } from "@/components/shared/Badge";
+import { api, type AllocationRow, type DealSummary, type RosterEntry, DEFAULT_INCLUDE_PARAMS } from "@/lib/api";
 import { SearchableSelect } from "@/components/shared/SearchableSelect";
 import { AssignWithOverAllocationCheck, OverAllocationWarningModal } from "@/components/shared/OverAllocationWarningModal";
 import { RESOURCING_STATUSES, SHIFT_TYPES } from "@/components/shared/AssignModal";
@@ -70,6 +69,24 @@ export function Step5ResourceAllocation({
     candidatesByDesignation[d] = topCandidatesQueries[i]?.data ?? [];
   });
   const topCandidatesLoading = topCandidatesQueries.some((q) => q.isLoading);
+
+  // The ranked top-20 list can run out before every budgeted slot for that
+  // designation is filled (e.g. budget wants 2 "Solutions Enabler" but only 1
+  // real ranked candidate exists) -- when that happens the draft's employeeId
+  // is legitimately blank, not a bug, but the dropdown must still offer every
+  // real employee with that title so the row is never a dead end with zero
+  // options to pick from.
+  const allByDesignation: Record<string, { employee_id: string; job_name: string | null }[]> = {};
+  for (const e of employees.data ?? []) {
+    if (!e.job_name) continue;
+    (allByDesignation[e.job_name] ??= []).push(e);
+  }
+  function optionsForDesignation(designation: string) {
+    const ranked = candidatesByDesignation[designation] ?? [];
+    const seen = new Set(ranked.map((c) => c.employee_id));
+    const rest = (allByDesignation[designation] ?? []).filter((e) => !seen.has(e.employee_id));
+    return [...ranked, ...rest].map((c) => ({ value: c.employee_id, label: `${c.employee_id} (${designation})` }));
+  }
 
   const [drafts, setDrafts] = useState<DraftRow[]>([]);
   // Reconciles rather than one-shot-initializes: every time the budget or
@@ -178,61 +195,61 @@ export function Step5ResourceAllocation({
         <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-[11px]">
+              <colgroup>
+                <col className="min-w-[240px]" />
+                <col className="w-[130px]" />
+                <col className="w-[130px]" />
+                <col className="min-w-[110px]" />
+                <col className="min-w-[110px]" />
+                <col className="min-w-[160px]" />
+                <col className="w-[90px]" />
+                <col className="w-[70px]" />
+              </colgroup>
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200">
                   {["Name (Designation)", "Start Date", "End Date", "Status", "Shift Type", "Reviewer", "Allocation %", ""].map((h) => (
-                    <th key={h} className="text-left font-semibold text-gray-500 px-2.5 py-1.5 whitespace-nowrap">{h}</th>
+                    <th key={h} className="text-left font-semibold text-gray-500 px-2.5 py-2 whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {rows.map((r) => (
-                  <tr key={r.allocation_id} className="border-b border-gray-50 last:border-0">
-                    <td className="px-2.5 py-1.5 font-medium text-gray-700 whitespace-nowrap">
-                      {r.employee_id} {r.job_name && <span className="text-gray-400 font-normal">({r.job_name})</span>}
-                    </td>
-                    <td className="px-2.5 py-1.5 text-gray-500 whitespace-nowrap">{r.allocated_start_date ?? "-"}</td>
-                    <td className="px-2.5 py-1.5 text-gray-500 whitespace-nowrap">{r.allocated_end_date ?? "-"}</td>
-                    <td className="px-2.5 py-1.5 whitespace-nowrap"><Badge variant={r.resourcing_status}>{r.resourcing_status}</Badge></td>
-                    <td className="px-2.5 py-1.5 text-gray-500 whitespace-nowrap">{r.shift_type ?? "-"}</td>
-                    <td className="px-2.5 py-1.5 text-gray-500 whitespace-nowrap">{r.reviewer_employee_id ?? "-"}</td>
-                    <td className="px-2.5 py-1.5 text-gray-700 whitespace-nowrap">{r.allocation_by_percentage}%</td>
-                    <td />
-                  </tr>
+                  <RealAllocationRow key={r.allocation_id} row={r} employeeOptions={employeeOptions} onSaved={refreshRoster} />
                 ))}
                 {drafts.map((d) => (
                   <tr key={d.key} className="border-b border-gray-50 last:border-0 bg-[hsl(var(--primary)/0.04)]">
-                    <td className="px-2.5 py-1.5 min-w-[240px]">
+                    <td className="px-2.5 py-1.5">
                       <div className="flex items-center gap-1.5">
                         <Sparkles size={13} className="text-amber-500 flex-shrink-0" title="Suggested from Budget" />
                         <SearchableSelect
+                          size="sm"
                           className="flex-1"
-                          options={(candidatesByDesignation[d.designation] ?? []).map((c) => ({ value: c.employee_id, label: `${c.employee_id} (${d.designation})` }))}
+                          options={optionsForDesignation(d.designation)}
                           value={d.employeeId ? [d.employeeId] : []}
                           onChange={(v) => updateDraft(d.key, { employeeId: v[0] ?? "" })}
-                          placeholder="Select Employee"
+                          placeholder={`Select ${d.designation}`}
                         />
                       </div>
                     </td>
                     <td className="px-2.5 py-1.5">
-                      <input type="date" className="px-2 py-1 rounded-lg border border-gray-200 text-xs outline-none" value={d.startDate} onChange={(e) => updateDraft(d.key, { startDate: e.target.value })} />
+                      <input type="date" className="w-full px-2 py-1 rounded-lg border border-gray-200 text-xs outline-none" value={d.startDate} onChange={(e) => updateDraft(d.key, { startDate: e.target.value })} />
                     </td>
                     <td className="px-2.5 py-1.5">
-                      <input type="date" className="px-2 py-1 rounded-lg border border-gray-200 text-xs outline-none" value={d.endDate} onChange={(e) => updateDraft(d.key, { endDate: e.target.value })} />
+                      <input type="date" className="w-full px-2 py-1 rounded-lg border border-gray-200 text-xs outline-none" value={d.endDate} onChange={(e) => updateDraft(d.key, { endDate: e.target.value })} />
                     </td>
-                    <td className="px-2.5 py-1.5 min-w-[110px]">
-                      <SearchableSelect options={RESOURCING_STATUSES.map((s) => ({ value: s, label: s }))} value={[d.resourcingStatus]} onChange={(v) => updateDraft(d.key, { resourcingStatus: v[0] ?? "BILLABLE" })} />
+                    <td className="px-2.5 py-1.5">
+                      <SearchableSelect size="sm" options={RESOURCING_STATUSES.map((s) => ({ value: s, label: s }))} value={[d.resourcingStatus]} onChange={(v) => updateDraft(d.key, { resourcingStatus: v[0] ?? "BILLABLE" })} />
                     </td>
-                    <td className="px-2.5 py-1.5 min-w-[110px]">
-                      <SearchableSelect options={SHIFT_TYPES.map((s) => ({ value: s, label: s }))} value={[d.shiftType]} onChange={(v) => updateDraft(d.key, { shiftType: v[0] ?? "General" })} />
+                    <td className="px-2.5 py-1.5">
+                      <SearchableSelect size="sm" options={SHIFT_TYPES.map((s) => ({ value: s, label: s }))} value={[d.shiftType]} onChange={(v) => updateDraft(d.key, { shiftType: v[0] ?? "General" })} />
                     </td>
-                    <td className="px-2.5 py-1.5 min-w-[160px]">
-                      <SearchableSelect options={employeeOptions} value={d.reviewerEmployeeId ? [d.reviewerEmployeeId] : []} onChange={(v) => updateDraft(d.key, { reviewerEmployeeId: v[0] ?? "" })} placeholder="Select Employee" />
+                    <td className="px-2.5 py-1.5">
+                      <SearchableSelect size="sm" options={employeeOptions} value={d.reviewerEmployeeId ? [d.reviewerEmployeeId] : []} onChange={(v) => updateDraft(d.key, { reviewerEmployeeId: v[0] ?? "" })} placeholder="Select Employee" />
                     </td>
                     <td className="px-2.5 py-1.5">
                       <input
                         type="number" min={0} max={100}
-                        className="w-16 px-2 py-1 rounded-lg border border-gray-200 text-xs outline-none"
+                        className="w-full px-2 py-1 rounded-lg border border-gray-200 text-xs outline-none"
                         value={d.allocationPct}
                         onChange={(e) => updateDraft(d.key, { allocationPct: Number(e.target.value) || 0 })}
                       />
@@ -345,6 +362,126 @@ export function Step5ResourceAllocation({
         </div>
       )}
     </div>
+  );
+}
+
+// A real, already-committed allocation -- editable in place (dates, status,
+// shift, reviewer, allocation %) rather than frozen the moment it's saved.
+// Employee identity itself isn't editable here (re-assigning a committed row
+// to a different person is a new allocation, not an edit); Save only enables
+// once something actually differs from the row's real saved values.
+function RealAllocationRow({
+  row,
+  employeeOptions,
+  onSaved,
+}: {
+  row: RosterEntry;
+  employeeOptions: { value: string; label: string }[];
+  onSaved: () => void;
+}) {
+  const [startDate, setStartDate] = useState(row.allocated_start_date ?? "");
+  const [endDate, setEndDate] = useState(row.allocated_end_date ?? "");
+  const [status, setStatus] = useState(row.resourcing_status);
+  const [shiftType, setShiftType] = useState(row.shift_type ?? "General");
+  const [reviewerEmployeeId, setReviewerEmployeeId] = useState(row.reviewer_employee_id ?? "");
+  const [allocationPct, setAllocationPct] = useState(row.allocation_by_percentage);
+  const [saving, setSaving] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const dirty =
+    startDate !== (row.allocated_start_date ?? "") ||
+    endDate !== (row.allocated_end_date ?? "") ||
+    status !== row.resourcing_status ||
+    shiftType !== (row.shift_type ?? "General") ||
+    reviewerEmployeeId !== (row.reviewer_employee_id ?? "") ||
+    allocationPct !== row.allocation_by_percentage;
+
+  async function save() {
+    setSaving(true);
+    setError(null);
+    try {
+      await api.updateAllocation(row.allocation_id, {
+        allocationPct, startDate, endDate, resourcingStatus: status,
+        shiftType, reviewerEmployeeId: reviewerEmployeeId || null,
+      });
+      onSaved();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not save changes.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function remove() {
+    if (!window.confirm(`Remove ${row.employee_id}'s allocation entirely? This can't be undone.`)) return;
+    setRemoving(true);
+    setError(null);
+    try {
+      await api.deleteAllocation(row.allocation_id);
+      onSaved();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not remove this allocation.");
+      setRemoving(false);
+    }
+  }
+
+  return (
+    <tr className="border-b border-gray-50 last:border-0">
+      <td className="px-2.5 py-1.5 font-medium text-gray-700 whitespace-nowrap">
+        {row.employee_id} {row.job_name && <span className="text-gray-400 font-normal">({row.job_name})</span>}
+      </td>
+      <td className="px-2.5 py-1.5">
+        <input type="date" className="w-full px-2 py-1 rounded-lg border border-gray-200 text-xs outline-none" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+      </td>
+      <td className="px-2.5 py-1.5">
+        <input type="date" className="w-full px-2 py-1 rounded-lg border border-gray-200 text-xs outline-none" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+      </td>
+      <td className="px-2.5 py-1.5">
+        <SearchableSelect size="sm" options={RESOURCING_STATUSES.map((s) => ({ value: s, label: s }))} value={[status]} onChange={(v) => setStatus(v[0] ?? status)} />
+      </td>
+      <td className="px-2.5 py-1.5">
+        <SearchableSelect size="sm" options={SHIFT_TYPES.map((s) => ({ value: s, label: s }))} value={[shiftType]} onChange={(v) => setShiftType(v[0] ?? "General")} />
+      </td>
+      <td className="px-2.5 py-1.5">
+        <SearchableSelect
+          size="sm"
+          options={employeeOptions}
+          value={reviewerEmployeeId ? [reviewerEmployeeId] : []}
+          onChange={(v) => setReviewerEmployeeId(v[0] ?? "")}
+          placeholder="Select Employee"
+        />
+      </td>
+      <td className="px-2.5 py-1.5">
+        <input
+          type="number" min={0} max={100}
+          className="w-full px-2 py-1 rounded-lg border border-gray-200 text-xs outline-none"
+          value={allocationPct}
+          onChange={(e) => setAllocationPct(Number(e.target.value) || 0)}
+        />
+      </td>
+      <td className="px-2.5 py-1.5 whitespace-nowrap">
+        <div className="flex items-center gap-1.5">
+          {error && <span className="text-red-500" title={error}>!</span>}
+          <button
+            onClick={save}
+            disabled={!dirty || saving || removing}
+            title={dirty ? "Save changes" : "No changes to save"}
+            className="flex items-center justify-center w-6 h-6 rounded-full bg-emerald-50 text-emerald-600 hover:bg-emerald-100 disabled:bg-gray-50 disabled:text-gray-300"
+          >
+            <Check size={13} />
+          </button>
+          <button
+            onClick={remove}
+            disabled={saving || removing}
+            title="Remove this allocation"
+            className="flex items-center justify-center w-6 h-6 rounded-full bg-gray-50 text-gray-400 hover:bg-red-50 hover:text-red-500 disabled:opacity-50"
+          >
+            <X size={13} />
+          </button>
+        </div>
+      </td>
+    </tr>
   );
 }
 

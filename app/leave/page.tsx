@@ -4,15 +4,13 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 import { AlertTriangle, Users } from "lucide-react";
-import { api, DEFAULT_INCLUDE_PARAMS, type IncludeParams, type LeaveImpact } from "@/lib/api";
+import { api, DEFAULT_INCLUDE_PARAMS, type LeaveImpact } from "@/lib/api";
 import { Badge } from "@/components/shared/Badge";
 import { StatCard } from "@/components/shared/StatCard";
 import { LoadingState, ErrorState } from "@/components/shared/EmptyState";
 import { StatCardGridSkeleton, TableSkeleton } from "@/components/shared/Skeleton";
 import { TableControls } from "@/components/shared/TableControls";
-import { AdvancedFiltersButton, AdvancedFiltersPanel } from "@/components/shared/AdvancedFilters";
 import { EmployeeProfileModal } from "@/components/shared/EmployeeProfileModal";
-import { ProjectBasicModal } from "@/components/shared/ProjectBasicModal";
 import { ProjectHealthDetailModal } from "@/components/health/ProjectHealthDetailModal";
 import { LeaveBackfillModal } from "@/components/shared/LeaveBackfillModal";
 
@@ -96,24 +94,21 @@ export default function LeavePage() {
 }
 
 function LeavePageInner() {
-  // Same ranking-parameter flexibility as the main Recommendations engine --
-  // skill/competency/availability/category_match/project_count, plus the
-  // below-capacity pool gate/tolerance. See components/shared/AdvancedFilters.
-  const [includeParams, setIncludeParams] = useState<IncludeParams>(DEFAULT_INCLUDE_PARAMS);
-  const [includeBelowCapacity, setIncludeBelowCapacity] = useState(false);
-  const [nearCapacityTolerancePct, setNearCapacityTolerancePct] = useState(25);
-  const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
-
+  // Backfill candidates are ranked with the same default composite (skill +
+  // competency + availability + CoE preference) used everywhere else in the
+  // app -- no per-page weight tuning here. This page is for spotting leave
+  // coverage gaps and picking a sensible backfill, not for re-ranking
+  // candidates; the per-candidate skill/competency/available % is already
+  // visible on each card for a manual judgment call.
   const queryClient = useQueryClient();
   const { data, isLoading, error } = useQuery({
-    queryKey: ["leave-impact", includeParams, includeBelowCapacity, nearCapacityTolerancePct],
-    queryFn: () => api.leaveImpact(includeParams, includeBelowCapacity, nearCapacityTolerancePct),
+    queryKey: ["leave-impact"],
+    queryFn: () => api.leaveImpact(DEFAULT_INCLUDE_PARAMS, false, 25),
   });
   const handleAssigned = () => {
     queryClient.invalidateQueries({ queryKey: ["leave-impact"] });
     queryClient.invalidateQueries({ queryKey: ["allocations"] });
   };
-  const healthProjects = useQuery({ queryKey: ["health-projects"], queryFn: api.healthProjects });
   const searchParams = useSearchParams();
 
   const [search, setSearch] = useState("");
@@ -138,11 +133,6 @@ function LeavePageInner() {
   useEffect(() => {
     if (searchParams.get("onLeaveNow") === "true") setOnLeaveOnly(true);
   }, []);
-
-  const healthTrackedProjects = useMemo(
-    () => new Set((healthProjects.data ?? []).map((p) => p.project_code)),
-    [healthProjects.data]
-  );
 
   if (isLoading) {
     return (
@@ -205,24 +195,7 @@ function LeavePageInner() {
               Clear filters
             </button>
           )}
-          <AdvancedFiltersButton
-            open={advancedFiltersOpen}
-            include={includeParams}
-            defaults={DEFAULT_INCLUDE_PARAMS}
-            includeBelowCapacity={includeBelowCapacity}
-            onClick={() => setAdvancedFiltersOpen((v) => !v)}
-          />
         </div>
-        {advancedFiltersOpen && (
-          <AdvancedFiltersPanel
-            include={includeParams}
-            onApply={setIncludeParams}
-            includeBelowCapacity={includeBelowCapacity}
-            onApplyBelowCapacity={setIncludeBelowCapacity}
-            nearCapacityTolerancePct={nearCapacityTolerancePct}
-            onApplyNearCapacityTolerancePct={setNearCapacityTolerancePct}
-          />
-        )}
         <TableControls
           search={{ value: search, onChange: setSearch, placeholder: "Search employee, designation, project…" }}
           filters={[
@@ -337,16 +310,11 @@ function LeavePageInner() {
       {selectedEmployee && (
         <EmployeeProfileModal employeeId={selectedEmployee} initialTab="leave" onClose={() => setSelectedEmployee(null)} />
       )}
-      {selectedProject &&
-        (healthTrackedProjects.has(selectedProject) ? (
-          <ProjectHealthDetailModal projectCode={selectedProject} onClose={() => setSelectedProject(null)} />
-        ) : (
-          <ProjectBasicModal projectCode={selectedProject} onClose={() => setSelectedProject(null)} />
-        ))}
+      {selectedProject && <ProjectHealthDetailModal projectCode={selectedProject} onClose={() => setSelectedProject(null)} />}
       {backfillTarget && (() => {
         const liveImpact = data.find((i) => i.employee_id === backfillTarget.employeeId && i.project_id === backfillTarget.projectId);
         return liveImpact ? (
-          <LeaveBackfillModal impact={liveImpact} onClose={() => setBackfillTarget(null)} onSelectEmployee={setSelectedEmployee} includeParams={includeParams} onAssigned={handleAssigned} />
+          <LeaveBackfillModal impact={liveImpact} onClose={() => setBackfillTarget(null)} onSelectEmployee={setSelectedEmployee} includeParams={DEFAULT_INCLUDE_PARAMS} onAssigned={handleAssigned} />
         ) : null;
       })()}
     </div>

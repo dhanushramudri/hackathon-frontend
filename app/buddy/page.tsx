@@ -7,6 +7,7 @@ import { Mascot } from "@/components/shared/Mascot";
 import { buddyAskStream, buddyRate, type BuddyStat, type BuddyTable, type BuddyToolCall } from "@/lib/api";
 import { EmployeeProfileModal } from "@/components/shared/EmployeeProfileModal";
 import { ProjectHealthDetailModal } from "@/components/health/ProjectHealthDetailModal";
+import { Modal } from "@/components/shared/Modal";
 
 const EMPLOYEE_COLUMNS = new Set(["Employee"]);
 const PROJECT_COLUMNS = new Set(["Project"]);
@@ -41,6 +42,7 @@ const TOOL_LABELS: Record<string, string> = {
   get_project_roster: "Pulling project roster",
   get_project_info: "Looking up project info",
   get_revenue_trend: "Pulling revenue trend",
+  query_database: "Running a database query",
 };
 
 function toolLabel(tool: string): string {
@@ -190,6 +192,161 @@ function ChatStats({ items }: { items: BuddyStat[] }) {
   );
 }
 
+// ── Breakdown drill-down ────────────────────────────────────────────────────────
+// Every count Buddy cites in an answer (280 in the free pool, 15 candidates,
+// 3 high-risk projects...) already came from a real tool call whose FULL,
+// uncapped result is sitting right there in the message's own `data` field --
+// no second lookup, no extra LLM call, just filtering/grouping data that's
+// already in hand. This turns those numbers into clickable proof instead of
+// leaving them as unverifiable prose.
+type BreakdownRecord = Record<string, unknown>;
+type BreakdownTable = { columns: string[]; rows: (string | number)[][] };
+type BreakdownGroup = { label: string; count: number; items: BreakdownRecord[] };
+
+function s(v: unknown, fallback = "-"): string {
+  return v === null || v === undefined || v === "" ? fallback : String(v);
+}
+function pct(v: unknown): string {
+  return `${Math.round(Number(v ?? 0))}%`;
+}
+function pct01(v: unknown): string {
+  return `${Math.round(Number(v ?? 0) * 100)}%`;
+}
+
+function buildFreePoolTable(items: BreakdownRecord[]): BreakdownTable {
+  return {
+    columns: ["Employee", "Role", "CoE", "Reason", "Idle %"],
+    rows: items.map((c) => [s(c.employee_id), s(c.job_name), s(c.primary_coe, "not determined"), s(c.reason), pct(c.idle_capacity_pct)]),
+  };
+}
+function buildHealthTable(items: BreakdownRecord[]): BreakdownTable {
+  return {
+    columns: ["Project", "Risk", "Root causes"],
+    rows: items.map((p) => [s(p.project_code), s(p.risk_band), Array.isArray(p.root_causes) ? (p.root_causes as string[]).join(", ") || "-" : "-"]),
+  };
+}
+function buildAllocationTable(items: BreakdownRecord[]): BreakdownTable {
+  return {
+    columns: ["Employee", "Project", "Allocation %", "Status", "Ending soon"],
+    rows: items.map((r) => [s(r.employee_id), s(r.project_id), pct(r.allocation_by_percentage), s(r.utilization_band), r.ending_soon ? "Yes" : "No"]),
+  };
+}
+function buildLeaveTable(items: BreakdownRecord[]): BreakdownTable {
+  return {
+    columns: ["Employee", "Project", "Leave type", "Starts", "Ends", "Backfill"],
+    rows: items.map((r) => [s(r.employee_id), s(r.project_id), s(r.leave_type), s(r.leave_start_date), s(r.leave_end_date), r.backfill_available ? "Yes" : "No"]),
+  };
+}
+function buildCandidatesTable(items: BreakdownRecord[]): BreakdownTable {
+  return {
+    columns: ["Employee", "Role", "Signal", "Skill", "Competency", "Available %"],
+    rows: items.map((c) => [s(c.employee_id), s(c.job_name), s(c.bucket), pct01(c.skill_score), pct01(c.competency_score), pct(c.available_pct)]),
+  };
+}
+
+const BREAKDOWN_LABELS: Record<string, Record<string, string>> = {
+  reason: { fully_free: "Fully free", under_utilized: "Under-utilized", ending_soon: "Ending soon" },
+  risk_band: { high: "High risk", medium: "Medium risk", low: "Low risk" },
+  bucket: { eligible: "Redeploy", trainable: "Needs training", gap: "Hire signal", not_assessed: "Not assessed" },
+};
+
+function groupByField(items: BreakdownRecord[], field: string): BreakdownGroup[] {
+  const labelMap = BREAKDOWN_LABELS[field] ?? {};
+  const buckets = new Map<string, BreakdownRecord[]>();
+  for (const item of items) {
+    const key = s(item[field], "unknown");
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key)!.push(item);
+  }
+  return Array.from(buckets.entries()).map(([key, group]) => ({ label: labelMap[key] ?? key, count: group.length, items: group }));
+}
+
+interface Breakdown {
+  groups: BreakdownGroup[];
+  buildTable: (items: BreakdownRecord[]) => BreakdownTable;
+}
+
+function extractBreakdown(toolName: string | undefined, data: unknown): Breakdown | null {
+  if (!toolName || data == null) return null;
+
+  if (toolName === "get_free_pool" && Array.isArray(data)) {
+    return { groups: groupByField(data as BreakdownRecord[], "reason"), buildTable: buildFreePoolTable };
+  }
+  if (toolName === "get_health_report" && Array.isArray(data)) {
+    return { groups: groupByField(data as BreakdownRecord[], "risk_band"), buildTable: buildHealthTable };
+  }
+  if (toolName === "get_allocation_report" && Array.isArray(data)) {
+    const items = data as BreakdownRecord[];
+    const over = items.filter((r) => r.utilization_band === "over_allocated");
+    const under = items.filter((r) => r.utilization_band === "under_utilized");
+    const ending = items.filter((r) => r.ending_soon);
+    return {
+      groups: [
+        { label: "Over-allocated", count: over.length, items: over },
+        { label: "Under-utilized", count: under.length, items: under },
+        { label: "Ending within 30 days", count: ending.length, items: ending },
+      ],
+      buildTable: buildAllocationTable,
+    };
+  }
+  if (toolName === "get_leave_impact" && Array.isArray(data)) {
+    const items = data as BreakdownRecord[];
+    const onLeave = items.filter((r) => r.is_currently_on_leave);
+    const noBackfill = items.filter((r) => !r.backfill_available);
+    return {
+      groups: [
+        { label: "Currently on leave", count: onLeave.length, items: onLeave },
+        { label: "No backfill available", count: noBackfill.length, items: noBackfill },
+      ],
+      buildTable: buildLeaveTable,
+    };
+  }
+  if ((toolName === "get_recommendations" || toolName === "get_recommendations_for_pipeline_row") && data && typeof data === "object" && Array.isArray((data as BreakdownRecord).candidates)) {
+    const candidates = (data as BreakdownRecord).candidates as BreakdownRecord[];
+    return { groups: groupByField(candidates, "bucket"), buildTable: buildCandidatesTable };
+  }
+  return null;
+}
+
+function BuddyBreakdown({
+  toolName,
+  data,
+  onEmployeeClick,
+  onProjectClick,
+}: {
+  toolName: string | undefined;
+  data: unknown;
+  onEmployeeClick: (id: string) => void;
+  onProjectClick: (code: string) => void;
+}) {
+  const [open, setOpen] = useState<{ label: string; table: BreakdownTable } | null>(null);
+  const breakdown = extractBreakdown(toolName, data);
+  if (!breakdown || breakdown.groups.every((g) => g.count === 0)) return null;
+
+  return (
+    <>
+      <div className="flex items-center gap-1.5 flex-wrap">
+        {breakdown.groups.filter((g) => g.count > 0).map((g) => (
+          <button
+            key={g.label}
+            onClick={() => setOpen({ label: g.label, table: breakdown.buildTable(g.items) })}
+            className="text-[11px] px-2 py-1 rounded-full border border-gray-200 bg-white text-gray-600 hover:border-primary hover:text-primary transition"
+          >
+            <span className="font-semibold">{g.count}</span> {g.label} ↗
+          </button>
+        ))}
+      </div>
+      {open && (
+        <Modal title={`${open.label} (${open.table.rows.length})`} onClose={() => setOpen(null)} widthClassName="max-w-3xl">
+          <div className="p-4">
+            <ChatTable {...open.table} onEmployeeClick={onEmployeeClick} onProjectClick={onProjectClick} />
+          </div>
+        </Modal>
+      )}
+    </>
+  );
+}
+
 function formatArgValue(v: unknown): string {
   if (v === null || v === undefined) return "—";
   if (typeof v === "string") return v.length > 50 ? `${v.slice(0, 50)}…` : v;
@@ -327,14 +484,23 @@ function ConversationRail({
   mobileOpen: boolean;
   onMobileClose: () => void;
 }) {
-  const [collapsed, setCollapsed] = useState(() => {
-    if (typeof window === "undefined") return false;
-    return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1";
-  });
+  // Always starts false (matching what the server renders, since window/localStorage
+  // don't exist there) -- reading the persisted preference in an effect, rather than in
+  // the useState initializer, means the client's first render still matches the server's
+  // HTML exactly. Hydration compares that first render, not whatever state settles into a
+  // moment later, so reading localStorage synchronously in the initializer (the previous
+  // approach) caused a real "server/client mismatch" error whenever the sidebar had
+  // previously been collapsed.
+  const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
-    localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? "1" : "0");
-  }, [collapsed]);
+    setCollapsed(localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1");
+  }, []);
+
+  function setCollapsedPersisted(value: boolean) {
+    setCollapsed(value);
+    localStorage.setItem(SIDEBAR_COLLAPSED_KEY, value ? "1" : "0");
+  }
 
   const sorted = [...conversations].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 
@@ -342,7 +508,7 @@ function ConversationRail({
     return (
       <div className="hidden md:flex w-12 flex-shrink-0 border-r border-gray-100 flex-col items-center bg-gray-50/50 py-2.5 gap-2 transition-all">
         <button
-          onClick={() => setCollapsed(false)}
+          onClick={() => setCollapsedPersisted(false)}
           title="Expand conversations"
           className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:bg-white hover:text-gray-600 transition"
         >
@@ -388,7 +554,7 @@ function ConversationRail({
             <X className="w-4 h-4" />
           </button>
           <button
-            onClick={() => setCollapsed(true)}
+            onClick={() => setCollapsedPersisted(true)}
             title="Collapse"
             className="hidden md:flex w-8 h-8 flex-shrink-0 items-center justify-center rounded-lg text-gray-400 hover:bg-white hover:text-gray-600 transition"
           >
@@ -430,8 +596,16 @@ function ConversationRail({
 }
 
 export default function BuddyPage() {
-  const [conversations, setConversations] = useState<BuddyConversation[]>(() => loadConversations());
-  const [activeId, setActiveId] = useState<string | null>(() => mostRecentId(loadConversations()));
+  // Always starts empty/null (matching the server, which has no localStorage) --
+  // the real persisted conversations are loaded in an effect below, after mount,
+  // so the client's first render still matches the server's HTML exactly. See the
+  // matching comment on ConversationRail's `collapsed` state for why reading
+  // localStorage directly in a useState initializer causes a real hydration
+  // mismatch (this was the "Expected server HTML to contain a matching <button>"
+  // error -- the server rendered an empty conversation list while the client's
+  // first hydration pass already had real conversations loaded).
+  const [conversations, setConversations] = useState<BuddyConversation[]>([]);
+  const [activeId, setActiveId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [liveTools, setLiveTools] = useState<{ tool: string; done: boolean }[]>([]);
@@ -439,8 +613,22 @@ export default function BuddyPage() {
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [railMobileOpen, setRailMobileOpen] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const skipNextPersist = useRef(true);
 
   useEffect(() => {
+    const loaded = loadConversations();
+    setConversations(loaded);
+    setActiveId(mostRecentId(loaded));
+  }, []);
+
+  useEffect(() => {
+    // The mount-time render always starts from conversations=[] (see above) --
+    // skip persisting that once so it can never clobber real localStorage data
+    // before the load effect above has had a chance to populate real state.
+    if (skipNextPersist.current) {
+      skipNextPersist.current = false;
+      return;
+    }
     saveConversations(conversations);
   }, [conversations]);
 
@@ -511,7 +699,8 @@ export default function BuddyPage() {
       }
     } catch (err) {
       console.error("[Buddy] stream error:", err);
-      appendMessage(conversationId, { role: "assistant", content: "Could not reach Buddy's backend." });
+      const message = err instanceof Error && err.message ? err.message : "Could not reach Buddy's backend.";
+      appendMessage(conversationId, { role: "assistant", content: message });
     } finally {
       setSending(false);
       setLiveTools([]);
@@ -582,7 +771,6 @@ export default function BuddyPage() {
           <div className="flex-1" />
           {pctHelpful !== null && (
             <div className="hidden sm:flex items-center gap-1.5 text-[11px] bg-gray-50 border border-gray-100 rounded-lg px-2.5 py-1 flex-shrink-0">
-              <span>{upCount === allRated.length ? "👍" : upCount > allRated.length / 2 ? "👍" : "📊"}</span>
               <span className="font-semibold text-gray-700">{pctHelpful}%</span>
               <span className="text-gray-400">helpful</span>
               <span className="text-gray-200">·</span>
@@ -629,6 +817,14 @@ export default function BuddyPage() {
                       <ChatTable {...m.table} onEmployeeClick={setSelectedEmployee} onProjectClick={setSelectedProject} />
                     )}
                     {m.role === "assistant" && m.format === "stats" && m.stats && <ChatStats items={m.stats} />}
+                    {m.role === "assistant" && (
+                      <BuddyBreakdown
+                        toolName={m.toolTrace?.[m.toolTrace.length - 1]?.tool}
+                        data={m.data}
+                        onEmployeeClick={setSelectedEmployee}
+                        onProjectClick={setSelectedProject}
+                      />
+                    )}
                     {m.role === "assistant" && m.toolTrace && m.toolTrace.length > 0 && <ToolTrace trace={m.toolTrace} />}
                     {m.role === "assistant" && (
                       <div className="flex items-center gap-1.5 mt-0.5">

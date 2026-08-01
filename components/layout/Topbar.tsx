@@ -11,8 +11,7 @@ const TITLES: Record<string, string> = {
   "/leave": "Leave Impact",
   "/recommendations": "Resource Recommendation Engine",
   "/health": "Project Health & Efficiency Monitor",
-  "/forecast/new-project": "New Project Demand Forecast",
-  "/forecast/pipeline": "Pipeline Outlook",
+  "/forecast": "Forecast",
   "/buddy": "Buddy",
   "/wellbeing": "Wellbeing",
 };

@@ -1,12 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import { Award } from "lucide-react";
-import type { IncludeParams, LeaveImpact, RedeployCandidate } from "@/lib/api";
+import { useQuery } from "@tanstack/react-query";
+import { Award, ChevronDown, ChevronUp, History, Mail } from "lucide-react";
+import { api, type IncludeParams, type LeaveImpact, type ProjectAlumniCandidate, type RedeployCandidate, type SupportRequestResult } from "@/lib/api";
 import { Modal } from "@/components/shared/Modal";
 import { Badge } from "@/components/shared/Badge";
 import { HoldChip } from "@/components/shared/HoldFlag";
 import { AssignModal } from "@/components/shared/AssignModal";
+import { cleanSkillLabel, SkillSection } from "@/components/shared/EmployeeProfileModal";
+import { cn } from "@/lib/utils";
 
 const REASON_VARIANT: Record<string, string> = { ending_soon: "amber", fully_free: "green", under_utilized: "under_utilized" };
 
@@ -36,9 +39,13 @@ function CandidateCard({
   includeParams: IncludeParams;
   onAssign: () => void;
 }) {
-  const matched = candidate.matched_skills ?? [];
-  const missing = candidate.missing_skills ?? [];
+  const matched = (candidate.matched_skills ?? []).map(cleanSkillLabel).filter(Boolean);
+  const missing = (candidate.missing_skills ?? []).map(cleanSkillLabel).filter(Boolean);
   const assessed = candidate.skill_bucket && candidate.skill_bucket !== "not_assessed";
+  const hasSkillDetail = assessed && (matched.length > 0 || missing.length > 0);
+  const [skillDetailOpen, setSkillDetailOpen] = useState(false);
+  const [showAllMatched, setShowAllMatched] = useState(false);
+  const [showAllMissing, setShowAllMissing] = useState(false);
 
   return (
     <div
@@ -91,35 +98,198 @@ function CandidateCard({
         )}
       </div>
 
-      {assessed && (matched.length > 0 || missing.length > 0) && (
-        <div className="space-y-1.5 pt-1 border-t border-gray-100">
-          {matched.length > 0 && (
-            <div className="flex items-start gap-1.5">
-              <span className="text-[10px] font-semibold text-emerald-600 flex-shrink-0 mt-0.5 w-12">Matched</span>
-              <div className="flex flex-wrap gap-1">
-                {matched.map((s) => (
-                  <span key={s} className="px-1.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-100 text-[10px] text-emerald-700">
-                    {s}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-          {missing.length > 0 && (
-            <div className="flex items-start gap-1.5">
-              <span className="text-[10px] font-semibold text-gray-400 flex-shrink-0 mt-0.5 w-12">Missing</span>
-              <div className="flex flex-wrap gap-1">
-                {missing.map((s) => (
-                  <span key={s} className="px-1.5 py-0.5 rounded-full bg-gray-50 border border-gray-200 text-[10px] text-gray-500">
-                    {s}
-                  </span>
-                ))}
-              </div>
+      {hasSkillDetail && (
+        <div className="pt-1 border-t border-gray-100">
+          <button
+            onClick={() => setSkillDetailOpen((v) => !v)}
+            className="flex items-center gap-1 text-[10px] text-primary hover:underline"
+          >
+            {skillDetailOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+            {skillDetailOpen ? "Hide" : "Show"} skill match ({matched.length} matched
+            {missing.length > 0 ? `, ${missing.length} missing` : ""})
+          </button>
+          {skillDetailOpen && (
+            <div className="space-y-1.5 mt-1.5">
+              {matched.length > 0 && (
+                <SkillSection
+                  labels={matched}
+                  variant="matched"
+                  showAll={showAllMatched}
+                  onToggle={(e) => { e.stopPropagation(); setShowAllMatched((v) => !v); }}
+                />
+              )}
+              {missing.length > 0 && (
+                <SkillSection
+                  labels={missing}
+                  variant="missing"
+                  showAll={showAllMissing}
+                  onToggle={(e) => { e.stopPropagation(); setShowAllMissing((v) => !v); }}
+                />
+              )}
             </div>
           )}
         </div>
       )}
     </div>
+  );
+}
+
+const STINT_STATUS_VARIANT: Record<string, string> = { BILLABLE: "billable", UNBILLABLE: "unbilled", SHADOW: "shadow" };
+
+function AlumniCandidateCard({
+  candidate,
+  onSelectEmployee,
+  onAssign,
+  onRequest,
+}: {
+  candidate: ProjectAlumniCandidate;
+  onSelectEmployee: (id: string) => void;
+  onAssign: () => void;
+  onRequest: () => void;
+}) {
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-3.5 space-y-2.5">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-2 min-w-0">
+          <button onClick={() => onSelectEmployee(candidate.employee_id)} className="font-semibold text-sm text-primary hover:underline truncate">
+            {candidate.employee_id}
+          </button>
+          <span className="text-xs text-gray-500 truncate">{candidate.job_name ?? "-"}</span>
+          {candidate.location && <span className="text-[11px] text-gray-400">· {candidate.location}</span>}
+        </div>
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          {candidate.is_currently_free ? (
+            <Badge variant="green">Currently free</Badge>
+          ) : (
+            candidate.current_projects.map((p) => (
+              <Badge key={p.project_id} variant="under_utilized">
+                on {p.project_id} · {p.allocation_by_percentage ?? "?"}%
+              </Badge>
+            ))
+          )}
+          <button
+            onClick={onRequest}
+            className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg border border-primary/30 text-primary hover:bg-primary/5 whitespace-nowrap"
+            title="Email this person to ask if they're available, CC'ing the project manager and their CDM"
+          >
+            <Mail className="w-3 h-3" /> Request
+          </button>
+          <button onClick={onAssign} className="text-[11px] px-2 py-1 rounded-lg bg-primary text-white hover:opacity-90 whitespace-nowrap">
+            Assign
+          </button>
+        </div>
+      </div>
+
+      <div className="space-y-1 pt-1 border-t border-gray-100">
+        {candidate.past_stints.map((s, i) => (
+          <div key={i} className="flex items-center gap-2 text-[11px] text-gray-600 flex-wrap">
+            <span>{s.allocated_start_date ?? "?"} → {s.allocated_end_date ?? "?"}</span>
+            <Badge variant={STINT_STATUS_VARIANT[s.resourcing_status] ?? "default"}>{s.resourcing_status}</Badge>
+            <span className="text-gray-400">{s.allocation_by_percentage ?? "?"}% allocated</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Emails a backfill candidate to ask if they're available, CC'ing the
+// project's real manager and the candidate's real reporting manager (CDM
+// proxy) -- resolved server-side (see leave_service.build_support_request).
+// No allocation is created here; purely an outreach nudge to follow up on.
+function RequestSupportModal({
+  employeeId,
+  projectId,
+  defaultStartDate,
+  defaultEndDate,
+  onClose,
+}: {
+  employeeId: string;
+  projectId: string;
+  defaultStartDate: string;
+  defaultEndDate: string;
+  onClose: () => void;
+}) {
+  const [startDate, setStartDate] = useState(defaultStartDate);
+  const [endDate, setEndDate] = useState(defaultEndDate);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<SupportRequestResult | null>(null);
+
+  async function submit() {
+    setError(null);
+    setSubmitting(true);
+    try {
+      const res = await api.requestSupport(employeeId, projectId, startDate, endDate);
+      setResult(res);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not send this request.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Modal title={`Request support from ${employeeId}`} onClose={onClose} widthClassName="max-w-sm">
+      <div className="p-4 space-y-3 text-xs">
+        {error && <p className="text-red-600 bg-red-50 border border-red-200 rounded-lg px-2 py-1.5">{error}</p>}
+
+        {result ? (
+          <div className="space-y-2">
+            <p className="text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-2.5 py-2 font-medium">
+              Request sent to {result.sent_to}
+            </p>
+            {result.cc.length > 0 && (
+              <p className="text-[11px] text-gray-500">
+                CC: {result.cc.join(", ")}
+                {result.project_manager_employee_id && ` (${result.project_manager_employee_id} · project manager`}
+                {result.project_manager_employee_id && result.cdm_employee_id && ", "}
+                {result.cdm_employee_id && `${result.cdm_employee_id} · CDM`}
+                {(result.project_manager_employee_id || result.cdm_employee_id) && ")"}
+              </p>
+            )}
+            <button
+              onClick={onClose}
+              className="w-full px-4 py-2 rounded-lg text-xs font-medium text-white"
+              style={{ backgroundColor: "hsl(var(--primary))" }}
+            >
+              Done
+            </button>
+          </div>
+        ) : (
+          <>
+            <p className="text-gray-500">
+              Emails {employeeId} asking if they can support {projectId} during this window, CC'ing the project manager
+              and their CDM. No allocation is created — this is just an availability check.
+            </p>
+            <div className="flex items-center gap-2">
+              <div className="flex-1">
+                <label className="text-[11px] text-gray-400 block mb-0.5">Start date</label>
+                <input
+                  type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)}
+                  className="w-full px-2.5 py-1.5 rounded-lg border border-gray-200 outline-none"
+                />
+              </div>
+              <div className="flex-1">
+                <label className="text-[11px] text-gray-400 block mb-0.5">End date</label>
+                <input
+                  type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)}
+                  className="w-full px-2.5 py-1.5 rounded-lg border border-gray-200 outline-none"
+                />
+              </div>
+            </div>
+            <button
+              onClick={submit}
+              disabled={submitting}
+              className="w-full px-4 py-2 rounded-lg text-xs font-medium text-white disabled:opacity-50"
+              style={{ backgroundColor: "hsl(var(--primary))" }}
+            >
+              {submitting ? "Sending…" : "Send request"}
+            </button>
+          </>
+        )}
+      </div>
+    </Modal>
   );
 }
 
@@ -137,6 +307,15 @@ export function LeaveBackfillModal({
   onAssigned?: () => void;
 }) {
   const [assignEmployeeId, setAssignEmployeeId] = useState<string | null>(null);
+  const [requestEmployeeId, setRequestEmployeeId] = useState<string | null>(null);
+  const [source, setSource] = useState<"pool" | "alumni">("pool");
+  const [requiredSkillsOpen, setRequiredSkillsOpen] = useState(false);
+  const alumni = useQuery({
+    queryKey: ["project-alumni", impact.project_id, impact.employee_id],
+    queryFn: () => api.projectAlumniCandidates(impact.project_id, impact.employee_id),
+    enabled: source === "alumni",
+  });
+
   return (
     <Modal
       title={`Backfill for ${impact.employee_id}${impact.job_name ? ` (${impact.job_name})` : ""}`}
@@ -145,34 +324,82 @@ export function LeaveBackfillModal({
       widthClassName="max-w-2xl"
     >
       <div className="p-5 space-y-4">
-        <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5">
-          <p className="text-[11px] font-semibold text-gray-600 mb-1.5">
-            Skill match is matched against {skillSourceLabel(impact.required_skill_source, impact.job_name)}
-          </p>
-          {impact.required_skills.length > 0 && (
-            <div className="flex flex-wrap gap-1.5">
-              {impact.required_skills.map((s) => (
-                <span key={s} className="px-2 py-0.5 rounded-full bg-white border border-gray-200 text-[11px] text-gray-600">
-                  {s}
-                </span>
-              ))}
-            </div>
-          )}
+        <div className="flex items-center bg-gray-100 rounded-full p-0.5 text-xs font-medium w-fit">
+          <button
+            onClick={() => setSource("pool")}
+            className={cn("px-3 py-1.5 rounded-full transition-all", source === "pool" ? "bg-white shadow-sm text-gray-900" : "text-gray-400 hover:text-gray-600")}
+          >
+            Free Pool
+          </button>
+          <button
+            onClick={() => setSource("alumni")}
+            className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-full transition-all", source === "alumni" ? "bg-white shadow-sm text-gray-900" : "text-gray-400 hover:text-gray-600")}
+          >
+            <History className="w-3 h-3" /> Previously on this project
+          </button>
         </div>
 
-        {impact.backfill_candidates.length === 0 ? (
-          <p className="text-xs text-gray-400 italic text-center py-6">
-            No one with this designation ({impact.job_name ?? "?"}) is currently free.
-          </p>
-        ) : (
-          <div className="space-y-2.5">
-            {impact.backfill_candidates.map((c, i) => (
-              <CandidateCard
-                key={c.employee_id} candidate={c} rank={i} onSelectEmployee={onSelectEmployee} includeParams={includeParams}
-                onAssign={() => setAssignEmployeeId(c.employee_id)}
-              />
-            ))}
-          </div>
+        {source === "pool" && (
+          <>
+            <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5">
+              <button
+                onClick={() => setRequiredSkillsOpen((v) => !v)}
+                className="flex items-center gap-1 text-[11px] font-semibold text-gray-600"
+              >
+                {requiredSkillsOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                Skill match is matched against {skillSourceLabel(impact.required_skill_source, impact.job_name)}
+                {impact.required_skills.length > 0 && ` (${impact.required_skills.length})`}
+              </button>
+              {requiredSkillsOpen && impact.required_skills.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mt-1.5">
+                  {impact.required_skills.map((s) => (
+                    <span key={s} className="px-2 py-0.5 rounded-full bg-white border border-gray-200 text-[11px] text-gray-600">
+                      {s}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {impact.backfill_candidates.length === 0 ? (
+              <p className="text-xs text-gray-400 italic text-center py-6">
+                No one with this designation ({impact.job_name ?? "?"}) is currently free.
+              </p>
+            ) : (
+              <div className="space-y-2.5">
+                {impact.backfill_candidates.map((c, i) => (
+                  <CandidateCard
+                    key={c.employee_id} candidate={c} rank={i} onSelectEmployee={onSelectEmployee} includeParams={includeParams}
+                    onAssign={() => setAssignEmployeeId(c.employee_id)}
+                  />
+                ))}
+              </div>
+            )}
+          </>
+        )}
+
+        {source === "alumni" && (
+          <>
+            {alumni.isLoading ? (
+              <p className="text-xs text-gray-400 italic text-center py-6">Loading…</p>
+            ) : alumni.error ? (
+              <p className="text-xs text-red-500 italic text-center py-6">Could not load past team members.</p>
+            ) : !alumni.data || alumni.data.length === 0 ? (
+              <p className="text-xs text-gray-400 italic text-center py-6">
+                No one else has previously worked on {impact.project_id}.
+              </p>
+            ) : (
+              <div className="space-y-2.5">
+                {alumni.data.map((c) => (
+                  <AlumniCandidateCard
+                    key={c.employee_id} candidate={c} onSelectEmployee={onSelectEmployee}
+                    onAssign={() => setAssignEmployeeId(c.employee_id)}
+                    onRequest={() => setRequestEmployeeId(c.employee_id)}
+                  />
+                ))}
+              </div>
+            )}
+          </>
         )}
       </div>
 
@@ -185,6 +412,16 @@ export function LeaveBackfillModal({
           defaultEndDate={impact.leave_end_date}
           onClose={() => setAssignEmployeeId(null)}
           onAssigned={() => { setAssignEmployeeId(null); onAssigned?.(); }}
+        />
+      )}
+
+      {requestEmployeeId && (
+        <RequestSupportModal
+          employeeId={requestEmployeeId}
+          projectId={impact.project_id}
+          defaultStartDate={impact.leave_start_date}
+          defaultEndDate={impact.leave_end_date}
+          onClose={() => setRequestEmployeeId(null)}
         />
       )}
     </Modal>

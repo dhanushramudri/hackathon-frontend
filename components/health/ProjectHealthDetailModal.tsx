@@ -56,14 +56,16 @@ export function ProjectHealthDetailContent({ projectCode, initialTab }: { projec
 
   return (
     <>
-      <div className="flex border-b border-gray-100 px-5 sticky top-0 bg-white z-10 overflow-x-auto">
+      <div className="flex gap-1 border-b border-gray-200 bg-gray-50 px-3 pt-2 sticky top-0 z-10 overflow-x-auto">
         {tabs.map((t) => (
           <button
             key={t.key}
             onClick={() => setTab(t.key)}
             className={cn(
-              "flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium border-b-2 -mb-px transition whitespace-nowrap",
-              tab === t.key ? "border-primary text-primary" : "border-transparent text-gray-400 hover:text-gray-600"
+              "flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium rounded-t-lg border border-b-0 -mb-px transition whitespace-nowrap",
+              tab === t.key
+                ? "bg-white text-primary border-gray-200 font-semibold"
+                : "bg-transparent text-gray-500 border-transparent hover:text-gray-700 hover:bg-gray-100"
             )}
           >
             {t.key === "relief" && <HeartPulse className="w-3 h-3 text-amber-500" />}
@@ -79,7 +81,7 @@ export function ProjectHealthDetailContent({ projectCode, initialTab }: { projec
           <ErrorState message="Could not load this project's detail." />
         ) : detail.data ? (
           <>
-            {tab === "overview" && <OverviewTab d={detail.data} onGoToExtensions={() => setTab("extensions")} />}
+            {tab === "overview" && <OverviewTab d={detail.data} />}
             {tab === "extensions" && <ExtensionsTab d={detail.data} />}
             {tab === "allocations" && <AllocationsTab d={detail.data} />}
             {tab === "staffing" && <StaffingTab d={detail.data} />}
@@ -130,7 +132,7 @@ function ragSequence(reports: WsrReportRow[]): string {
   return reports.length ? reports.map((r) => r.worst_signal).join(", ") : "no reports";
 }
 
-function OverviewTab({ d, onGoToExtensions }: { d: ProjectHealthDetail; onGoToExtensions: () => void }) {
+function OverviewTab({ d }: { d: ProjectHealthDetail }) {
   const recentReports = d.wsr.reports.slice(-d.wsr.recent_n);
   const priorReports = d.wsr.reports.slice(-d.wsr.min_reports_required, -d.wsr.recent_n);
   const baselineReports = d.wsr.reports.slice(0, d.wsr.recent_n);
@@ -263,43 +265,29 @@ function OverviewTab({ d, onGoToExtensions }: { d: ProjectHealthDetail; onGoToEx
   // as if it already happened.
   const displayEndDate = d.project_extended_end_date ?? d.project_end_date;
   const isExplicitlyExtended = d.project_extended_end_date != null;
-  const hasUnapprovedInferredExtension =
-    !isExplicitlyExtended && d.effective_end_date != null && displayEndDate != null && d.effective_end_date > displayEndDate;
 
   return (
     <div className="space-y-4">
+      {!d.is_health_tracked && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-700">
+          Not part of Health Monitor's active risk tracking (real project status:{" "}
+          <span className="font-semibold">{d.project_status ?? "unknown"}</span>) — the numbers below are still computed
+          from this project's real data, just not included in the org-wide risk view (Health list, dashboard, email digest).
+        </div>
+      )}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
         <Field label="Client" value={d.client_id ?? "-"} />
         <Field label="Type" value={d.type_of_project} />
         <Field label="Tech COE" value={d.tech_coe ?? "-"} />
         <div>
           <p className="text-[10px] uppercase tracking-wide text-gray-400">Project window</p>
-          <div className="flex items-center gap-2 flex-wrap">
-            <p className="text-gray-700 font-medium">
-              {d.project_start_date ?? "?"} → {displayEndDate ?? "?"}
-            </p>
-            <button
-              onClick={onGoToExtensions}
-              className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full border border-gray-200 text-gray-500 hover:border-primary hover:text-primary transition whitespace-nowrap"
-              title="View extension history and change this project's end date"
-            >
-              <Pencil className="w-2.5 h-2.5" /> Extensions
-            </button>
-          </div>
+          <p className="text-gray-700 font-medium">
+            {d.project_start_date ?? "?"} → {displayEndDate ?? "?"}
+          </p>
           {isExplicitlyExtended && (
             <p className="text-[10px] text-amber-600">
               end date changed — originally {d.project_end_date}
               {d.project_extended_end_status && ` · ${d.project_extended_end_status.toLowerCase()}`}
-            </p>
-          )}
-          {hasUnapprovedInferredExtension && (
-            <p className="text-[10px] text-gray-400">
-              active allocations run through {d.effective_end_date} — not yet reflected in an approved extension
-            </p>
-          )}
-          {!isExplicitlyExtended && !hasUnapprovedInferredExtension && d.extension_estimate.predicted_extension_end_date && (
-            <p className="text-[10px] text-amber-700">
-              model predicts this will run through {d.extension_estimate.predicted_extension_end_date} — no extension approved or booked yet
             </p>
           )}
         </div>
@@ -321,22 +309,28 @@ function OverviewTab({ d, onGoToExtensions }: { d: ProjectHealthDetail; onGoToEx
               <> — already <strong>{d.extension_estimate.committed_overrun_days}d</strong> past that, with nothing further booked.</>
             )}
           </p>
-          {d.extension_estimate.projected_additional_days != null && (
-            <p className="text-xs text-gray-700">
-              DevOps estimate adds <strong>+{d.extension_estimate.projected_additional_days}d</strong> of remaining ticket work
-              (
-              <span className={cn("font-medium", d.extension_estimate.projected_additional_days_confidence === "low" ? "text-amber-700" : "text-gray-500")}>
-                {d.extension_estimate.projected_additional_days_confidence} confidence
-              </span>
-              ), counted from <strong>{d.extension_estimate.predicted_extension_start_date ?? "today"}</strong>
-              {d.extension_estimate.predicted_extension_end_date && (
-                <> → new projected end <strong>{d.extension_estimate.predicted_extension_end_date}</strong>.</>
-              )}
-            </p>
-          )}
-          {d.extension_estimate.projected_basis && (
-            <p className="text-[10px] text-gray-500">{d.extension_estimate.projected_basis}</p>
-          )}
+          {d.extension_estimate.projected_additional_days != null && (() => {
+            // If the project is already overdue, the remaining-work clock can't
+            // start from the old resourced-through date -- adding the estimate
+            // there would land in the past, contradicting the DevOps board's own
+            // proof that the work still isn't done. So it counts from today instead.
+            const startedFromToday =
+              d.extension_estimate.predicted_extension_start_date !== d.extension_estimate.currently_resourced_through_date;
+            return (
+              <p className="text-xs text-gray-700">
+                DevOps estimate adds <strong>+{d.extension_estimate.projected_additional_days}d</strong> of remaining ticket work
+                (
+                <span className={cn("font-medium", d.extension_estimate.projected_additional_days_confidence === "low" ? "text-amber-700" : "text-gray-500")}>
+                  {d.extension_estimate.projected_additional_days_confidence} confidence
+                </span>
+                ). {startedFromToday ? "Already overdue, so that clock starts today" : "Counted from the currently-resourced end date"}{" "}
+                (<strong>{d.extension_estimate.predicted_extension_start_date ?? "?"}</strong>)
+                {d.extension_estimate.predicted_extension_end_date && (
+                  <> → new projected end <strong>{d.extension_estimate.predicted_extension_end_date}</strong>.</>
+                )}
+              </p>
+            );
+          })()}
           {d.extension_estimate.projected_additional_days == null && d.extension_estimate.committed_overrun_days === 0 && (
             <p className="text-xs text-gray-500">No additional delay projected — see DevOps tab.</p>
           )}
@@ -455,6 +449,7 @@ function AllocationsTab({ d }: { d: ProjectHealthDetail }) {
   const [activeOnly, setActiveOnly] = useState(false);
   const [sort, setSort] = useState<AllocSort>("start_desc");
   const [extending, setExtending] = useState<RosterEntry | null>(null);
+  const [openProfile, setOpenProfile] = useState<string | null>(null);
 
   if (d.allocations_roster.length === 0) {
     return <p className="text-sm text-gray-400 italic">No allocation history for this project.</p>;
@@ -523,6 +518,7 @@ function AllocationsTab({ d }: { d: ProjectHealthDetail }) {
                 row={r}
                 projectExtendedEndDate={d.project_extended_end_date}
                 onExtend={() => setExtending(r)}
+                onOpenEmployee={() => setOpenProfile(r.employee_id)}
               />
             ))}
           </tbody>
@@ -543,6 +539,7 @@ function AllocationsTab({ d }: { d: ProjectHealthDetail }) {
           onClose={() => setExtending(null)}
         />
       )}
+      {openProfile && <EmployeeProfileModal employeeId={openProfile} initialTab="overview" onClose={() => setOpenProfile(null)} />}
     </div>
   );
 }
@@ -551,16 +548,20 @@ function RosterRow({
   row,
   projectExtendedEndDate,
   onExtend,
+  onOpenEmployee,
 }: {
   row: RosterEntry;
   projectExtendedEndDate: string | null;
   onExtend: () => void;
+  onOpenEmployee: () => void;
 }) {
   const isPending = useIsMutating({ mutationKey: ["extend-allocation", row.allocation_id] }) > 0;
 
   return (
     <tr className="border-b border-gray-50 last:border-0">
-      <td className="px-2.5 py-1.5 font-medium text-gray-700 whitespace-nowrap">{row.employee_id}</td>
+      <td className="px-2.5 py-1.5 whitespace-nowrap">
+        <button onClick={onOpenEmployee} className="font-medium text-primary hover:underline">{row.employee_id}</button>
+      </td>
       <td className="px-2.5 py-1.5 text-gray-600 whitespace-nowrap">{row.job_name ?? "-"}</td>
       <td className="px-2.5 py-1.5 whitespace-nowrap"><Badge variant={row.resourcing_status}>{row.resourcing_status}</Badge></td>
       <td className="px-2.5 py-1.5 text-gray-500 whitespace-nowrap">{row.allocation_by_percentage}%</td>
@@ -619,6 +620,7 @@ function StaffingTab({ d }: { d: ProjectHealthDetail }) {
   const [shadowSearch, setShadowSearch] = useState("");
   const [shadowStatus, setShadowStatus] = useState("all");
   const [shadowSort, setShadowSort] = useState<ShadowSort>("value_desc");
+  const [openProfile, setOpenProfile] = useState<string | null>(null);
 
   const [roleSearch, setRoleSearch] = useState("");
   const [roleSort, setRoleSort] = useState<RoleMixSort>("gap_desc");
@@ -715,7 +717,11 @@ function StaffingTab({ d }: { d: ProjectHealthDetail }) {
               <tbody>
                 {shadowRows.map((q, i) => (
                   <tr key={i} className="border-b border-gray-50 last:border-0">
-                    <td className="px-2.5 py-1.5 font-medium text-gray-700 whitespace-nowrap">{q.employee_id}</td>
+                    <td className="px-2.5 py-1.5 whitespace-nowrap">
+                      <button onClick={() => setOpenProfile(q.employee_id)} className="font-medium text-primary hover:underline">
+                        {q.employee_id}
+                      </button>
+                    </td>
                     <td className="px-2.5 py-1.5 text-gray-600 whitespace-nowrap">{q.job_name ?? "-"}</td>
                     <td className="px-2.5 py-1.5 whitespace-nowrap"><Badge variant={q.resourcing_status}>{q.resourcing_status}</Badge></td>
                     <td className="px-2.5 py-1.5 text-gray-500 whitespace-nowrap">{q.allocation_by_percentage}%</td>
@@ -838,6 +844,7 @@ function StaffingTab({ d }: { d: ProjectHealthDetail }) {
           </>
         )}
       </div>
+      {openProfile && <EmployeeProfileModal employeeId={openProfile} initialTab="overview" onClose={() => setOpenProfile(null)} />}
     </div>
   );
 }
@@ -849,6 +856,7 @@ function OvertimeTab({ d }: { d: ProjectHealthDetail }) {
   const [otSearch, setOtSearch] = useState("");
   const [otSort, setOtSort] = useState<OvertimeSort>("hours_desc");
   const [weekSort, setWeekSort] = useState<WeeklySort>("week_desc");
+  const [openProfile, setOpenProfile] = useState<string | null>(null);
 
   let employees = d.overtime_risk.employees;
   const q = otSearch.trim().toLowerCase();
@@ -887,7 +895,10 @@ function OvertimeTab({ d }: { d: ProjectHealthDetail }) {
               {employees.map((e) => (
                 <div key={e.employee_id} className="rounded-xl border border-gray-200 p-3">
                   <div className="flex items-center justify-between mb-2">
-                    <p className="text-xs font-medium text-gray-700">{e.employee_id} — {e.job_name ?? "Employee"}</p>
+                    <p className="text-xs font-medium text-gray-700">
+                      <button onClick={() => setOpenProfile(e.employee_id)} className="text-primary hover:underline">{e.employee_id}</button>
+                      {" "}— {e.job_name ?? "Employee"}
+                    </p>
                     <p className="text-[11px] text-gray-400">{e.overtime_days_recent} overtime day(s) · max {e.max_daily_hours_recent}h</p>
                   </div>
                   <div className="flex gap-1.5 flex-wrap">
@@ -957,6 +968,7 @@ function OvertimeTab({ d }: { d: ProjectHealthDetail }) {
           </>
         )}
       </div>
+      {openProfile && <EmployeeProfileModal employeeId={openProfile} initialTab="overview" onClose={() => setOpenProfile(null)} />}
     </div>
   );
 }

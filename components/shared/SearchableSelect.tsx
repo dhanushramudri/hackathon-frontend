@@ -31,6 +31,7 @@ export function SearchableSelect({
   placeholder = "-- Select --",
   disabled = false,
   className,
+  size = "md",
 }: {
   options: SearchableSelectOption[];
   value: string[];
@@ -39,6 +40,10 @@ export function SearchableSelect({
   placeholder?: string;
   disabled?: boolean;
   className?: string;
+  // "sm" matches a dense table row (e.g. Step5's allocation drafts sitting
+  // next to plain-text roster rows) -- default "md" is the original size
+  // used everywhere else (forms, filter bars).
+  size?: "sm" | "md";
 }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -109,13 +114,14 @@ export function SearchableSelect({
         disabled={disabled}
         onClick={() => setOpen((v) => !v)}
         className={cn(
-          "w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-gray-200 text-sm bg-white text-left outline-none",
+          "w-full flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white text-left outline-none",
+          size === "sm" ? "px-2 py-1 text-xs" : "px-3 py-2 text-sm",
           disabled && "opacity-50 cursor-not-allowed",
           !disabled && "focus:border-[hsl(var(--primary))]"
         )}
       >
         <span className={cn("truncate", selectedLabels.length === 0 && "text-gray-400")}>{triggerText}</span>
-        <ChevronDown className={cn("w-3.5 h-3.5 text-gray-400 flex-shrink-0 transition-transform", open && "rotate-180")} />
+        <ChevronDown className={cn("flex-shrink-0 text-gray-400 transition-transform", size === "sm" ? "w-3 h-3" : "w-3.5 h-3.5", open && "rotate-180")} />
       </button>
       {open && !disabled && coords && typeof document !== "undefined" && createPortal(
         <div

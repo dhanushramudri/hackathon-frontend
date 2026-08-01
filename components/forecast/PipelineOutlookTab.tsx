@@ -17,7 +17,6 @@ import { Badge } from "@/components/shared/Badge";
 import { Modal } from "@/components/shared/Modal";
 import { EmployeeProfileModal } from "@/components/shared/EmployeeProfileModal";
 import { cn, formatUsd } from "@/lib/utils";
-import { JMAN, JMAN_HEADER_GRADIENT } from "@/lib/brandColors";
 
 const CLUSTER_COLORS = ["#3411A3", "#26D4F0", "#C36BDB", "#18978E", "#FF6196"];
 
@@ -59,7 +58,7 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
-export default function PipelineOutlookPage() {
+export function PipelineOutlookTab() {
   const [startDate, setStartDate] = useState(tomorrowStr());
   const [horizonMonths, setHorizonMonths] = useState(6);
   const [granularity, setGranularity] = useState<"month" | "week">("month");
@@ -102,7 +101,7 @@ export default function PipelineOutlookPage() {
 
   if (isLoading) {
     return (
-      <div className="p-4 sm:p-6 w-full space-y-5">
+      <div className="max-w-6xl mx-auto space-y-5">
         <div className="rounded-xl border border-gray-200 bg-white p-4 flex flex-wrap items-end gap-4">
           <Skeleton className="h-9 w-32 rounded-lg" />
           <Skeleton className="h-9 w-24 rounded-lg" />
@@ -142,7 +141,7 @@ export default function PipelineOutlookPage() {
   const open = (sel: DrilldownSel) => setDrilldown(sel);
 
   return (
-    <div className="p-4 sm:p-6 w-full space-y-5">
+    <div className="p-4 sm:p-6 max-w-6xl mx-auto space-y-5">
       <div className="rounded-xl border border-gray-200 bg-white p-4 flex flex-wrap items-end gap-4">
         <div>
           <label className="text-[10px] text-gray-400 block mb-0.5">Start date</label>
@@ -246,10 +245,10 @@ export default function PipelineOutlookPage() {
         </ResponsiveContainer>
       </div>
 
-      <div className="rounded-xl bg-white overflow-hidden" style={{ border: `1px solid ${JMAN.emerald}40` }}>
+      <div className="rounded-xl border border-[hsl(var(--primary)/0.3)] bg-white overflow-hidden">
         <div className="overflow-x-auto">
         <table className="w-full text-xs data-table">
-          <thead className="text-white" style={{ background: JMAN_HEADER_GRADIENT }}>
+          <thead className="bg-secondary text-secondary-foreground">
             <tr>
               {["Period", "Confirmed", "Unconfirmed", "Supply", "Net", "Confirmed $", "Unconfirmed $", "Flags"].map((h) => (
                 <th key={h} className="text-left font-medium px-3 py-2 whitespace-nowrap">{h}</th>
@@ -371,10 +370,10 @@ export default function PipelineOutlookPage() {
             </button>
           )}
         </div>
-        <div className="overflow-hidden rounded-lg" style={{ border: `1px solid ${JMAN.emerald}40` }}>
+        <div className="overflow-hidden rounded-lg border border-[hsl(var(--primary)/0.3)]">
           <div className="overflow-x-auto">
           <table className="w-full text-xs data-table">
-            <thead className="text-white" style={{ background: JMAN_HEADER_GRADIENT }}>
+            <thead className="bg-secondary text-secondary-foreground">
               <tr>
                 {["Period", "Role", "Needed", "Available", "Shortfall", "Shortfall $", "Value $"].map((h) => (
                   <th key={h} className="text-left font-medium px-3 py-2 whitespace-nowrap">{h}</th>

@@ -5,14 +5,14 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import {
   CheckCircle2, ChevronDown, ChevronUp, Sparkles, XCircle,
-  RefreshCw, AlertTriangle, Clock, Zap, Users,
+  RefreshCw, AlertTriangle, Clock, Zap, Users, MessageSquare, Star,
 } from "lucide-react";
 import {
   api,
   DEFAULT_INCLUDE_PARAMS,
   type AllocationRow, type EmployeeAllocationRow, type EmployeeProfile,
   type BackfillResult, type RecommendationCandidate, type FallbackCandidates,
-  type IncludeParams, type RedeployMatch,
+  type IncludeParams, type RedeployMatch, type EmployeeFeedbackEntry,
 } from "@/lib/api";
 import { Modal } from "@/components/shared/Modal";
 import { Badge } from "@/components/shared/Badge";
@@ -24,6 +24,7 @@ import { FiredBadge } from "@/components/shared/FiredBadge";
 import { HoldDot, HoldChip } from "@/components/shared/HoldFlag";
 import { TimesheetProofModal } from "@/components/shared/TimesheetProofModal";
 import { AssignModal } from "@/components/shared/AssignModal";
+import { SearchableSelect } from "@/components/shared/SearchableSelect";
 import { cn } from "@/lib/utils";
 
 export type ProfileTab =
@@ -33,6 +34,7 @@ export type ProfileTab =
   | "skills"
   | "competency"
   | "leave"
+  | "feedback"
   | "redeploy_matches"
   | "replacement";
 
@@ -61,6 +63,7 @@ const BASE_TABS: { key: ProfileTab; label: string }[] = [
   { key: "skills", label: "Skills" },
   { key: "competency", label: "Competency" },
   { key: "leave", label: "Leave" },
+  { key: "feedback", label: "Feedback" },
 ];
 
 export function EmployeeProfileModal({
@@ -113,6 +116,7 @@ export function EmployeeProfileModal({
           >
             {t.key === "redeploy_matches" && <Sparkles className="w-3 h-3" />}
             {t.key === "replacement" && <RefreshCw className="w-3 h-3" />}
+            {t.key === "feedback" && <MessageSquare className="w-3 h-3" />}
             {t.label}
           </button>
         ))}
@@ -137,6 +141,7 @@ export function EmployeeProfileModal({
             {tab === "skills" && <SkillsTab profile={profile.data} matchContext={skillMatchContext} />}
             {tab === "competency" && <CompetencyTab profile={profile.data} />}
             {tab === "leave" && <LeaveTab profile={profile.data} />}
+            {tab === "feedback" && <FeedbackTab employeeId={employeeId} />}
             {tab === "redeploy_matches" && <RedeployMatchesTab employeeId={employeeId} />}
             {tab === "replacement" && replacementCtx && (
               <ReplacementTab
@@ -532,7 +537,7 @@ function ReplacementTab({
   );
 }
 
-function cleanSkillLabel(s: string): string {
+export function cleanSkillLabel(s: string): string {
   const cleaned = s.split("|")[0].replace(/\s*\(score [\d.]+\/\d+\)\s*$/i, "").trim();
   return cleaned.length > 42 ? cleaned.slice(0, 40) + "…" : cleaned;
 }
@@ -540,7 +545,7 @@ function cleanSkillLabel(s: string): string {
 const MATCH_SHOW = 5;
 const MISS_SHOW  = 3;
 
-function SkillSection({
+export function SkillSection({
   labels,
   variant,
   showAll,
@@ -956,6 +961,14 @@ function OverviewTab({ profile }: { profile: EmployeeProfile }) {
         ) : (
           "no current allocation shows this"
         ),
+    },
+    {
+      key: "pulse",
+      label: "Pulse",
+      fired: profile.pulse?.is_not_happy ?? false,
+      detail: !profile.pulse
+        ? "no Weekly Pulse submissions for this employee"
+        : `${profile.pulse.avg_score}/4 avg (inspired/valued/workload), ${profile.pulse.response_count} response(s), last ${profile.pulse.window_weeks}w. Worst: ${profile.pulse.worst_question}.`,
     },
   ];
 
@@ -1397,6 +1410,226 @@ function LeaveTab({ profile }: { profile: EmployeeProfile }) {
           </table>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── Feedback Tab ───────────────────────────────────────────────────────────────
+// Real HR/PM performance-review check-ins on real projects, written by a real
+// reviewing employee -- a manual "proof" surface for the resource manager to
+// cross-check a recommendation candidate against, never an input to
+// recommendation scoring itself.
+
+const WEEKS_BACK_OPTIONS: [string, string][] = [
+  ["all", "All time"],
+  ["4", "Last 4 weeks"],
+  ["8", "Last 8 weeks"],
+  ["12", "Last 12 weeks"],
+  ["26", "Last 6 months"],
+  ["52", "Last 12 months"],
+];
+
+// All 5 real rating values -- the scale is 1-5, no 0, and every value is
+// independently selectable (e.g. just 5 and 2, to see the extremes only)
+// rather than a single "N+" threshold.
+const RATING_OPTIONS = [5, 4, 3, 2, 1].map((n) => ({ value: String(n), label: `${n} star${n === 1 ? "" : "s"}` }));
+
+function StarRating({ rating }: { rating: number }) {
+  return (
+    <span className="inline-flex items-center gap-0.5">
+      {[1, 2, 3, 4, 5].map((n) => (
+        <Star
+          key={n}
+          className={cn("w-3 h-3", n <= rating ? "fill-amber-400 text-amber-400" : "text-gray-200")}
+        />
+      ))}
+    </span>
+  );
+}
+
+function FeedbackDetailModal({ entry, onClose }: { entry: EmployeeFeedbackEntry; onClose: () => void }) {
+  return (
+    <Modal
+      title={
+        <span className="inline-flex items-center gap-2">
+          {entry.project_id} — feedback
+          <StarRating rating={entry.rating} />
+        </span>
+      }
+      subtitle={`${entry.feedback_date} · Reviewed by ${entry.reviewer_employee_id} (${entry.reviewer_role})`}
+      onClose={onClose}
+      widthClassName="max-w-2xl"
+    >
+      <div className="p-5 space-y-3">
+        <div className="flex items-center gap-2 flex-wrap">
+          {entry.client_id && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full border bg-gray-50 border-gray-200 text-gray-500 whitespace-nowrap">
+              {entry.client_id}
+            </span>
+          )}
+          {entry.coe && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full border bg-violet-50 border-violet-200 text-violet-700 whitespace-nowrap">
+              {entry.coe}
+            </span>
+          )}
+          {entry.themes.map((t) => (
+            <span key={t} className="text-[10px] px-1.5 py-0.5 rounded-full border bg-teal-50 border-teal-200 text-teal-700 whitespace-nowrap">
+              {t}
+            </span>
+          ))}
+          <span className={cn(
+            "text-[10px] px-1.5 py-0.5 rounded-full border whitespace-nowrap",
+            entry.would_recommend ? "bg-emerald-50 border-emerald-200 text-emerald-700" : "bg-red-50 border-red-200 text-red-600"
+          )}>
+            {entry.would_recommend ? "Would recommend" : "Would not recommend"}
+          </span>
+        </div>
+        <div className="rounded-xl border border-gray-100 bg-gray-50/60 p-4">
+          <p className="text-[12px] text-gray-700 leading-relaxed whitespace-pre-line">{entry.full_text}</p>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function FeedbackEntryCard({ entry, onOpen }: { entry: EmployeeFeedbackEntry; onOpen: () => void }) {
+  return (
+    <button
+      onClick={onOpen}
+      className="w-full text-left rounded-lg border border-gray-100 p-3 space-y-1.5 hover:border-primary/40 hover:bg-gray-50/60 transition"
+    >
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap text-[11px] text-gray-500">
+          <span className="text-gray-700 font-medium">{entry.project_id}</span>
+          {entry.client_id && <span>· {entry.client_id}</span>}
+          {entry.coe && <span>· {entry.coe}</span>}
+          <span>· {entry.feedback_date}</span>
+          <span>· by {entry.reviewer_employee_id} ({entry.reviewer_role})</span>
+        </div>
+        <StarRating rating={entry.rating} />
+      </div>
+      <div className="flex items-center gap-1.5 flex-wrap">
+        {entry.themes.map((t) => (
+          <span key={t} className="text-[10px] px-1.5 py-0.5 rounded-full border bg-teal-50 border-teal-200 text-teal-700 whitespace-nowrap">
+            {t}
+          </span>
+        ))}
+        <span className={cn(
+          "text-[10px] px-1.5 py-0.5 rounded-full border whitespace-nowrap",
+          entry.would_recommend ? "bg-emerald-50 border-emerald-200 text-emerald-700" : "bg-red-50 border-red-200 text-red-600"
+        )}>
+          {entry.would_recommend ? "Would recommend" : "Would not recommend"}
+        </span>
+      </div>
+      <p className="text-[11px] text-gray-600 leading-relaxed">{entry.summary_comment}</p>
+      <p className="text-[10px] text-primary">Read full feedback →</p>
+    </button>
+  );
+}
+
+function FeedbackTab({ employeeId }: { employeeId: string }) {
+  const [weeksBack, setWeeksBack] = useState("all");
+  const [coe, setCoe] = useState("all");
+  const [projectId, setProjectId] = useState("all");
+  const [reviewerEmployeeId, setReviewerEmployeeId] = useState("all");
+  const [theme, setTheme] = useState("all");
+  const [ratings, setRatings] = useState<string[]>([]);
+  const [openEntry, setOpenEntry] = useState<EmployeeFeedbackEntry | null>(null);
+
+  const feedback = useQuery({
+    queryKey: ["employee-feedback", employeeId, weeksBack, coe, projectId, reviewerEmployeeId, theme, ratings],
+    queryFn: () =>
+      api.employeeFeedback(employeeId, {
+        weeksBack: weeksBack === "all" ? undefined : Number(weeksBack),
+        coe: coe === "all" ? undefined : coe,
+        projectId: projectId === "all" ? undefined : projectId,
+        reviewerEmployeeId: reviewerEmployeeId === "all" ? undefined : reviewerEmployeeId,
+        theme: theme === "all" ? undefined : theme,
+        ratings: ratings.length > 0 ? ratings.map(Number) : undefined,
+      }),
+  });
+
+  if (feedback.isLoading) return <TableSkeleton columns={4} rows={5} />;
+  if (feedback.error) return <ErrorState message="Could not load feedback for this employee." />;
+  const data = feedback.data;
+  if (!data || data.total_response_count === 0) {
+    return <p className="text-sm text-gray-400 italic">No HR feedback records for this employee.</p>;
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-[11px] text-gray-400">
+        Real HR/PM performance-review check-ins on this person's real projects — proof to cross-check a recommendation against, not a ranking input.
+      </p>
+
+      <TableControls
+        filters={[
+          { value: weeksBack, onChange: setWeeksBack, options: WEEKS_BACK_OPTIONS },
+          { value: coe, onChange: setCoe, options: [["all", "All CoEs"], ...data.available_coes.map((c) => [c, c] as [string, string])] },
+          { value: projectId, onChange: setProjectId, options: [["all", "All projects"], ...data.available_projects.map((p) => [p, p] as [string, string])] },
+          {
+            value: reviewerEmployeeId,
+            onChange: setReviewerEmployeeId,
+            options: [["all", "All reviewers"], ...data.available_reviewers.map((r) => [r.employee_id, `${r.employee_id} (${r.role})`] as [string, string])],
+          },
+          { value: theme, onChange: setTheme, options: [["all", "All themes"], ...data.available_themes.map((t) => [t, t] as [string, string])] },
+        ]}
+      />
+      <div className="flex items-center gap-1.5 -mt-1.5">
+        <span className="text-[10px] text-gray-400 whitespace-nowrap">Rating:</span>
+        <SearchableSelect
+          options={RATING_OPTIONS}
+          value={ratings}
+          onChange={setRatings}
+          multi
+          placeholder="All ratings"
+          className="w-36"
+          size="sm"
+        />
+      </div>
+
+      {data.response_count === 0 ? (
+        <p className="text-xs text-gray-400 italic py-4 text-center">No feedback matches the current filters.</p>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="rounded-lg border border-gray-100 p-2.5">
+              <p className="text-[10px] uppercase tracking-wide text-gray-400">Avg rating</p>
+              <p className="text-gray-700 font-semibold text-sm">{data.avg_rating}/5</p>
+            </div>
+            <div className="rounded-lg border border-gray-100 p-2.5">
+              <p className="text-[10px] uppercase tracking-wide text-gray-400">Responses</p>
+              <p className="text-gray-700 font-semibold text-sm">{data.response_count}</p>
+            </div>
+            <div className="rounded-lg border border-gray-100 p-2.5">
+              <p className="text-[10px] uppercase tracking-wide text-gray-400">Would recommend</p>
+              <p className="text-gray-700 font-semibold text-sm">{data.would_recommend_pct}%</p>
+            </div>
+            <div className="rounded-lg border border-gray-100 p-2.5">
+              <p className="text-[10px] uppercase tracking-wide text-gray-400">Projects covered</p>
+              <p className="text-gray-700 font-semibold text-sm">{data.distinct_project_count}</p>
+            </div>
+          </div>
+
+          {Object.keys(data.theme_averages).length > 0 && (
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {Object.entries(data.theme_averages).map(([t, avg]) => (
+                <span key={t} className="text-[10px] px-2 py-0.5 rounded-full border border-gray-200 bg-gray-50 text-gray-500 whitespace-nowrap">
+                  {t}: {avg}/5
+                </span>
+              ))}
+            </div>
+          )}
+
+          <div className="space-y-2">
+            {data.entries.map((entry) => (
+              <FeedbackEntryCard key={entry.feedback_id} entry={entry} onOpen={() => setOpenEntry(entry)} />
+            ))}
+          </div>
+        </>
+      )}
+
+      {openEntry && <FeedbackDetailModal entry={openEntry} onClose={() => setOpenEntry(null)} />}
     </div>
   );
 }

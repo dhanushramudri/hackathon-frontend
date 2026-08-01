@@ -77,14 +77,6 @@ export interface CandidateFilterOptions {
   minRelevantProjects: number;
   relevantExperienceOnly: boolean;
   sort: CandidateSort;
-  // Whether "skill" is currently a selected ranking parameter (Advanced Filters).
-  // Bucket/confidence are skill-derived, so they must only drive the default
-  // sort priority when skill is actually included -- otherwise unchecking
-  // "Skill match" would silently have no effect on ordering. Defaults true to
-  // match the platform default (skill included).
-  includeSkill?: boolean;
-  includeAvailability?: boolean;
-  includeCoeAffinity?: boolean;
 }
 
 export function filterAndSortCandidates(candidates: RecommendationCandidate[], opts: CandidateFilterOptions): RecommendationCandidate[] {
@@ -122,33 +114,17 @@ export function filterAndSortCandidates(candidates: RecommendationCandidate[], o
   if (opts.minRelevantProjects > 0) result = result.filter((c) => c.relevant_project_count >= opts.minRelevantProjects);
   if (opts.relevantExperienceOnly) result = result.filter((c) => c.relevant_project_count > 0);
 
-  const BUCKET_RANK: Record<string, number> = { eligible: 1, trainable: 1, gap: 1, not_assessed: 0 };
-  const CONF_RANK: Record<string, number> = { observed: 2, imputed: 1, semantic_match: 1, no_match: 0, no_requirement: 0 };
-
   const sorted = [...result];
   switch (opts.sort) {
     case "composite":
-      sorted.sort((a, b) => {
-        if (opts.includeSkill !== false) {
-          const bucketDiff = (BUCKET_RANK[b.bucket] ?? 0) - (BUCKET_RANK[a.bucket] ?? 0);
-          if (bucketDiff !== 0) return bucketDiff;
-          const confDiff = (CONF_RANK[b.skill_confidence] ?? 0) - (CONF_RANK[a.skill_confidence] ?? 0);
-          if (confDiff !== 0) return confDiff;
-        }
-        if (opts.includeCoeAffinity !== false) {
-          const coeDiff = (b.coe_affinity_rank ?? 1) - (a.coe_affinity_rank ?? 1);
-          if (coeDiff !== 0) return coeDiff;
-        }
-        if (opts.includeAvailability !== false) {
-          const availDiff = b.available_pct - a.available_pct;
-          if (availDiff !== 0) return availDiff;
-        }
-        const compositeDiff = b.composite_score - a.composite_score;
-        if (compositeDiff !== 0) return compositeDiff;
-        const relevantDiff = b.relevant_project_count - a.relevant_project_count;
-        if (relevantDiff !== 0) return relevantDiff;
-        return b.relevant_project_ratio - a.relevant_project_ratio;
-      });
+      // Trust the backend's own order rather than re-deriving it here: the
+      // backend already applies every Advanced Filters parameter correctly
+      // (skill bucket/confidence, coe_affinity, availability, AND the cost-
+      // efficiency tiebreak) when it builds this response. A second,
+      // independent JS re-sort duplicating that logic previously missed the
+      // cost-efficiency tiebreak entirely, silently undoing it every render.
+      // `.filter()` above preserves relative order, so no explicit sort call
+      // is needed here at all -- doing nothing is the correct behavior.
       break;
     case "skill":
       sorted.sort((a, b) => b.skill_score - a.skill_score);
@@ -182,13 +158,13 @@ export interface AdvancedParamDef {
 // Staffing, New Project forecast) so "advanced filters" means the exact same
 // thing everywhere.
 export const ADVANCED_PARAMS: AdvancedParamDef[] = [
-  { key: "skill", label: "Skill match", weightPct: 40, description: "How well the employee's skill records match the requested skillset." },
-  { key: "competency", label: "Competency", weightPct: 25, description: "Employee's overall competency assessment score." },
-  { key: "availability", label: "Availability", weightPct: 35, description: "How much of the requested allocation percentage the employee has free." },
-  { key: "category_match", label: "COE / Proposition category match", weightPct: 15, description: "Past projects matching this deal's proposition category (e.g. Data Advisory, Pricing) — a specialist with 4/4 matching projects can outrank a generalist with 1/4." },
-  { key: "project_count", label: "Number of projects completed", weightPct: 15, description: "Overall completed/active project experience (breadth/seniority), regardless of category — capped at 20+ projects." },
-  { key: "coe_affinity", label: "CoE preference", weightPct: 0, description: "Prefer candidates from the CoE this role is asking for (e.g. a DS role prefers DS people first, falling back to other CoEs only if none rank higher). Data Engineering roles are exempt — any CoE can staff them. This is a sort tiebreak, not a blended composite weight." },
-  { key: "cost_efficiency", label: "Budget-friendly", weightPct: 0, description: "Among candidates who are already comparably good matches (within ~2 points of each other), prefer the lower-cost role — e.g. a Software Engineer over a Senior Software Engineer or Solutions Enabler at the same fit level. Never overrides a genuinely better match; only breaks near-ties." },
+  { key: "skill", label: "Skill match", weightPct: 40, description: "" },
+  { key: "competency", label: "Competency", weightPct: 25, description: "" },
+  { key: "availability", label: "Availability", weightPct: 35, description: "" },
+  { key: "category_match", label: "COE / Proposition category match", weightPct: 15, description: "" },
+  { key: "project_count", label: "Number of projects completed", weightPct: 15, description: "" },
+  { key: "coe_affinity", label: "CoE preference", weightPct: 15, description: "" },
+  { key: "cost_efficiency", label: "Budget-friendly", weightPct: 0, description: "Tiebreak among near-equal matches only." },
 ];
 
 export function isNonDefaultParams(include: IncludeParams, defaults: IncludeParams): boolean {

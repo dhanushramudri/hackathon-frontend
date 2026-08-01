@@ -204,9 +204,6 @@ export function RoleRecommendationDetail({
     minRelevantProjects,
     relevantExperienceOnly,
     sort: candidateSort,
-    includeSkill: includeParams.skill,
-    includeAvailability: includeParams.availability,
-    includeCoeAffinity: includeParams.coe_affinity,
   });
 
   const hasActiveCandidateFilters =
@@ -835,9 +832,6 @@ function OtherOptionsSection({
   const filteredBase = filterAndSortCandidates(otherOptions, {
     search, signal, designation, coe, skillData, minSkill, minCompetency, minAvailable,
     meetsCapacityOnly, minRelevantProjects, relevantExperienceOnly, sort,
-    includeSkill: includeParams.skill,
-    includeAvailability: includeParams.availability,
-    includeCoeAffinity: includeParams.coe_affinity,
   });
   const filtered = availableByDate
     ? filteredBase.filter((c) => c.meets_requested_capacity || (c.earliest_available_date != null && c.earliest_available_date <= availableByDate))

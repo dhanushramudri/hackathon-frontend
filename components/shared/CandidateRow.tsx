@@ -126,7 +126,12 @@ export function CandidateRow({
         className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-left hover:bg-gray-50/70 transition flex-wrap"
       >
         <span className="text-[11px] text-gray-400 w-4 flex-shrink-0">{rank}</span>
-        <span className="text-sm font-semibold text-gray-800 whitespace-nowrap">{candidate.employee_id}</span>
+        <button
+          onClick={(e) => { e.stopPropagation(); onOpenProfile("overview"); }}
+          className="text-sm font-semibold text-primary hover:underline whitespace-nowrap"
+        >
+          {candidate.employee_id}
+        </button>
         <span className="text-xs text-gray-400 truncate">{candidate.job_name}</span>
         {candidate.coe ? (
   <span
