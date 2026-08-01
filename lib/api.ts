@@ -1593,6 +1593,7 @@ export interface ProjectInfo {
   client_id: string | null;
   type_of_project: string | null;
   tech_coe: string | null;
+  proposition_coe: string | null;
   project_status: string | null;
   project_start_date: string | null;
   project_end_date: string | null;

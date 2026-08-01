@@ -220,7 +220,9 @@ export function Step5ResourceAllocation({
                   <tr key={d.key} className="border-b border-gray-50 last:border-0 bg-[hsl(var(--primary)/0.04)]">
                     <td className="px-2.5 py-1.5">
                       <div className="flex items-center gap-1.5">
-                        <Sparkles size={13} className="text-amber-500 flex-shrink-0" title="Suggested from Budget" />
+                        <span title="Suggested from Budget" className="flex-shrink-0 inline-flex">
+                          <Sparkles size={13} className="text-amber-500" />
+                        </span>
                         <SearchableSelect
                           size="sm"
                           className="flex-1"
