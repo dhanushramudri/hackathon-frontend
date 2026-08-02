@@ -134,6 +134,7 @@ export function PipelineOutlookTab() {
   const monthsInFilter = periodFilter.length ? data.months.filter((m) => periodFilter.includes(m.month)) : data.months;
   const totalConfirmedInFilter = monthsInFilter.reduce((s, m) => s + m.confirmed_demand_count, 0);
   const totalUnconfirmedInFilter = monthsInFilter.reduce((s, m) => s + m.unconfirmed_demand_count, 0);
+  const totalConfirmedDealsInFilter = monthsInFilter.reduce((s, m) => s + m.confirmed_deal_count, 0);
 
   const togglePeriod = (m: string) =>
     setPeriodFilter((prev) => (prev.includes(m) ? prev.filter((p) => p !== m) : [...prev, m]));
@@ -249,8 +250,14 @@ export function PipelineOutlookTab() {
         <table className="w-full text-xs data-table">
           <thead className="bg-secondary text-secondary-foreground">
             <tr>
-              {["Period", "Confirmed", "Unconfirmed", "Supply", "Net", "Confirmed $", "Unconfirmed $", "Flags"].map((h) => (
-                <th key={h} className="text-left font-medium px-3 py-2 whitespace-nowrap">{h}</th>
+              {["Period", "Confirmed", "Unconfirmed", "Supply", "Net (Supply − Confirmed)", "Confirmed $", "Unconfirmed $", "Flags"].map((h) => (
+                <th
+                  key={h}
+                  className="text-left font-medium px-3 py-2 whitespace-nowrap"
+                  title={h === "Net (Supply − Confirmed)" ? "Projected supply minus confirmed demand for this period -- negative means a real shortfall against signed deals." : undefined}
+                >
+                  {h}
+                </th>
               ))}
             </tr>
           </thead>
@@ -282,7 +289,24 @@ export function PipelineOutlookTab() {
                     {m.projected_supply_count}
                   </button>
                 </td>
-                <td className="px-3 py-2 text-gray-500">{m.net_confirmed_surplus_shortfall}</td>
+                <td className="px-3 py-2">
+                  <button
+                    onClick={() =>
+                      open(
+                        m.net_confirmed_surplus_shortfall < 0
+                          ? { dimension: "confirmed_demand", month: m.month, label: `Confirmed demand behind the shortfall -- ${m.month}` }
+                          : { dimension: "supply", month: m.month, label: `Supply behind the surplus -- ${m.month}` }
+                      )
+                    }
+                    title="Projected supply minus confirmed demand for this period"
+                    className={cn(
+                      "font-medium hover:underline",
+                      m.net_confirmed_surplus_shortfall < 0 ? "text-red-600 hover:text-red-700" : "text-emerald-600 hover:text-emerald-700"
+                    )}
+                  >
+                    {m.net_confirmed_surplus_shortfall > 0 ? `+${m.net_confirmed_surplus_shortfall}` : m.net_confirmed_surplus_shortfall}
+                  </button>
+                </td>
                 <td className="px-3 py-2">
                   {m.confirmed_value_usd > 0 ? (
                     <button
@@ -338,7 +362,10 @@ export function PipelineOutlookTab() {
         </div>
         {roleMode === "confirmed" ? (
           <p className="text-[11px] text-gray-400 mb-2">
-            Click a row to see the real deals behind it. {totalConfirmedInFilter} confirmed request(s) in this view.
+            Click a row to see the real deals behind it. {totalConfirmedInFilter} confirmed request(s) across{" "}
+            {totalConfirmedDealsInFilter} real deal{totalConfirmedDealsInFilter === 1 ? "" : "s"} in this view -- a deal
+            requesting several roles (SOW-signed deals average ~5-6 role requests each) counts once per role here, so a
+            low number for one specific role just means few of these few deals happened to ask for it.
           </p>
         ) : (
           <p className="text-[11px] text-gray-400 mb-2">

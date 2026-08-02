@@ -10,6 +10,7 @@ import {
 import { ErrorState } from "@/components/shared/EmptyState";
 import { Skeleton, TableSkeleton } from "@/components/shared/Skeleton";
 import { Badge } from "@/components/shared/Badge";
+import { Modal } from "@/components/shared/Modal";
 import { HoldDot } from "@/components/shared/HoldFlag";
 import { EmployeeProfileModal, cleanSkillLabel, SkillSection, type SkillMatchContext, type ProfileTab } from "@/components/shared/EmployeeProfileModal";
 import { Metric, ProjectHistoryModal } from "@/components/shared/CandidateRow";
@@ -944,6 +945,7 @@ function RevenueTargetSection({
   const [mixOverride, setMixOverride] = useState<DurationMixPct | null>(null);
   const [viewTab, setViewTab] = useState<"mix" | "financial">("mix");
   const [targetDate, setTargetDate] = useState("");
+  const [showHitDateProof, setShowHitDateProof] = useState(false);
   // No real D&D-to-delivery conversion rate exists in this org's data --
   // 100% preserves the old fixed 1:1-per-project assumption; editable so the
   // RM can plug in their own real-world win-rate estimate.
@@ -1201,6 +1203,21 @@ function RevenueTargetSection({
                 </p>
               </div>
             )}
+            {revenue.data.revenue_hit_estimate && (
+              <button
+                onClick={() => setShowHitDateProof(true)}
+                className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-left hover:border-primary/40 transition"
+                title="Click for the calculation behind this date"
+              >
+                <p className="text-[10px] text-gray-400">Hit {formatUsd(revenue.data.target_revenue_usd)} by</p>
+                <p className="text-sm font-semibold text-primary underline decoration-dotted underline-offset-2">
+                  {revenue.data.revenue_hit_estimate.hit_date}
+                  {revenue.data.revenue_hit_estimate.has_staffing_gap && (
+                    <span className="text-amber-600 font-normal text-[11px]"> · assumes gap filled</span>
+                  )}
+                </p>
+              </button>
+            )}
             {viewTab === "financial" && revenue.data.timeline && (
               <div className="rounded-xl border border-gray-200 bg-white px-3 py-2">
                 <p className="text-[10px] text-gray-400">By {revenue.data.timeline.target_date}</p>
@@ -1317,6 +1334,41 @@ function RevenueTargetSection({
             </div>
           )}
         </div>
+      )}
+
+      {showHitDateProof && revenue.data?.revenue_hit_estimate && (
+        <Modal title="How this date was calculated" onClose={() => setShowHitDateProof(false)} widthClassName="max-w-lg">
+          <div className="p-5 space-y-3 text-xs text-gray-600">
+            <p>
+              <strong>{revenue.data.revenue_hit_estimate.project_count} delivery project(s)</strong> in this mix are
+              assumed to start together on <strong>{revenue.data.revenue_hit_estimate.start_date_used}</strong> and run
+              in parallel (your team works them concurrently, not one project queued after another).
+            </p>
+            <p>
+              Each takes about <strong>{revenue.data.revenue_hit_estimate.duration_weeks} week(s)</strong> -- the same
+              typical duration used to price this mix&apos;s revenue above. That puts the last project finishing, and
+              this mix&apos;s revenue landing, on{" "}
+              <strong className="text-primary">{revenue.data.revenue_hit_estimate.hit_date}</strong>.
+            </p>
+            {revenue.data.revenue_hit_estimate.has_staffing_gap && (
+              <p className="text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
+                This assumes the {revenue.data.revenue_hit_estimate.shortfall_headcount} role(s) your team doesn&apos;t
+                cover yet ("Staffable with your team today" above) are filled by the start date -- no real
+                hiring-lead-time data exists in this system to say exactly when that happens, so the date isn&apos;t
+                pushed out for it.
+              </p>
+            )}
+            <div className="pt-2 border-t border-gray-100 space-y-1">
+              <p className="text-[11px] text-gray-400">Project mix behind this date:</p>
+              {revenue.data.project_mix.filter((m) => m.project_count > 0).map((m) => (
+                <div key={m.coe} className="flex items-center justify-between text-[11px]">
+                  <span className="text-gray-600">{m.coe}</span>
+                  <span className="text-gray-500">{m.project_count} project(s) · {formatUsd(m.avg_revenue_per_project)} each</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </Modal>
       )}
     </div>
   );

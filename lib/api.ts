@@ -1008,6 +1008,15 @@ export interface TimelineFeasibility {
   likely_fits: boolean;
 }
 
+export interface RevenueHitEstimate {
+  start_date_used: string;
+  hit_date: string;
+  duration_weeks: number;
+  project_count: number;
+  has_staffing_gap: boolean;
+  shortfall_headcount: number;
+}
+
 export interface RevenueTargetForecastResult {
   target_revenue_usd: number;
   priority_coes: string[];
@@ -1019,6 +1028,7 @@ export interface RevenueTargetForecastResult {
   design_and_discovery: DesignAndDiscoveryInfo | null;
   effective_duration_weeks: number | null;
   timeline: TimelineFeasibility | null;
+  revenue_hit_estimate: RevenueHitEstimate | null;
   error?: string;
 }
 
@@ -1112,7 +1122,9 @@ export interface ProjectAlumniCandidate {
 export interface OutlookMonth {
   month: string;
   confirmed_demand_count: number;
+  confirmed_deal_count: number;
   unconfirmed_demand_count: number;
+  unconfirmed_deal_count: number;
   projected_supply_count: number;
   net_confirmed_surplus_shortfall: number;
   early_warning: boolean;
