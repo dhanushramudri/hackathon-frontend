@@ -17,7 +17,7 @@ import { SIGNAL_LABEL } from "@/components/shared/candidateFilters";
 import type { ProfileTab, SkillMatchContext } from "@/components/shared/EmployeeProfileModal";
 import { cn } from "@/lib/utils";
 
-// The exact same candidate row used on the Recommendations page -- shared so
+// The exact same candidate row used on the Resourcing page -- shared so
 // every other surface that lists ranked candidates (Leave backfill, Employee
 // Profile Replacement tab, Relief Staffing, New Project forecast) renders
 // them identically: same badges, same expandable skill/AI/track-record proof,

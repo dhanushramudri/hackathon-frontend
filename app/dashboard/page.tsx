@@ -3,9 +3,8 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import { Users, Briefcase, ShieldAlert, Clock, ArrowRight, UserCheck, AlertOctagon, DollarSign, CalendarOff, Mail, Loader2, Check } from "lucide-react";
-import { api, type RevenueMonth } from "@/lib/api";
+import { api } from "@/lib/api";
 import { StatCard } from "@/components/shared/StatCard";
 import { Badge } from "@/components/shared/Badge";
 import { ErrorState } from "@/components/shared/EmptyState";
@@ -14,8 +13,6 @@ import { ProjectHealthDetailModal } from "@/components/health/ProjectHealthDetai
 import { rootCauseLabel } from "@/lib/utils";
 import { EmployeeProfileModal } from "@/components/shared/EmployeeProfileModal";
 import { cn, formatUsd } from "@/lib/utils";
-
-type RevenueRow = RevenueMonth & { deltaAbs: number | null; deltaPct: number | null };
 
 function normalize(value: string | null | undefined): string {
   return (value ?? "").trim().toLowerCase();
@@ -27,7 +24,6 @@ export default function DashboardPage() {
   const health = useQuery({ queryKey: ["health-projects"], queryFn: api.healthProjects });
   const allocations = useQuery({ queryKey: ["allocations"], queryFn: api.allocations });
   const freePool = useQuery({ queryKey: ["free-pool"], queryFn: api.freePool });
-  const revenue = useQuery({ queryKey: ["revenue-trend"], queryFn: api.revenueTrend });
   const leave = useQuery({ queryKey: ["leave-impact"], queryFn: () => api.leaveImpact() });
   const pipeline = useQuery({ queryKey: ["pipeline-forecast"], queryFn: api.pipelineForecast });
 
@@ -60,13 +56,6 @@ export default function DashboardPage() {
     under_utilized: (freePool.data ?? []).filter((c) => c.reason === "under_utilized").length,
     ending_soon: (freePool.data ?? []).filter((c) => c.reason === "ending_soon").length,
   };
-  const revenueChartData: RevenueRow[] = [...(revenue.data ?? [])].reverse().map((m, i, arr) => {
-    const prev = i > 0 ? arr[i - 1] : null;
-    const deltaAbs = prev ? m.value - prev.value : null;
-    const deltaPct = prev && prev.value !== 0 ? ((m.value - prev.value) / prev.value) * 100 : null;
-    return { ...m, deltaAbs, deltaPct };
-  });
-  const latestRevenue = revenueChartData.length > 0 ? revenueChartData[revenueChartData.length - 1] : null;
   const totalUnbilledValue = (health.data ?? []).reduce((sum, p) => sum + p.monthly_unbilled_value_usd, 0);
   const onLeaveNow = (leave.data ?? [])
     .filter((i) => i.is_currently_on_leave)
@@ -257,7 +246,7 @@ export default function DashboardPage() {
         <div className="rounded-xl border border-gray-200 bg-white p-4">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-semibold text-gray-700">Urgent Pipeline Needing Action</h2>
-            <Link href="/recommendations" className="text-xs text-primary flex items-center gap-1 hover:underline">
+            <Link href="/resourcing" className="text-xs text-primary flex items-center gap-1 hover:underline">
               View all <ArrowRight className="w-3 h-3" />
             </Link>
           </div>
@@ -265,7 +254,7 @@ export default function DashboardPage() {
             {urgentPipeline.map((r) => (
               <Link
                 key={r.row_index}
-                href={`/recommendations?row=${r.row_index}`}
+                href={`/resourcing?row=${r.row_index}`}
                 className="flex items-center gap-2 text-xs w-full text-left hover:bg-gray-50 rounded-lg px-1.5 py-1 -mx-1.5 transition"
               >
                 {r.is_late_notice && <Badge variant="red">late</Badge>}
@@ -305,38 +294,6 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <div className="rounded-xl border border-gray-200 bg-white p-4">
-        <div className="mb-1">
-          <h2 className="text-sm font-semibold text-gray-700">Revenue Trend</h2>
-          <p className="text-[11px] text-gray-400 mt-0.5">Monthly revenue, from the Pipeline workbook.</p>
-        </div>
-        {latestRevenue && (
-          <p className="text-xs text-gray-500 mb-2">
-            Latest ({latestRevenue.month}): <span className="font-semibold text-gray-800">{latestRevenue.value.toLocaleString()}</span>
-            {latestRevenue.deltaPct != null && (
-              <span className={cn("ml-1.5", latestRevenue.deltaAbs! >= 0 ? "text-emerald-600" : "text-red-500")}>
-                {latestRevenue.deltaAbs! >= 0 ? "▲" : "▼"} {Math.abs(latestRevenue.deltaPct).toFixed(1)}% vs prior month
-              </span>
-            )}
-          </p>
-        )}
-        {revenue.isLoading ? (
-          <p className="text-xs text-gray-400">Loading…</p>
-        ) : revenue.error || !revenue.data?.length ? (
-          <p className="text-xs text-gray-400 italic">No revenue data available.</p>
-        ) : (
-          <ResponsiveContainer width="100%" height={180}>
-            <LineChart data={revenueChartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f3f3f7" />
-              <XAxis dataKey="month" tick={{ fontSize: 11 }} />
-              <YAxis tick={{ fontSize: 11 }} />
-              <Tooltip content={<RevenueTooltip />} />
-              <Line type="monotone" dataKey="value" stroke="#3411A3" strokeWidth={2} dot={{ r: 3 }} />
-            </LineChart>
-          </ResponsiveContainer>
-        )}
-      </div>
-
       {overAllocated.length > 0 && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
           <p className="text-xs text-amber-700">
@@ -351,25 +308,6 @@ export default function DashboardPage() {
       )}
       {selectedEmployee && (
         <EmployeeProfileModal employeeId={selectedEmployee} initialTab="overview" onClose={() => setSelectedEmployee(null)} />
-      )}
-    </div>
-  );
-}
-
-function RevenueTooltip({ active, payload }: { active?: boolean; payload?: Array<{ payload: RevenueRow }> }) {
-  if (!active || !payload?.length) return null;
-  const d = payload[0].payload;
-  return (
-    <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-sm text-xs space-y-1 max-w-xs">
-      <p className="font-semibold text-gray-800">{d.month}</p>
-      <p className="text-gray-600">
-        Parsed value: <span className="font-medium text-gray-800">{d.value.toLocaleString()}</span>
-      </p>
-      <p className="text-gray-400">Source cell: &quot;{d.raw}&quot;</p>
-      {d.deltaAbs != null && (
-        <p className={d.deltaAbs >= 0 ? "text-emerald-600" : "text-red-500"}>
-          {d.deltaAbs >= 0 ? "▲" : "▼"} {Math.abs(d.deltaAbs).toLocaleString()} ({d.deltaPct!.toFixed(1)}%) vs prior month
-        </p>
       )}
     </div>
   );

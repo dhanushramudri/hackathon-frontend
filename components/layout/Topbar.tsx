@@ -9,7 +9,7 @@ const TITLES: Record<string, string> = {
   "/allocations": "Current-State Allocation Report",
   "/free-pool": "Free Pool",
   "/leave": "Leave Impact",
-  "/recommendations": "Resource Recommendation Engine",
+  "/resourcing": "Resourcing Engine",
   "/health": "Project Health & Efficiency Monitor",
   "/forecast": "Forecast",
   "/buddy": "Buddy",

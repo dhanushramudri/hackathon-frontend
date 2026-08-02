@@ -27,9 +27,9 @@ const NAV_GROUPS: { label: string; links: NavLinkSpec[] }[] = [
     ],
   },
   {
-    label: "Recommendation",
+    label: "Resourcing",
     links: [
-      { label: "Recommendations", href: "/recommendations", icon: Sparkles },
+      { label: "Resourcing", href: "/resourcing", icon: Sparkles },
       { label: "Health", href: "/health", icon: ShieldAlert },
     ],
   },

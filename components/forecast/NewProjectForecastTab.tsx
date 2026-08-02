@@ -4,9 +4,6 @@ import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Plus, Trash2, AlertTriangle, ChevronDown, ChevronUp, X, Search } from "lucide-react";
 import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, ResponsiveContainer, Legend,
-} from "recharts";
-import {
   api, DEFAULT_INCLUDE_PARAMS,
   type ForecastBreakdownRow, type ForecastSpec, type RecommendationCandidate, type RedeployCandidate,
 } from "@/lib/api";
@@ -17,7 +14,7 @@ import { HoldDot } from "@/components/shared/HoldFlag";
 import { EmployeeProfileModal, cleanSkillLabel, SkillSection, type SkillMatchContext, type ProfileTab } from "@/components/shared/EmployeeProfileModal";
 import { Metric, ProjectHistoryModal } from "@/components/shared/CandidateRow";
 import { cn, formatUsd } from "@/lib/utils";
-import { JMAN, JMAN_HEADER_GRADIENT, CHART_CHROME } from "@/lib/brandColors";
+import { JMAN, JMAN_HEADER_GRADIENT } from "@/lib/brandColors";
 
 type DurationMixPct = { short: number; mid: number; long: number };
 
@@ -947,6 +944,10 @@ function RevenueTargetSection({
   const [mixOverride, setMixOverride] = useState<DurationMixPct | null>(null);
   const [viewTab, setViewTab] = useState<"mix" | "financial">("mix");
   const [targetDate, setTargetDate] = useState("");
+  // No real D&D-to-delivery conversion rate exists in this org's data --
+  // 100% preserves the old fixed 1:1-per-project assumption; editable so the
+  // RM can plug in their own real-world win-rate estimate.
+  const [dndWinRatePct, setDndWinRatePct] = useState("100");
 
   const togglePriorityCoe = (coe: string) =>
     setPriorityCoes((prev) => (prev.includes(coe) ? prev.filter((c) => c !== coe) : [...prev, coe]));
@@ -970,20 +971,19 @@ function RevenueTargetSection({
         startDate: startDate || null,
         durationWeeks: durationWeeks ? Number(durationWeeks) : null,
         typeOfProject: typeOfProject || null,
-        durationMix: !durationWeeks && durationMix
-          ? { short: durationMix.short / 100, mid: durationMix.mid / 100, long: durationMix.long / 100 }
+        // Only sent once the RM actually adjusts a bucket -- until then this
+        // stays null so the backend falls back to the flat, real $35k/5-week
+        // template. The un-adjusted "typical mix" shown in the inputs is
+        // historical Short/Mid/Long *bucket* durations, but the Long bucket's
+        // ~59w average reflects pooled multi-phase project_codes in the
+        // source data, not one clean project's real length -- auto-applying
+        // it by default silently inflated every project's revenue ~4-5x.
+        durationMix: !durationWeeks && mixOverride
+          ? { short: mixOverride.short / 100, mid: mixOverride.mid / 100, long: mixOverride.long / 100 }
           : null,
+        dndWinRatePct: dndWinRatePct ? Number(dndWinRatePct) : null,
+        targetDate: viewTab === "financial" && targetDate ? targetDate : null,
         include: DEFAULT_INCLUDE_PARAMS,
-      }),
-  });
-
-  const financialSummary = useMutation({
-    mutationFn: () =>
-      api.financialSummary({
-        targetRevenueUsd: Number(targetRevenue) || 0,
-        targetDate,
-        priorityCoes: priorityCoes.length > 0 ? priorityCoes : null,
-        durationWeeks: durationWeeks ? Number(durationWeeks) : null,
       }),
   });
 
@@ -1088,25 +1088,44 @@ function RevenueTargetSection({
                 const label = bucket === "short" ? "Short" : bucket === "mid" ? "Mid" : "Long";
                 return (
                   <div key={bucket} className="flex-1 min-w-[140px]">
-                    <div className="flex items-center justify-between text-[10px] text-gray-500 mb-0.5">
+                    <div className="text-[10px] text-gray-500 mb-0.5">
                       <span>{label}{b ? ` (~${b.avg_weeks}w)` : ""}</span>
-                      <span className="font-semibold text-gray-700">{durationMix[bucket]}%</span>
                     </div>
-                    <input
-                      type="range"
-                      min={0}
-                      max={100}
-                      value={durationMix[bucket]}
-                      disabled={!!durationWeeks}
-                      onChange={(e) => setMixOverride(adjustDurationMix(durationMix, bucket, Number(e.target.value)))}
-                      className="w-full accent-primary disabled:opacity-40"
-                    />
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        min={0}
+                        max={100}
+                        value={durationMix[bucket]}
+                        disabled={!!durationWeeks}
+                        onChange={(e) => setMixOverride(adjustDurationMix(durationMix, bucket, Number(e.target.value)))}
+                        className="w-16 px-2 py-1 rounded-lg border border-gray-200 text-xs outline-none disabled:opacity-40"
+                      />
+                      <span className="text-xs text-gray-500">%</span>
+                    </div>
                   </div>
                 );
               })}
             </div>
           </div>
         )}
+
+        <div>
+          <label className="text-[11px] text-gray-400 block mb-0.5">
+            D&amp;D → delivery win rate (editable -- no real conversion data exists to fit this)
+          </label>
+          <div className="flex items-center gap-1">
+            <input
+              type="number"
+              min={1}
+              max={100}
+              value={dndWinRatePct}
+              onChange={(e) => setDndWinRatePct(e.target.value)}
+              className="w-20 px-2.5 py-1.5 rounded-lg border border-gray-200 text-xs outline-none"
+            />
+            <span className="text-xs text-gray-500">%</span>
+          </div>
+        </div>
 
         <div className="flex items-center gap-1.5">
           {(["mix", "financial"] as const).map((tab) => (
@@ -1136,54 +1155,61 @@ function RevenueTargetSection({
 
         <div className="flex items-center justify-end">
           <button
-            onClick={() => (viewTab === "mix" ? revenue.mutate() : financialSummary.mutate())}
+            onClick={() => revenue.mutate()}
             disabled={
-              viewTab === "mix"
-                ? revenue.isPending || !targetRevenue || Number(targetRevenue) <= 0
-                : financialSummary.isPending || !targetRevenue || Number(targetRevenue) <= 0 || !targetDate
+              revenue.isPending || !targetRevenue || Number(targetRevenue) <= 0 || (viewTab === "financial" && !targetDate)
             }
             className="px-4 py-2 rounded-lg text-xs font-medium text-white disabled:opacity-50"
             style={{ backgroundColor: "hsl(var(--primary))" }}
           >
-            {viewTab === "mix"
-              ? revenue.isPending ? "Computing…" : "Run Revenue-Target Forecast"
-              : financialSummary.isPending ? "Computing…" : "Run Financial Summary"}
+            {revenue.isPending ? "Computing…" : viewTab === "mix" ? "Run Revenue-Target Forecast" : "Run Financial Summary"}
           </button>
         </div>
       </div>
 
-      {viewTab === "mix" && revenue.isPending && !revenue.data && (
+      {revenue.isPending && !revenue.data && (
         <div className="space-y-3">
           <Skeleton className="h-12 w-full rounded-xl" />
-          <TableSkeleton columns={6} rows={5} />
+          <TableSkeleton columns={7} rows={5} />
         </div>
       )}
 
-      {viewTab === "mix" && revenue.data?.error && <ErrorState message={revenue.data.error} />}
+      {revenue.data?.error && <ErrorState message={revenue.data.error} />}
 
-      {viewTab === "mix" && revenue.data && !revenue.data.error && (
+      {revenue.data && !revenue.data.error && (
         <div className="space-y-3">
-          <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-1">
-            <p className="text-xs text-gray-700">
-              Target <strong>{formatUsd(revenue.data.target_revenue_usd)}</strong> -- recommended mix projects to{" "}
-              <strong>{formatUsd(revenue.data.total_projected_revenue_usd)}</strong>
-              {revenue.data.pct_of_target_covered != null && ` (${revenue.data.pct_of_target_covered}% of target)`}.
-              {revenue.data.revenue_gap_usd > 0 && (
-                <span className="text-amber-600"> Gap of {formatUsd(revenue.data.revenue_gap_usd)} left uncovered by this mix.</span>
-              )}
-              {revenue.data.effective_duration_weeks != null && (
-                <span className="text-gray-400"> Effective duration: {revenue.data.effective_duration_weeks}w.</span>
-              )}
-            </p>
-            {forecast && forecast.pct_achievable_with_current_headcount != null && (
-              <p className="text-xs text-gray-700">
-                Of the resources this mix needs, <strong>{forecast.pct_achievable_with_current_headcount}%</strong> is achievable with
-                current headcount (same-title redeploy + adjacent-title flexible fit) before any hiring. Cross-role matches and
-                trainable candidates are shown per role as additional context, not counted here.
-                {forecast.total_shortfall_headcount > 0 && (
-                  <span className="text-red-600"> Real shortfall: {forecast.total_shortfall_headcount} heads.</span>
-                )}
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="rounded-xl border border-gray-200 bg-white px-3 py-2">
+              <p className="text-[10px] text-gray-400">Target</p>
+              <p className="text-sm font-semibold text-gray-700">{formatUsd(revenue.data.target_revenue_usd)}</p>
+            </div>
+            <div className="rounded-xl border border-gray-200 bg-white px-3 py-2">
+              <p className="text-[10px] text-gray-400">This mix delivers</p>
+              <p className="text-sm font-semibold text-gray-700">
+                {formatUsd(revenue.data.total_projected_revenue_usd)}
+                {revenue.data.pct_of_target_covered != null && <span className="text-gray-400 font-normal"> ({revenue.data.pct_of_target_covered}%)</span>}
               </p>
+            </div>
+            {forecast && forecast.pct_achievable_with_current_headcount != null && (
+              <div className="rounded-xl border border-gray-200 bg-white px-3 py-2">
+                <p className="text-[10px] text-gray-400">Staffable with your team today</p>
+                <p className="text-sm font-semibold text-gray-700">
+                  {forecast.pct_achievable_with_current_headcount}%
+                  {forecast.total_shortfall_headcount > 0 && (
+                    <span className="text-red-600 font-normal"> · {forecast.total_shortfall_headcount} to hire</span>
+                  )}
+                </p>
+              </div>
+            )}
+            {viewTab === "financial" && revenue.data.timeline && (
+              <div className="rounded-xl border border-gray-200 bg-white px-3 py-2">
+                <p className="text-[10px] text-gray-400">By {revenue.data.timeline.target_date}</p>
+                <p className={cn("text-sm font-semibold", revenue.data.timeline.likely_fits ? "text-emerald-600" : "text-amber-600")}>
+                  {revenue.data.timeline.likely_fits
+                    ? "On time"
+                    : `Tight -- projects take ~${revenue.data.timeline.typical_project_weeks}w, you have ~${revenue.data.timeline.weeks_available}w`}
+                </p>
+              </div>
             )}
           </div>
 
@@ -1192,7 +1218,7 @@ function RevenueTargetSection({
               <table className="w-full text-xs data-table">
                 <thead className="text-white" style={{ background: JMAN_HEADER_GRADIENT }}>
                   <tr>
-                    {["CoE", "Priority weight", "Projects", "Avg revenue/project", "Projected revenue", "Sample size"].map((h) => (
+                    {["CoE", "Priority weight", "Projects", "D&D Needed", "Avg revenue/project", "Projected revenue", "Sample size"].map((h) => (
                       <th key={h} className="text-left font-medium px-3 py-2 whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
@@ -1203,6 +1229,7 @@ function RevenueTargetSection({
                       <td className="px-3 py-2 font-medium text-gray-700">{m.coe}</td>
                       <td className="px-3 py-2 text-gray-500">{m.weight_pct}%</td>
                       <td className="px-3 py-2 text-gray-700 font-semibold">{m.project_count}</td>
+                      <td className="px-3 py-2 text-gray-500">{m.dnd_engagements_needed}</td>
                       <td className="px-3 py-2 text-gray-500">{formatUsd(m.avg_revenue_per_project)}</td>
                       <td className="px-3 py-2 text-gray-700">{formatUsd(m.projected_revenue_usd)}</td>
                       <td className="px-3 py-2 text-gray-400">{m.sample_size} past projects</td>
@@ -1220,12 +1247,12 @@ function RevenueTargetSection({
                 <p className="text-sm font-semibold text-gray-700">Design & Discovery (precursor phase)</p>
               </div>
               <p className="text-xs text-gray-600 mb-2">
-                Before these {revenue.data.design_and_discovery.engagements_needed} delivery project(s) can start, clients
-                typically commit via a paid D&D engagement first (~{revenue.data.design_and_discovery.duration_weeks} weeks,{" "}
+                Clients typically sign a paid D&D engagement first (~{revenue.data.design_and_discovery.duration_weeks} weeks,{" "}
                 {formatUsd(revenue.data.design_and_discovery.revenue_usd_low)}-{formatUsd(revenue.data.design_and_discovery.revenue_usd_high)}{" "}
-                each). Up to {revenue.data.design_and_discovery.engagements_needed} D&D engagement(s) ={" "}
+                each). At a {revenue.data.design_and_discovery.win_rate_pct}% win rate, that's{" "}
+                <strong>{revenue.data.design_and_discovery.engagements_needed} D&D engagement(s)</strong> ={" "}
                 {formatUsd(revenue.data.design_and_discovery.total_revenue_usd_low)}-{formatUsd(revenue.data.design_and_discovery.total_revenue_usd_high)}{" "}
-                of additional revenue, not counted in the totals above.
+                more revenue (not in the totals above).
               </p>
               <div className="flex flex-wrap gap-1.5">
                 {Object.entries(revenue.data.design_and_discovery.role_mix).map(([role, fte]) => (
@@ -1234,7 +1261,6 @@ function RevenueTargetSection({
                   </span>
                 ))}
               </div>
-              <p className="text-[10px] text-gray-400 mt-2">{revenue.data.design_and_discovery.note}</p>
             </div>
           )}
 
@@ -1292,87 +1318,6 @@ function RevenueTargetSection({
           )}
         </div>
       )}
-
-      {viewTab === "financial" && financialSummary.isPending && !financialSummary.data && (
-        <div className="space-y-3">
-          <Skeleton className="h-16 w-full rounded-xl" />
-          <Skeleton className="h-60 w-full rounded-xl" />
-        </div>
-      )}
-
-      {viewTab === "financial" && financialSummary.data?.error && <ErrorState message={financialSummary.data.error} />}
-
-      {viewTab === "financial" && financialSummary.data && !financialSummary.data.error && (() => {
-        const fs = financialSummary.data;
-        const chartData = [
-          ...fs.monthly_actual.map((p) => ({ x: p.month ?? "", actual: p.cumulative_revenue_usd, required: undefined as number | undefined })),
-          ...fs.required_line.map((p) => ({ x: p.date ?? "", actual: undefined as number | undefined, required: p.cumulative_revenue_usd })),
-        ].sort((a, b) => a.x.localeCompare(b.x));
-        const kpis: { label: string; value: string }[] = [
-          { label: "Current run-rate", value: `${formatUsd(fs.current_run_rate_monthly_usd)}/mo` },
-          { label: "Required run-rate", value: `${formatUsd(fs.required_run_rate_monthly_usd)}/mo` },
-          { label: "Velocity gap", value: `${fs.velocity_gap_monthly_usd >= 0 ? "+" : ""}${formatUsd(fs.velocity_gap_monthly_usd)}/mo` },
-          { label: "Productivity multiplier", value: fs.productivity_multiplier != null ? `${fs.productivity_multiplier}x` : "-" },
-          { label: "Projected attainment", value: fs.projected_attainment_date ?? "Not attainable at current pace" },
-        ];
-        return (
-          <div className="space-y-3">
-            <div className="flex items-center gap-2 flex-wrap">
-              {kpis.map((k) => (
-                <div key={k.label} className="rounded-xl border border-gray-200 bg-white px-3 py-2 min-w-[130px]">
-                  <p className="text-[10px] text-gray-400">{k.label}</p>
-                  <p className="text-sm font-semibold text-gray-700">{k.value}</p>
-                </div>
-              ))}
-              {fs.low_confidence && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-600 border border-amber-200 self-start mt-1">
-                  Low confidence (n={fs.sample_size} recent projects)
-                </span>
-              )}
-            </div>
-
-            <div className="rounded-xl bg-white p-3" style={{ border: `1px solid ${JMAN.emerald}40` }}>
-              <ResponsiveContainer width="100%" height={220}>
-                <LineChart data={chartData} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={CHART_CHROME.grid} />
-                  <XAxis dataKey="x" tick={{ fontSize: 10, fill: CHART_CHROME.axisText }} />
-                  <YAxis tick={{ fontSize: 10, fill: CHART_CHROME.axisText }} tickFormatter={(v) => formatUsd(v)} width={56} />
-                  <Tooltip formatter={(v: number) => formatUsd(v)} />
-                  <Legend wrapperStyle={{ fontSize: 11 }} />
-                  <ReferenceLine x={fs.required_line[0]?.date} stroke={CHART_CHROME.mutedText} strokeDasharray="4 3" label={{ value: "Today", fontSize: 9, fill: CHART_CHROME.mutedText, position: "insideTopRight" }} />
-                  <Line dataKey="actual" name="Actual / booked" stroke={JMAN.midnightBlue} strokeWidth={2} dot={false} connectNulls />
-                  <Line dataKey="required" name="Required" stroke={JMAN.emerald} strokeWidth={2} strokeDasharray="5 4" dot={false} connectNulls />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-
-            {fs.per_coe.length > 0 && (
-              <div className="rounded-xl bg-white overflow-hidden" style={{ border: `1px solid ${JMAN.emerald}40` }}>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-xs data-table">
-                    <thead className="text-white" style={{ background: JMAN_HEADER_GRADIENT }}>
-                      <tr>
-                        {["CoE", "Current run-rate/mo", "Sample size"].map((h) => (
-                          <th key={h} className="text-left font-medium px-3 py-2 whitespace-nowrap">{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {fs.per_coe.map((c) => (
-                        <tr key={c.coe} className="border-b border-gray-50 last:border-0">
-                          <td className="px-3 py-2 font-medium text-gray-700">{c.coe}</td>
-                          <td className="px-3 py-2 text-gray-700">{formatUsd(c.current_run_rate_monthly_usd)}</td>
-                          <td className="px-3 py-2 text-gray-400">{c.sample_size} recent projects</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-          </div>
-        );
-      })()}
     </div>
   );
 }

@@ -16,6 +16,10 @@ function cellToDisplay(v: HeadcountRawCellValue): string {
   if (v === null || v === undefined) return "";
   if (typeof v === "number") return Number.isInteger(v) ? String(v) : v.toFixed(2);
   if (typeof v === "boolean") return v ? "true" : "false";
+  if (typeof v === "object") {
+    const entries = Object.entries(v as Record<string, unknown>);
+    return entries.length ? entries.map(([k, val]) => `${k}: ${val}`).join(", ") : "—";
+  }
   return String(v);
 }
 

@@ -100,7 +100,7 @@ export function ProjectWizard({
     return (
       <div className="space-y-4">
         <div className="flex items-center gap-2 text-xs text-gray-500">
-          <button onClick={onExit} className="hover:text-primary hover:underline">← Back to Recommendations</button>
+          <button onClick={onExit} className="hover:text-primary hover:underline">← Back to Resourcing</button>
         </div>
         <div className="rounded-xl border border-gray-200 bg-white p-10 text-center text-xs text-gray-400">
           Loading this deal&apos;s project…
@@ -112,7 +112,7 @@ export function ProjectWizard({
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-2 text-xs text-gray-500">
-        <button onClick={onExit} className="hover:text-primary hover:underline">← Back to Recommendations</button>
+        <button onClick={onExit} className="hover:text-primary hover:underline">← Back to Resourcing</button>
       </div>
 
       <div className="rounded-xl border border-gray-200 bg-white px-2">

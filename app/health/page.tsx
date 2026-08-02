@@ -450,7 +450,6 @@ const [escalationRiskOnly, setEscalationRiskOnly] = useState(false);
   const unbilledProjects = [...data]
     .filter((p) => p.monthly_unbilled_value_usd > 0)
     .sort((a, b) => b.monthly_unbilled_value_usd - a.monthly_unbilled_value_usd);
-  const totalExtensionAccrued   = data.reduce((sum, p) => sum + (p.extension_unbilled_value_usd ?? 0), 0);
   const totalExtensionPredicted = data.reduce((sum, p) => sum + (p.predicted_extension_revenue_loss_usd ?? 0), 0);
   const extensionProjects = [...data]
     .filter((p) => (p.extension_unbilled_value_usd ?? 0) > 0 || (p.predicted_extension_revenue_loss_usd ?? 0) > 0)
@@ -622,8 +621,7 @@ const [escalationRiskOnly, setEscalationRiskOnly] = useState(false);
           ) : (
             <>
               <p className="text-[11px] text-gray-500">
-                <strong>Accrued</strong> = working days (Mon–Fri) already booked past the project&apos;s end date × 8h/day × allocation % × rate card — already happened, not an estimate ({formatUsd(totalExtensionAccrued)} total).{" "}
-                <strong>Predicted</strong> = the DevOps-capacity day forecast (same as each project&apos;s Overview tab) × the current team&apos;s $/working-day if they keep going ({formatUsd(totalExtensionPredicted)} total). Day/week/month toggle above doesn&apos;t apply — these are working-day totals.
+                <strong>Predicted</strong> = the DevOps-capacity day forecast (same as each project&apos;s Overview tab) × the current team&apos;s $/working-day if they keep going ({formatUsd(totalExtensionPredicted)} total). Day/week/month toggle above doesn&apos;t apply — this is a working-day total.
               </p>
               <div className="rounded-lg border border-[hsl(var(--primary)/0.3)] bg-white overflow-hidden">
                 <ScrollHintTable>
@@ -634,7 +632,6 @@ const [escalationRiskOnly, setEscalationRiskOnly] = useState(false);
                         <th className="text-left font-medium px-3 py-1.5 whitespace-nowrap">Client</th>
                         <th className="text-left font-medium px-3 py-1.5 whitespace-nowrap">Predicted window</th>
                         <th className="text-right font-medium px-3 py-1.5 whitespace-nowrap">Time</th>
-                        <th className="text-right font-medium px-3 py-1.5 whitespace-nowrap">Accrued $</th>
                         <th className="text-right font-medium px-3 py-1.5 whitespace-nowrap">Predicted $ (more)</th>
                       </tr>
                     </thead>
@@ -656,15 +653,6 @@ const [escalationRiskOnly, setEscalationRiskOnly] = useState(false);
                             {p.projected_extension_duration_label ?? "-"}
                           </td>
                           <td className="px-3 py-1.5 text-right whitespace-nowrap">
-                            <button
-                              onClick={() => setExtensionProofProject({ code: p.project_code, client: p.client_id })}
-                              className="text-gray-700 font-medium hover:underline hover:text-primary"
-                              title="Click to see exactly which allocations this figure comes from"
-                            >
-                              {formatUsd(p.extension_unbilled_value_usd ?? 0)}
-                            </button>
-                          </td>
-                          <td className="px-3 py-1.5 text-right whitespace-nowrap">
                             {(p.predicted_extension_revenue_loss_usd ?? 0) > 0 ? (
                               <button
                                 onClick={() => setExtensionProofProject({ code: p.project_code, client: p.client_id })}
@@ -681,7 +669,7 @@ const [escalationRiskOnly, setEscalationRiskOnly] = useState(false);
                       ))}
                       {extensionProjects.length === 0 && (
                         <tr>
-                          <td colSpan={6} className="text-center text-xs text-gray-400 italic py-4">
+                          <td colSpan={5} className="text-center text-xs text-gray-400 italic py-4">
                             No projects currently show extension-related revenue loss.
                           </td>
                         </tr>

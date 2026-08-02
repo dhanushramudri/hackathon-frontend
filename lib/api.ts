@@ -884,7 +884,7 @@ export interface RedeployCandidate {
   level_offset?: number;
   on_hold?: boolean;
   hold_projects?: HoldProject[];
-  // Full ranking-parameter parity with the main Recommendations engine -- see
+  // Full ranking-parameter parity with the main Resourcing engine -- see
   // scoring.composite_score_v2 / experience_engine.match_experience.
   composite_score?: number;
   competency_score?: number;
@@ -919,7 +919,7 @@ export interface ForecastBreakdownRow {
   adjacent_level_candidates: RedeployCandidate[];
   adjacent_fill_count: number;
   // Cross-role tier: same org-wide skill/competency/availability search the
-  // main Recommendations page uses, unrestricted by designation -- surfaces
+  // main Resourcing page uses, unrestricted by designation -- surfaces
   // real skill-tag matches from OTHER job titles (e.g. a Consultant whose
   // actual skill record matches a Data Engineering build). Shown as context
   // only -- does NOT reduce shortfall or the hire signal, since a skill-tag
@@ -986,10 +986,12 @@ export interface ProjectMixRow {
   avg_revenue_per_project: number;
   projected_revenue_usd: number;
   sample_size: number;
+  dnd_engagements_needed: number;
 }
 
 export interface DesignAndDiscoveryInfo {
   engagements_needed: number;
+  win_rate_pct: number;
   duration_weeks: number;
   revenue_usd_low: number;
   revenue_usd_high: number;
@@ -997,6 +999,13 @@ export interface DesignAndDiscoveryInfo {
   total_revenue_usd_high: number;
   role_mix: Record<string, number>;
   note: string;
+}
+
+export interface TimelineFeasibility {
+  target_date: string;
+  weeks_available: number;
+  typical_project_weeks: number;
+  likely_fits: boolean;
 }
 
 export interface RevenueTargetForecastResult {
@@ -1009,6 +1018,7 @@ export interface RevenueTargetForecastResult {
   forecast: NewProjectForecastResult | null;
   design_and_discovery: DesignAndDiscoveryInfo | null;
   effective_duration_weeks: number | null;
+  timeline: TimelineFeasibility | null;
   error?: string;
 }
 
@@ -1023,34 +1033,6 @@ export interface DurationBucket {
 export interface DurationMixBenchmarks {
   buckets: Record<"short" | "mid" | "long", DurationBucket>;
   total_sample_size: number;
-}
-
-export interface FinancialSummaryMonthPoint {
-  month?: string;
-  date?: string;
-  cumulative_revenue_usd: number;
-}
-
-export interface FinancialSummaryCoeRow {
-  coe: string;
-  current_run_rate_monthly_usd: number;
-  sample_size: number;
-}
-
-export interface FinancialSummaryResult {
-  target_revenue_usd: number;
-  target_date: string;
-  current_run_rate_monthly_usd: number;
-  required_run_rate_monthly_usd: number;
-  velocity_gap_monthly_usd: number;
-  productivity_multiplier: number | null;
-  projected_attainment_date: string | null;
-  monthly_actual: FinancialSummaryMonthPoint[];
-  required_line: FinancialSummaryMonthPoint[];
-  per_coe: FinancialSummaryCoeRow[];
-  low_confidence: boolean;
-  sample_size: number;
-  error?: string;
 }
 
 export interface RoleMixPreview {
@@ -1957,6 +1939,8 @@ export const api = {
     durationWeeks?: number | null;
     typeOfProject?: string | null;
     durationMix?: Record<string, number> | null;
+    dndWinRatePct?: number | null;
+    targetDate?: string | null;
     include?: IncludeParams;
   }) => {
     const include = opts.include ?? DEFAULT_INCLUDE_PARAMS;
@@ -1967,6 +1951,8 @@ export const api = {
       duration_weeks: opts.durationWeeks ?? null,
       type_of_project: opts.typeOfProject ?? null,
       duration_mix: opts.durationMix ?? null,
+      dnd_win_rate_pct: opts.dndWinRatePct ?? null,
+      target_date: opts.targetDate ?? null,
       include_skill: include.skill,
       include_competency: include.competency,
       include_availability: include.availability,
@@ -1975,18 +1961,6 @@ export const api = {
     });
   },
   durationMixBenchmarks: () => getJSON<DurationMixBenchmarks>("/forecast/duration-mix-benchmarks"),
-  financialSummary: (opts: {
-    targetRevenueUsd: number;
-    targetDate: string;
-    priorityCoes?: string[] | null;
-    durationWeeks?: number | null;
-  }) =>
-    postJSON<FinancialSummaryResult>("/forecast/financial-summary", {
-      target_revenue_usd: opts.targetRevenueUsd,
-      target_date: opts.targetDate,
-      priority_coes: opts.priorityCoes ?? null,
-      duration_weeks: opts.durationWeeks ?? null,
-    }),
   roleMixCoes: () => getJSON<CoeOption[]>("/role-mix/coes"),
   topCandidatesForRole: (designation: string, asOfDate: string, limit = 15) =>
     getJSON<TopRoleCandidate[]>(
@@ -2092,6 +2066,9 @@ export interface HeadcountForecastRow {
   upper: number;
   sample_months: number;
   low_confidence: boolean;
+  forecast_new_hires: number;
+  forecast_resignations: number;
+  forecast_hires_by_location: Record<string, number>;
 }
 
 export interface HeadcountRiskFlag {
@@ -2127,11 +2104,11 @@ export interface HeadcountInsights {
   forecast_change_pct: number | null;
   productivity: {
     current_revenue_per_head_gbp: number;
-    predicted_revenue_per_head_gbp_3mo: number | null;
+    predicted_revenue_per_head_gbp_forecast: number | null;
     history: HeadcountProductivityPoint[];
     forecast: HeadcountProductivityPoint[];
     current_ebitda_margin_pct: number;
-    predicted_ebitda_margin_pct_3mo: number | null;
+    predicted_ebitda_margin_pct_forecast: number | null;
     ebitda_margin_history: { month: string; value: number }[];
     ebitda_margin_forecast: { month: string; value: number }[];
   };
@@ -2141,6 +2118,7 @@ export interface HeadcountInsights {
   };
   attrition: {
     hires_vs_resignations: HeadcountHiresVsResignationsRow[];
+    hires_vs_resignations_forecast: HeadcountHiresVsResignationsRow[];
   };
   utilization: {
     free_pool_current: number;
@@ -2164,7 +2142,7 @@ export interface HeadcountPredictionResult {
   };
 }
 
-export type HeadcountRawCellValue = string | number | boolean | null;
+export type HeadcountRawCellValue = string | number | boolean | null | Record<string, number>;
 
 export interface HeadcountRawTableSummary {
   table: string;

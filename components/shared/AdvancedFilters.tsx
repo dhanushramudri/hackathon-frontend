@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 import { ADVANCED_PARAMS, isNonDefaultParams } from "@/components/shared/candidateFilters";
 
 // Shared "Advanced Filters" control -- the exact same ranking-parameter panel
-// used on the Recommendations page, reused verbatim everywhere else a
+// used on the Resourcing page, reused verbatim everywhere else a
 // candidate list is ranked (Leave backfill, Employee Profile Replacement/
 // Redeploy tabs, Relief Staffing, New Project forecast). One definition, one
 // behavior, everywhere.

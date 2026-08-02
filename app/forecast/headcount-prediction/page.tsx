@@ -35,7 +35,6 @@ function buildChartData(history: HeadcountHistoryRow[], forecast: HeadcountForec
     forecast: undefined as number | undefined,
     hires_by_location: r.hires_by_location,
     hires_estimated: r.hires_estimated,
-    note: r.note,
   }));
   const fc = forecast.map((r) => ({
     month: r.month,
@@ -43,9 +42,8 @@ function buildChartData(history: HeadcountHistoryRow[], forecast: HeadcountForec
     forecast: r.forecast as number | undefined,
     lower: r.lower as number | undefined,
     upper: r.upper as number | undefined,
-    hires_by_location: undefined as Record<string, number> | undefined,
-    hires_estimated: false,
-    note: null as string | null,
+    hires_by_location: r.forecast_hires_by_location as Record<string, number> | undefined,
+    hires_estimated: true,
   }));
   // Bridge point so the forecast line (and its range band) connects to the
   // last actual value instead of starting from a gap.
@@ -82,9 +80,9 @@ function ForecastChart({
             const hasForecast = byName["Forecast"] != null;
             const hasRange = byName["Upper"] != null && byName["Lower"] != null && byName["Upper"] !== byName["Lower"];
             const point = payload[0]?.payload as
-              | { hires_by_location?: Record<string, number>; hires_estimated?: boolean; note?: string | null }
+              | { hires_by_location?: Record<string, number>; hires_estimated?: boolean }
               | undefined;
-            const hiresByLocation = hasActual ? point?.hires_by_location : undefined;
+            const hiresByLocation = point?.hires_by_location;
             const hasHiresByLocation = hiresByLocation && Object.keys(hiresByLocation).length > 0;
             return (
               <div style={{ background: CHART_CHROME.tooltipBg, border: `1px solid ${CHART_CHROME.tooltipBorder}`, borderRadius: 8, padding: "10px 14px", fontSize: 12, minWidth: 210, boxShadow: "0 4px 16px rgba(25,16,91,0.12)" }}>
@@ -119,9 +117,6 @@ function ForecastChart({
                     <span style={{ color: CHART_CHROME.mutedText, fontSize: 11 }}>Real range (best/worst trailing month)</span>
                     <span style={{ color: CHART_CHROME.mutedText, fontSize: 11 }}>{Math.round(byName["Lower"])} – {Math.round(byName["Upper"])}</span>
                   </div>
-                )}
-                {point?.note && (
-                  <p style={{ color: JMAN.amber, fontSize: 10, marginTop: 6 }}>{point.note}</p>
                 )}
                 <p style={{ color: CHART_CHROME.mutedText, fontSize: 10, marginTop: 6, borderTop: `1px solid ${CHART_CHROME.grid}`, paddingTop: 5 }}>
                   {hasForecast ? "Trailing-average forecast, not a validated model" : "Real historical period"}
@@ -167,8 +162,8 @@ function StatCard({ label, value, sub, trend }: { label: string; value: string; 
   );
 }
 
-function ProductivityPanel({ insights }: { insights: HeadcountInsights }) {
-  const { history, forecast, predicted_revenue_per_head_gbp_3mo, predicted_ebitda_margin_pct_3mo } = insights.productivity;
+function ProductivityPanel({ insights, horizonMonths }: { insights: HeadcountInsights; horizonMonths: number }) {
+  const { history, forecast, predicted_revenue_per_head_gbp_forecast, predicted_ebitda_margin_pct_forecast } = insights.productivity;
   // Combined, in order, so a 12-months-back YoY lookup (for the growth-rate proof
   // in the tooltip) can walk back across the history/forecast boundary.
   const combined = [...history, ...forecast];
@@ -204,8 +199,7 @@ function ProductivityPanel({ insights }: { insights: HeadcountInsights }) {
         <DollarSign className="w-4 h-4 text-primary" />
         <p className="text-sm font-semibold text-foreground">Workforce Productivity & Margin</p>
       </div>
-      <p className="text-xs text-muted-foreground mb-3">Revenue per head and Adj. EBITDA margin, based on reported financials -- with a 3-month predicted continuation. Hover a point for the real revenue/headcount behind it.</p>
-      <div className="flex items-baseline gap-6 mb-1 flex-wrap">
+      <div className="flex items-baseline gap-6 mb-1 flex-wrap mt-1">
         <p className="text-2xl font-bold text-foreground">
           £{insights.productivity.current_revenue_per_head_gbp.toLocaleString()}
           <span className="text-xs font-normal text-muted-foreground"> /head/month</span>
@@ -215,10 +209,10 @@ function ProductivityPanel({ insights }: { insights: HeadcountInsights }) {
           <span className="text-xs font-normal text-muted-foreground"> Adj. EBITDA margin</span>
         </p>
       </div>
-      {predicted_revenue_per_head_gbp_3mo != null && (
+      {predicted_revenue_per_head_gbp_forecast != null && (
         <p className="text-xs text-muted-foreground mb-3">
-          3-month predicted: <strong className="text-foreground">£{predicted_revenue_per_head_gbp_3mo.toLocaleString()}/head/month</strong>
-          {predicted_ebitda_margin_pct_3mo != null && <> · <strong className="text-foreground">{predicted_ebitda_margin_pct_3mo.toFixed(1)}%</strong> margin</>}
+          {horizonMonths}-month predicted: <strong className="text-foreground">£{predicted_revenue_per_head_gbp_forecast.toLocaleString()}/head/month</strong>
+          {predicted_ebitda_margin_pct_forecast != null && <> · <strong className="text-foreground">{predicted_ebitda_margin_pct_forecast.toFixed(1)}%</strong> margin</>}
         </p>
       )}
       <ResponsiveContainer width="100%" height={140}>
@@ -304,26 +298,49 @@ function CoeBreakdownPanel({ insights }: { insights: HeadcountInsights }) {
 }
 
 function AttritionPanel({ insights }: { insights: HeadcountInsights }) {
-  const { hires_vs_resignations } = insights.attrition;
+  const { hires_vs_resignations, hires_vs_resignations_forecast } = insights.attrition;
+  const hist = hires_vs_resignations.map((r) => ({
+    month: r.month,
+    new_hires: r.new_hires as number | undefined,
+    resignations: r.resignations as number | undefined,
+    new_hires_forecast: undefined as number | undefined,
+    resignations_forecast: undefined as number | undefined,
+  }));
+  const fc = hires_vs_resignations_forecast.map((r) => ({
+    month: r.month,
+    new_hires: undefined as number | undefined,
+    resignations: undefined as number | undefined,
+    new_hires_forecast: r.new_hires as number | undefined,
+    resignations_forecast: r.resignations as number | undefined,
+  }));
+  // Bridge point so the dashed forecast lines connect to the last real point
+  // instead of starting from a gap (same technique as the headcount chart):
+  // the real series gets one extra point at the first forecast month, equal
+  // to its last real value, so the solid and dashed lines meet at the same
+  // x-tick instead of jumping straight to the trailing-average forecast value.
+  const last = hist[hist.length - 1];
+  if (last && fc[0]) {
+    fc[0] = { ...fc[0], new_hires: last.new_hires, resignations: last.resignations };
+  }
+  const chartData = [...hist, ...fc];
+
   return (
     <div className="bg-card border border-border rounded-xl p-5">
       <div className="flex items-center gap-2 mb-1">
         <UserMinus className="w-4 h-4 text-primary" />
         <p className="text-sm font-semibold text-foreground">Attrition & Retention</p>
       </div>
-      <p className="text-xs text-muted-foreground mb-3">
-        Real hires vs. resignations, last 6 months. Resignation records only exist from 2026-05 onward, so
-        earlier months show hires only.
-      </p>
       <ResponsiveContainer width="100%" height={160}>
-        <ComposedChart data={hires_vs_resignations} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+        <ComposedChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke={CHART_CHROME.grid} />
           <XAxis dataKey="month" tickFormatter={formatMonth} tick={{ fontSize: 9, fill: CHART_CHROME.axisText }} />
           <YAxis tick={{ fontSize: 9, fill: CHART_CHROME.axisText }} width={28} />
           <Tooltip labelFormatter={formatMonth} contentStyle={{ background: CHART_CHROME.tooltipBg, border: `1px solid ${CHART_CHROME.tooltipBorder}`, fontSize: 11 }} />
           <Legend wrapperStyle={{ fontSize: 10 }} />
-          <Line dataKey="new_hires" stroke={JMAN.emerald} strokeWidth={2} dot={{ r: 2 }} name="Hires" />
-          <Line dataKey="resignations" stroke={JMAN.rose} strokeWidth={2} dot={{ r: 2 }} name="Resignations" />
+          <Line dataKey="new_hires" stroke={JMAN.emerald} strokeWidth={2} dot={{ r: 2 }} connectNulls name="Hires" />
+          <Line dataKey="new_hires_forecast" stroke={JMAN.emerald} strokeWidth={2} strokeDasharray="5 4" strokeOpacity={0.6} dot={false} connectNulls legendType="none" name="Hires (forecast)" />
+          <Line dataKey="resignations" stroke={JMAN.rose} strokeWidth={2} dot={{ r: 2 }} connectNulls name="Resignations" />
+          <Line dataKey="resignations_forecast" stroke={JMAN.rose} strokeWidth={2} strokeDasharray="5 4" strokeOpacity={0.6} dot={false} connectNulls legendType="none" name="Resignations (forecast)" />
         </ComposedChart>
       </ResponsiveContainer>
     </div>
@@ -338,8 +355,7 @@ function UtilizationPanel({ insights }: { insights: HeadcountInsights }) {
         <Activity className="w-4 h-4 text-primary" />
         <p className="text-sm font-semibold text-foreground">Utilization & Bench Health</p>
       </div>
-      <p className="text-xs text-muted-foreground mb-3">Real current over/under-allocation and free pool (same counts as the Allocations/Free Pool pages).</p>
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-3 gap-3 mt-2">
         <div className="text-center px-2 py-2 rounded-lg bg-muted/40 border border-border">
           <p className="text-lg font-bold text-foreground">{over_allocated_current}</p>
           <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Over-allocated</p>
@@ -374,7 +390,8 @@ export default function HeadcountPredictionPage() {
   const chartData = activeData ? buildChartData(activeData.history, activeData.forecast) : [];
 
   const currentHeadcount = activeData?.history[activeData.history.length - 1]?.total_active_headcount;
-  const threeMonthForecast = activeData?.forecast[2];
+  const currentHeadcountEstimated = activeData?.history[activeData.history.length - 1]?.hires_estimated ?? false;
+  const horizonForecast = activeData?.forecast[activeData.forecast.length - 1];
 
   return (
     <div className="p-4 sm:p-6 w-full space-y-6">
@@ -431,13 +448,13 @@ export default function HeadcountPredictionPage() {
             <StatCard
               label="Current Headcount"
               value={String(currentHeadcount ?? "-")}
-              sub={boundaryMonth ? formatMonth(boundaryMonth) : undefined}
+              sub={boundaryMonth ? `${formatMonth(boundaryMonth)}${currentHeadcountEstimated ? " (estimated)" : ""}` : undefined}
               trend={activeData.insights.headcount_change_pct_3mo}
             />
             <StatCard
-              label="3-Month Forecast"
-              value={threeMonthForecast ? String(Math.round(threeMonthForecast.forecast)) : "-"}
-              sub={threeMonthForecast ? formatMonth(threeMonthForecast.month) : undefined}
+              label={`${activeData.horizon_months}-Month Forecast`}
+              value={horizonForecast ? String(Math.round(horizonForecast.forecast)) : "-"}
+              sub={horizonForecast ? formatMonth(horizonForecast.month) : undefined}
               trend={activeData.insights.forecast_change_pct}
             />
             <StatCard
@@ -449,24 +466,20 @@ export default function HeadcountPredictionPage() {
 
           {/* Chart */}
           <div className="bg-card border border-border rounded-xl p-5">
-            <p className="text-sm font-semibold text-foreground mb-1">Monthly Active Headcount</p>
-            <p className="text-xs text-muted-foreground mb-4">
-              Solid = real headcount. Dashed = trailing-average forecast{lowConfidence ? " (low confidence -- thin real departure history)" : ""}.
-              Faint band = real range (best vs. worst of the trailing months feeding the forecast), not a fabricated confidence interval.
-            </p>
+            <p className="text-sm font-semibold text-foreground mb-4">Monthly Active Headcount</p>
             <ForecastChart data={chartData} boundaryMonth={boundaryMonth} lowConfidence={lowConfidence} />
           </div>
 
           {/* Executive panels: money, skills mix, retention, bench health */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-            <ProductivityPanel insights={activeData.insights} />
+            <ProductivityPanel insights={activeData.insights} horizonMonths={activeData.horizon_months} />
             <CoeBreakdownPanel insights={activeData.insights} />
             <AttritionPanel insights={activeData.insights} />
             <UtilizationPanel insights={activeData.insights} />
           </div>
 
           {/* Raw data used -- editable, with a Run button to re-forecast on edited values */}
-          <DataUsedSection horizon={horizon} onSimulate={setSimulated} isSimulated={!!simulated} />
+          <DataUsedSection horizon={horizon} onSimulate={setSimulated} simulated={simulated} />
         </>
       )}
     </div>
@@ -476,12 +489,13 @@ export default function HeadcountPredictionPage() {
 const EDITABLE_HISTORY_COLUMNS = ["new_hires", "resignations", "total_active_headcount"];
 
 function DataUsedSection({
-  horizon, onSimulate, isSimulated,
+  horizon, onSimulate, simulated,
 }: {
   horizon: number;
-  onSimulate: (result: HeadcountPredictionResult) => void;
-  isSimulated: boolean;
+  onSimulate: (result: HeadcountPredictionResult | null) => void;
+  simulated: HeadcountPredictionResult | null;
 }) {
+  const isSimulated = !!simulated;
   const tablesQuery = useQuery({ queryKey: ["headcount-prediction-tables"], queryFn: () => api.headcountPredictionTables() });
   const [selected, setSelected] = useState<string | null>(null);
   const activeTable = selected ?? tablesQuery.data?.[0]?.table ?? null;
@@ -492,7 +506,6 @@ function DataUsedSection({
     enabled: !!activeTable,
   });
 
-  const activeMeta = tablesQuery.data?.find((t) => t.table === activeTable);
   const isMonthlyHistory = activeTable === "monthly_history";
 
   // Edits keyed by month -> column -> value, layered on top of the fetched real rows.
@@ -512,6 +525,41 @@ function DataUsedSection({
       return { ...merged, net: newHires - resignations };
     });
   }, [rawQuery.data, isMonthlyHistory, edits]);
+
+  // Once a scenario has been run, the Forecast and Real Revenue & Margin tabs
+  // should reflect it too -- otherwise the tables below silently disagree with
+  // the charts above, which is exactly the "did this actually refresh?" gap.
+  // Monthly History already shows the edited values via editedRows above;
+  // CoE Breakdown intentionally stays real (see CoeBreakdownPanel/simulate
+  // endpoint -- editing history doesn't change today's real CoE mix).
+  const simulatedProductivityRows = useMemo(() => {
+    if (!simulated) return null;
+    const { history, forecast, ebitda_margin_history, ebitda_margin_forecast } = simulated.insights.productivity;
+    const marginByMonth = new Map([...ebitda_margin_history, ...ebitda_margin_forecast].map((m) => [m.month, m.value]));
+    return [
+      ...history.map((p) => ({ ...p, is_forecast: false })),
+      ...forecast.map((p) => ({ ...p, is_forecast: true })),
+    ].map((p) => ({
+      month: p.month,
+      revenue_per_head_gbp: p.value,
+      ebitda_margin_pct: marginByMonth.get(p.month) ?? null,
+      revenue_ltm_gbp_000: p.revenue_ltm_gbp_000,
+      headcount: p.headcount,
+      is_real_revenue_anchor: p.is_real_revenue_anchor,
+      is_forecast: p.is_forecast,
+    }));
+  }, [simulated]);
+
+  const displayRows = useMemo(() => {
+    if (simulated && activeTable === "forecast") return simulated.forecast as unknown as Record<string, HeadcountRawCellValue>[];
+    if (simulated && activeTable === "productivity" && simulatedProductivityRows) {
+      return simulatedProductivityRows as unknown as Record<string, HeadcountRawCellValue>[];
+    }
+    return editedRows;
+  }, [simulated, activeTable, simulatedProductivityRows, editedRows]);
+
+  const displayColumns = displayRows.length > 0 ? Object.keys(displayRows[0]) : (rawQuery.data?.columns ?? []);
+  const showingSimulatedTable = isSimulated && (activeTable === "forecast" || activeTable === "productivity");
 
   const pendingEditCount = Object.keys(edits).length;
 
@@ -539,8 +587,7 @@ function DataUsedSection({
         <p className="text-sm font-semibold text-foreground">Data used for this forecast</p>
       </div>
       <p className="text-xs text-muted-foreground mb-4">
-        Every table behind this forecast — sortable, searchable, exportable. Monthly History is editable: double-click a
-        Hires / Resignations / Headcount cell, then Run to see the forecast and graphs recompute on your edited values.
+        Monthly History is editable — double-click a Hires / Resignations / Headcount cell, then Run.
       </p>
 
       {tablesQuery.isLoading && <Skeleton className="h-10 mb-3" />}
@@ -561,8 +608,6 @@ function DataUsedSection({
         </div>
       )}
 
-      {activeMeta && <p className="text-xs text-muted-foreground mb-3">{activeMeta.description}</p>}
-
       {isMonthlyHistory && (
         <div className="flex items-center gap-2 flex-wrap mb-3">
           <button
@@ -580,7 +625,7 @@ function DataUsedSection({
           </button>
           {(pendingEditCount > 0 || isSimulated) && (
             <button
-              onClick={() => { setEdits({}); }}
+              onClick={() => { setEdits({}); onSimulate(null); }}
               className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border hover:bg-muted transition"
               style={{ borderColor: `${JMAN.emerald}40` }}
             >
@@ -591,6 +636,10 @@ function DataUsedSection({
         </div>
       )}
 
+      {showingSimulatedTable && (
+        <p className="text-xs text-amber-600 dark:text-amber-400 mb-2">Showing the simulated scenario's values — not live data.</p>
+      )}
+
       {rawQuery.isLoading && <Skeleton className="h-64" />}
       {rawQuery.isError && (
         <div className="flex items-center gap-2 text-destructive text-sm bg-destructive/10 border border-destructive/20 rounded-lg p-4">
@@ -599,8 +648,8 @@ function DataUsedSection({
       )}
       {rawQuery.data && (
         <DataGrid
-          columns={rawQuery.data.columns}
-          rows={editedRows}
+          columns={displayColumns}
+          rows={displayRows}
           exportFilename={`${rawQuery.data.table}.csv`}
           rowKey={isMonthlyHistory ? "month" : undefined}
           editableColumns={isMonthlyHistory ? EDITABLE_HISTORY_COLUMNS : undefined}

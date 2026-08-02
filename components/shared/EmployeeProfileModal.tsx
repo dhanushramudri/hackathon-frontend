@@ -178,7 +178,7 @@ function ReplacementTab({
   const [bestFitOpen, setBestFitOpen] = useState(false);
   const [fallbackOpen, setFallbackOpen] = useState(false);
   const [openProfile, setOpenProfile] = useState<string | null>(null);
-  // Same ranking-parameter flexibility as the main Recommendations engine.
+  // Same ranking-parameter flexibility as the main Resourcing engine.
   const [includeParams, setIncludeParams] = useState<IncludeParams>(DEFAULT_INCLUDE_PARAMS);
   const [includeBelowCapacity, setIncludeBelowCapacity] = useState(false);
   const [nearCapacityTolerancePct, setNearCapacityTolerancePct] = useState(25);
@@ -867,7 +867,7 @@ function RedeployMatchesTab({ employeeId }: { employeeId: string }) {
                           <HoldChip onHold={m.on_hold} holdProjects={m.hold_projects} />
                         </td>
                         <td className="px-2.5 py-1.5">
-                          <Link href={`/recommendations?row=${m.row_index}`} className="text-primary hover:underline whitespace-nowrap">
+                          <Link href={`/resourcing?row=${m.row_index}`} className="text-primary hover:underline whitespace-nowrap">
                             Open →
                           </Link>
                         </td>

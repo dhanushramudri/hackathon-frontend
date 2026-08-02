@@ -33,7 +33,7 @@ import { cn } from "@/lib/utils";
 
 // This whole file (DealField/SemanticMatchPanel/RoleRecommendationDetail/
 // DecisionHeader/OtherOptionsSection) used to live inline in
-// app/recommendations/page.tsx. Moved out verbatim so the Project Wizard's
+// app/resourcing/page.tsx. Moved out verbatim so the Project Wizard's
 // Step 5 (Resource Allocation) can reuse RoleRecommendationDetail too --
 // Next.js forbids arbitrary named exports from a page.tsx file, so it can't
 // be exported from there directly.

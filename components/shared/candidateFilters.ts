@@ -153,7 +153,7 @@ export interface AdvancedParamDef {
 // nothing is hard-locked "always on". Extensible by design -- adding a new
 // parameter later is just another entry here, a matching field on
 // RecommendationCandidate, and a matching key on IncludeParams/BASE_WEIGHTS.
-// Shared by every recommendation-adjacent surface in the app (Recommendations
+// Shared by every recommendation-adjacent surface in the app (Resourcing
 // page, Leave backfill, Employee Profile Replacement/Redeploy tabs, Relief
 // Staffing, New Project forecast) so "advanced filters" means the exact same
 // thing everywhere.
