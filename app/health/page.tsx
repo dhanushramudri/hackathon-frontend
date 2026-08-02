@@ -61,7 +61,7 @@ const TABLE_COLUMNS = [
   "Unbilled $/mo",
   "Real WSR (latest)",
   "DevOps board",
-  "Ramp-down?",
+  // "Ramp-down?", -- column hidden from the frontend table per request
 ] as const;
 
 interface HealthFilterOptions {
@@ -1004,12 +1004,13 @@ const [escalationRiskOnly, setEscalationRiskOnly] = useState(false);
                     <DevopsBoardCell p={p} onOpenProject={openProject} />
                   </td>
 
-                  {/* Ramp-down */}
+                  {/* Ramp-down column hidden from the frontend table per request -- kept here, commented, in case it's needed again:
                   <td className="px-3 py-2 whitespace-nowrap">
                     {p.is_ramp_down_candidate && (
                       <Badge variant="default">{p.days_to_ramp_down}d</Badge>
                     )}
                   </td>
+                  */}
                 </tr>
               ))}
               {filtered.length === 0 && (

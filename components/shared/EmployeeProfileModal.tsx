@@ -13,6 +13,7 @@ import {
   type AllocationRow, type EmployeeAllocationRow, type EmployeeProfile,
   type BackfillResult, type RecommendationCandidate, type FallbackCandidates,
   type IncludeParams, type RedeployMatch, type EmployeeFeedbackEntry,
+  type EmployeeTimesheetRow,
 } from "@/lib/api";
 import { Modal } from "@/components/shared/Modal";
 import { Badge } from "@/components/shared/Badge";
@@ -25,6 +26,7 @@ import { HoldDot, HoldChip } from "@/components/shared/HoldFlag";
 import { TimesheetProofModal } from "@/components/shared/TimesheetProofModal";
 import { AssignModal } from "@/components/shared/AssignModal";
 import { SearchableSelect } from "@/components/shared/SearchableSelect";
+import { ProjectHealthDetailModal } from "@/components/health/ProjectHealthDetailModal";
 import { cn } from "@/lib/utils";
 
 export type ProfileTab =
@@ -35,6 +37,7 @@ export type ProfileTab =
   | "competency"
   | "leave"
   | "feedback"
+  | "timesheet"
   | "redeploy_matches"
   | "replacement";
 
@@ -64,6 +67,7 @@ const BASE_TABS: { key: ProfileTab; label: string }[] = [
   { key: "competency", label: "Competency" },
   { key: "leave", label: "Leave" },
   { key: "feedback", label: "Feedback" },
+  { key: "timesheet", label: "Timesheet" },
 ];
 
 export function EmployeeProfileModal({
@@ -71,6 +75,7 @@ export function EmployeeProfileModal({
 }: EmployeeProfileModalProps) {
   const [tab, setTab] = useState<ProfileTab>(initialTab);
   const [replacementCtx, setReplacementCtx] = useState<ReplacementContext | null>(null);
+  const [openProjectCode, setOpenProjectCode] = useState<string | null>(null);
 
   const profile = useQuery({
     queryKey: ["employee-profile", employeeId],
@@ -117,6 +122,7 @@ export function EmployeeProfileModal({
             {t.key === "redeploy_matches" && <Sparkles className="w-3 h-3" />}
             {t.key === "replacement" && <RefreshCw className="w-3 h-3" />}
             {t.key === "feedback" && <MessageSquare className="w-3 h-3" />}
+            {t.key === "timesheet" && <Clock className="w-3 h-3" />}
             {t.label}
           </button>
         ))}
@@ -129,12 +135,13 @@ export function EmployeeProfileModal({
           <ErrorState message="Could not load this employee's profile." />
         ) : profile.data ? (
           <>
-            {tab === "overview" && <OverviewTab profile={profile.data} />}
+            {tab === "overview" && <OverviewTab profile={profile.data} onOpenProject={setOpenProjectCode} />}
             {tab === "allocations" && (
               <AllocationsTab
                 profile={profile.data}
                 onFindReplacement={handleFindReplacement}
                 activeReplacementProjectId={replacementCtx?.projectId ?? null}
+                onOpenProject={setOpenProjectCode}
               />
             )}
             {tab === "overtime" && <OvertimeTab profile={profile.data} />}
@@ -142,6 +149,7 @@ export function EmployeeProfileModal({
             {tab === "competency" && <CompetencyTab profile={profile.data} />}
             {tab === "leave" && <LeaveTab profile={profile.data} />}
             {tab === "feedback" && <FeedbackTab employeeId={employeeId} />}
+            {tab === "timesheet" && <TimesheetTab employeeId={employeeId} />}
             {tab === "redeploy_matches" && <RedeployMatchesTab employeeId={employeeId} />}
             {tab === "replacement" && replacementCtx && (
               <ReplacementTab
@@ -154,6 +162,9 @@ export function EmployeeProfileModal({
           </>
         ) : null}
       </div>
+      {openProjectCode && (
+        <ProjectHealthDetailModal projectCode={openProjectCode} onClose={() => setOpenProjectCode(null)} />
+      )}
     </Modal>
   );
 }
@@ -895,7 +906,7 @@ function Field({ label, value }: { label: string; value: string }) {
   );
 }
 
-function OverviewTab({ profile }: { profile: EmployeeProfile }) {
+function OverviewTab({ profile, onOpenProject }: { profile: EmployeeProfile; onOpenProject: (projectCode: string) => void }) {
   const s = profile.signals;
   const [timesheetProject, setTimesheetProject] = useState<string | null>(null);
   const quietAllocations = profile.current_allocations.filter((a) => a.possible_unplanned_absence);
@@ -909,7 +920,9 @@ function OverviewTab({ profile }: { profile: EmployeeProfile }) {
           <span className="flex flex-wrap items-center gap-1.5">
             Current project(s) flagged as likely to extend past end date:
             {s.hold_projects.map((p) => (
-              <span key={p.project_code} className="text-amber-700 font-medium">{p.project_code}</span>
+              <button key={p.project_code} onClick={() => onOpenProject(p.project_code)} className="text-amber-700 font-medium hover:underline">
+                {p.project_code}
+              </button>
             ))}
             <span className="text-gray-400">— availability uncertain until confirmed.</span>
           </span>
@@ -1038,11 +1051,12 @@ function hoursFor(row: EmployeeAllocationRow, current: AllocationRow[]): Allocat
 }
 
 function AllocationsTab({
-  profile, onFindReplacement, activeReplacementProjectId,
+  profile, onFindReplacement, activeReplacementProjectId, onOpenProject,
 }: {
   profile: EmployeeProfile;
   onFindReplacement: (ctx: { projectId: string; allocPct: number } | null) => void;
   activeReplacementProjectId: string | null;
+  onOpenProject: (projectCode: string) => void;
 }) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -1107,7 +1121,11 @@ function AllocationsTab({
                 const isActiveReplacement = activeReplacementProjectId === a.project_id;
                 return (
                   <tr key={i} className={cn("border-b border-gray-50 last:border-0", isActiveReplacement && "bg-amber-50/40")}>
-                    <td className="px-2.5 py-1.5 text-gray-700 font-medium whitespace-nowrap">{a.project_id}</td>
+                    <td className="px-2.5 py-1.5 whitespace-nowrap">
+                      <button onClick={() => onOpenProject(a.project_id)} className="text-primary font-medium hover:underline">
+                        {a.project_id}
+                      </button>
+                    </td>
                     <td className="px-2.5 py-1.5 text-gray-600 whitespace-nowrap">{a.client_id ?? "-"}</td>
                     <td className="px-2.5 py-1.5 text-gray-500 whitespace-nowrap">{a.type_of_project ?? "-"}</td>
                     <td className="px-2.5 py-1.5 whitespace-nowrap"><Badge variant={a.resourcing_status}>{a.resourcing_status}</Badge></td>
@@ -1638,6 +1656,160 @@ function FeedbackTab({ employeeId }: { employeeId: string }) {
       )}
 
       {openEntry && <FeedbackDetailModal entry={openEntry} onClose={() => setOpenEntry(null)} />}
+    </div>
+  );
+}
+
+type TimesheetSort = "date_desc" | "date_asc" | "hours_desc";
+
+function TimesheetTab({ employeeId }: { employeeId: string }) {
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [projectId, setProjectId] = useState("all");
+  const [billingStatus, setBillingStatus] = useState("all");
+  const [sort, setSort] = useState<TimesheetSort>("date_desc");
+
+  const ts = useQuery({
+    queryKey: ["employee-timesheet", employeeId, startDate, endDate, projectId, billingStatus],
+    queryFn: () =>
+      api.employeeTimesheet(employeeId, {
+        startDate: startDate || undefined,
+        endDate: endDate || undefined,
+        projectId: projectId === "all" ? undefined : projectId,
+        billingStatus: billingStatus === "all" ? undefined : billingStatus,
+      }),
+  });
+
+  if (ts.isLoading) return <TableSkeleton columns={5} rows={6} />;
+  if (ts.error || !ts.data) return <ErrorState message="Could not load timesheet data for this employee." />;
+  const data = ts.data;
+
+  const rows: EmployeeTimesheetRow[] = [...data.rows];
+  switch (sort) {
+    case "date_desc": rows.sort((a, b) => b.date.localeCompare(a.date)); break;
+    case "date_asc": rows.sort((a, b) => a.date.localeCompare(b.date)); break;
+    case "hours_desc": rows.sort((a, b) => b.hours - a.hours); break;
+  }
+
+  const billingOptions = Object.keys(data.by_billing_status);
+
+  return (
+    <div className="space-y-3">
+      <p className="text-[11px] text-gray-400">
+        Real day-by-day timesheet entries for this employee
+        {data.data_start_date && data.data_end_date && ` — data available ${data.data_start_date} → ${data.data_end_date}`}.
+      </p>
+
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-1">
+          <span className="text-[10px] text-gray-400 whitespace-nowrap">From</span>
+          <input
+            type="date"
+            value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
+            min={data.data_start_date ?? undefined}
+            max={data.data_end_date ?? undefined}
+            className="text-[11px] px-1.5 py-1 rounded-lg border border-gray-200 bg-white text-gray-600"
+          />
+        </div>
+        <div className="flex items-center gap-1">
+          <span className="text-[10px] text-gray-400 whitespace-nowrap">To</span>
+          <input
+            type="date"
+            value={endDate}
+            onChange={(e) => setEndDate(e.target.value)}
+            min={data.data_start_date ?? undefined}
+            max={data.data_end_date ?? undefined}
+            className="text-[11px] px-1.5 py-1 rounded-lg border border-gray-200 bg-white text-gray-600"
+          />
+        </div>
+        {(startDate || endDate) && (
+          <button
+            onClick={() => { setStartDate(""); setEndDate(""); }}
+            className="text-[11px] text-gray-400 hover:text-gray-600 underline"
+          >
+            Clear dates
+          </button>
+        )}
+      </div>
+
+      <TableControls
+        filters={[
+          { value: projectId, onChange: setProjectId, options: [["all", "All projects"], ...data.available_projects.map((p) => [p, p] as [string, string])] },
+          { value: billingStatus, onChange: setBillingStatus, options: [["all", "All billing status"], ...billingOptions.map((b) => [b, b] as [string, string])] },
+        ]}
+        sort={{
+          value: sort,
+          onChange: (v) => setSort(v as TimesheetSort),
+          options: [
+            ["date_desc", "Latest day first"],
+            ["date_asc", "Earliest day first"],
+            ["hours_desc", "Most hours first"],
+          ],
+        }}
+      />
+
+      {rows.length === 0 ? (
+        <p className="text-xs text-gray-400 italic py-4 text-center">No timesheet entries match the current filters.</p>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="rounded-lg border border-gray-100 p-2.5">
+              <p className="text-[10px] uppercase tracking-wide text-gray-400">Total hours</p>
+              <p className="text-gray-700 font-semibold text-sm">{data.total_hours}h</p>
+            </div>
+            <div className="rounded-lg border border-gray-100 p-2.5">
+              <p className="text-[10px] uppercase tracking-wide text-gray-400">Days logged</p>
+              <p className="text-gray-700 font-semibold text-sm">{data.days_logged}</p>
+            </div>
+            <div className="rounded-lg border border-gray-100 p-2.5">
+              <p className="text-[10px] uppercase tracking-wide text-gray-400">Avg hrs/day logged</p>
+              <p className="text-gray-700 font-semibold text-sm">{data.avg_hours_per_logged_day}h</p>
+            </div>
+            <div className="rounded-lg border border-gray-100 p-2.5">
+              <p className="text-[10px] uppercase tracking-wide text-gray-400">Entries</p>
+              <p className="text-gray-700 font-semibold text-sm">{data.entry_count}</p>
+            </div>
+          </div>
+
+          {data.by_project.length > 1 && (
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {data.by_project.map((p) => (
+                <span key={p.project_id} className="text-[10px] px-2 py-0.5 rounded-full border border-gray-200 bg-gray-50 text-gray-500 whitespace-nowrap">
+                  {p.project_id}: {p.hours}h
+                </span>
+              ))}
+            </div>
+          )}
+
+          <div className="rounded-xl border border-[hsl(var(--primary)/0.3)] overflow-hidden max-h-96 overflow-y-auto scrollbar-thin">
+            <div className="overflow-x-auto">
+              <table className="w-full text-[11px]">
+                <thead className="sticky top-0">
+                  <tr className="bg-gray-50 border-b border-gray-200">
+                    <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5 whitespace-nowrap">Date</th>
+                    <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5 whitespace-nowrap">Project</th>
+                    <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5 whitespace-nowrap">Hours</th>
+                    <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5 whitespace-nowrap">Status</th>
+                    <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5 whitespace-nowrap">Billing</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r, i) => (
+                    <tr key={i} className="border-b border-gray-50 last:border-0">
+                      <td className="px-2.5 py-1.5 text-gray-600 whitespace-nowrap">{r.date}</td>
+                      <td className="px-2.5 py-1.5 text-gray-700 font-medium whitespace-nowrap">{r.project_id}</td>
+                      <td className="px-2.5 py-1.5 text-gray-700 whitespace-nowrap">{r.hours}h</td>
+                      <td className="px-2.5 py-1.5 text-gray-500 whitespace-nowrap">{r.status}</td>
+                      <td className="px-2.5 py-1.5 whitespace-nowrap"><Badge variant={r.billing_status.toLowerCase()}>{r.billing_status}</Badge></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

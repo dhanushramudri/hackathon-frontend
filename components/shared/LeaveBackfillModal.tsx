@@ -158,15 +158,6 @@ function AlumniCandidateCard({
           {candidate.location && <span className="text-[11px] text-gray-400">· {candidate.location}</span>}
         </div>
         <div className="flex items-center gap-1.5 flex-shrink-0">
-          {candidate.is_currently_free ? (
-            <Badge variant="green">Currently free</Badge>
-          ) : (
-            candidate.current_projects.map((p) => (
-              <Badge key={p.project_id} variant="under_utilized">
-                on {p.project_id} · {p.allocation_by_percentage ?? "?"}%
-              </Badge>
-            ))
-          )}
           <button
             onClick={onRequest}
             className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg border border-primary/30 text-primary hover:bg-primary/5 whitespace-nowrap"
@@ -178,6 +169,18 @@ function AlumniCandidateCard({
             Assign
           </button>
         </div>
+      </div>
+
+      <div className="flex items-center gap-1.5 flex-wrap">
+        {candidate.is_currently_free ? (
+          <Badge variant="green">Currently free</Badge>
+        ) : (
+          candidate.current_projects.map((p) => (
+            <Badge key={p.project_id} variant="under_utilized">
+              on {p.project_id} · {p.allocation_by_percentage ?? "?"}%
+            </Badge>
+          ))
+        )}
       </div>
 
       <div className="space-y-1 pt-1 border-t border-gray-100">

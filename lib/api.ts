@@ -1523,6 +1523,29 @@ export interface EmployeeFeedbackResult {
   entries: EmployeeFeedbackEntry[];
 }
 
+export interface EmployeeTimesheetRow {
+  date: string;
+  project_id: string;
+  job_name: string | null;
+  hours: number;
+  status: string;
+  billing_status: string;
+}
+
+export interface EmployeeTimesheetResult {
+  employee_id: string;
+  total_hours: number;
+  days_logged: number;
+  entry_count: number;
+  avg_hours_per_logged_day: number;
+  data_start_date: string | null;
+  data_end_date: string | null;
+  available_projects: string[];
+  by_project: { project_id: string; hours: number }[];
+  by_billing_status: Record<string, number>;
+  rows: EmployeeTimesheetRow[];
+}
+
 export interface AllocationTimesheet extends AllocationRow {
   hours_window_end: string;
   daily_hours: { date: string; hours: number | null; expected_hours: number; utilization_pct: number | null; is_missing: boolean }[];
@@ -1696,6 +1719,18 @@ export const api = {
     for (const r of filters.ratings ?? []) params.append("ratings", String(r));
     const qs = params.toString();
     return getJSON<EmployeeFeedbackResult>(`/employees/${encodeURIComponent(employeeId)}/feedback${qs ? `?${qs}` : ""}`);
+  },
+  employeeTimesheet: (
+    employeeId: string,
+    filters: { startDate?: string; endDate?: string; projectId?: string; billingStatus?: string } = {}
+  ) => {
+    const params = new URLSearchParams();
+    if (filters.startDate) params.set("start_date", filters.startDate);
+    if (filters.endDate) params.set("end_date", filters.endDate);
+    if (filters.projectId) params.set("project_id", filters.projectId);
+    if (filters.billingStatus) params.set("billing_status", filters.billingStatus);
+    const qs = params.toString();
+    return getJSON<EmployeeTimesheetResult>(`/employees/${encodeURIComponent(employeeId)}/timesheet${qs ? `?${qs}` : ""}`);
   },
   employeeHeadcountSummary: () => getJSON<EmployeeHeadcountSummary>("/employees/headcount-summary"),
   overtimeRiskSummary: () => getJSON<OvertimeRiskSummary>("/employees/overtime-risk-summary"),
