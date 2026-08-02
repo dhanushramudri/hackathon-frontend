@@ -1312,13 +1312,16 @@ export interface BuddyStreamEvent {
  * as Buddy works, instead of waiting for the full answer. Uses fetch() directly since
  * the structured-final-answer JSON only arrives once on the "done" event, not streamed
  * token-by-token (the backend's final answer is parsed JSON, not free prose). */
-// 60s of total silence (no new SSE bytes at all -- tool_call/tool_result events reset this
+// 120s of total silence (no new SSE bytes at all -- tool_call/tool_result events reset this
 // on every real turn) aborts the connection with a clear, catchable error instead of leaving
 // the caller awaiting forever. This is a real recovery path, not just a defensive nicety: an
 // in-flight request whose backend worker gets killed mid-stream (e.g. uvicorn --reload
 // restarting while a request is in flight) never sends a clean close, so without this the
 // browser's fetch reader can hang indefinitely with no way for the UI to recover on its own.
-const STREAM_INACTIVITY_TIMEOUT_MS = 60000;
+// Was 60s -- measured real GPT-4o final-answer generation (the one gap with zero intermediate
+// SSE events) taking 30s+ on its own for an ordinary question, so 60s had too little margin
+// and was aborting requests that were still genuinely working, not actually stuck.
+const STREAM_INACTIVITY_TIMEOUT_MS = 120000;
 
 export async function* buddyAskStream(
   message: string,

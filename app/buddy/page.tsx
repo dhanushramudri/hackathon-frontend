@@ -1,8 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { Send, Sparkles, Loader2, Plus, Trash2, MessageSquare, PanelLeftClose, PanelLeftOpen, X, ChevronDown, ChevronUp, Wrench, ThumbsUp, ThumbsDown } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from "recharts";
+import { cn, formatUsd } from "@/lib/utils";
 import { Mascot } from "@/components/shared/Mascot";
 import { buddyAskStream, buddyRate, type BuddyStat, type BuddyTable, type BuddyToolCall } from "@/lib/api";
 import { EmployeeProfileModal } from "@/components/shared/EmployeeProfileModal";
@@ -139,6 +142,41 @@ function Avatar() {
   );
 }
 
+// Renders the model's answer text as real markdown -- bold, lists, links, and
+// (defensively) any stray GFM table a model appends despite the system prompt
+// asking for a plain summary. Without this, that leaked markdown shows up as
+// raw "**"/"|---|" characters instead of formatted text (the exact bug seen
+// when a model occasionally echoes a table after its required JSON object).
+function ChatMarkdown({ content }: { content: string }) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      components={{
+        p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+        strong: ({ children }) => <strong className="font-semibold text-gray-900">{children}</strong>,
+        ul: ({ children }) => <ul className="list-disc pl-4 mb-2 space-y-0.5">{children}</ul>,
+        ol: ({ children }) => <ol className="list-decimal pl-4 mb-2 space-y-0.5">{children}</ol>,
+        li: ({ children }) => <li className="text-[13.5px]">{children}</li>,
+        a: ({ href, children }) => (
+          <a href={href} target="_blank" rel="noreferrer" className="text-primary hover:underline">{children}</a>
+        ),
+        code: ({ children }) => <code className="px-1 py-0.5 rounded bg-gray-100 text-[12px] font-mono">{children}</code>,
+        table: ({ children }) => (
+          <div className="w-full rounded-xl border border-[hsl(var(--primary)/0.3)] overflow-x-auto my-2">
+            <table className="w-full text-[11px]">{children}</table>
+          </div>
+        ),
+        thead: ({ children }) => <thead className="bg-gray-50 border-b border-gray-200">{children}</thead>,
+        th: ({ children }) => <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5 whitespace-nowrap">{children}</th>,
+        tr: ({ children }) => <tr className="border-b border-gray-50 last:border-0">{children}</tr>,
+        td: ({ children }) => <td className="px-2.5 py-1.5 text-gray-700">{children}</td>,
+      }}
+    >
+      {content}
+    </ReactMarkdown>
+  );
+}
+
 function ChatTable({
   columns,
   rows,
@@ -179,17 +217,89 @@ function ChatTable({
   );
 }
 
-function ChatStats({ items }: { items: BuddyStat[] }) {
+function ChatStats({ items, toolName, data }: { items: BuddyStat[]; toolName?: string; data?: unknown }) {
+  const [open, setOpen] = useState<{ label: string; table: BreakdownTable } | null>(null);
   return (
-    <div className="w-full grid grid-cols-1 sm:grid-cols-2 gap-2">
-      {items.map((s) => (
-        <div key={s.label} className="rounded-xl border border-gray-200 px-3 py-2">
-          <p className="text-[10px] text-gray-400 mb-0.5">{s.label}</p>
-          <p className="text-sm font-bold text-gray-800">{s.value}</p>
-        </div>
-      ))}
-    </div>
+    <>
+      <div className="w-full grid grid-cols-1 sm:grid-cols-2 gap-2">
+        {items.map((st) => {
+          const proof = extractStatProof(toolName, st.label, data);
+          return (
+            <div
+              key={st.label}
+              onClick={proof ? () => setOpen({ label: st.label, table: proof }) : undefined}
+              className={cn(
+                "rounded-xl border border-gray-200 px-3 py-2 transition",
+                proof && "hover:border-primary hover:bg-primary/5 cursor-pointer"
+              )}
+              title={proof ? "Click for the real rows behind this number" : undefined}
+            >
+              <p className="text-[10px] text-gray-400 mb-0.5 flex items-center gap-1">
+                {st.label}
+                {proof && <span className="text-primary">↗</span>}
+              </p>
+              <p className="text-sm font-bold text-gray-800">{st.value}</p>
+            </div>
+          );
+        })}
+      </div>
+      {open && (
+        <Modal title={`${open.label} (${open.table.rows.length})`} onClose={() => setOpen(null)} widthClassName="max-w-2xl">
+          <div className="p-4">
+            <ChatTable {...open.table} onEmployeeClick={() => {}} onProjectClick={() => {}} />
+          </div>
+        </Modal>
+      )}
+    </>
   );
+}
+
+// A handful of tool results are naturally a time series -- rendering them as a
+// chart (with the same hover-tooltip UX as the rest of the app) reads faster
+// than scanning a raw table. Deliberately narrow: only tools where the data
+// shape is unambiguously "one row per period" get a chart, nothing is guessed.
+function BuddyChart({ toolName, data }: { toolName: string | undefined; data: unknown }) {
+  if (!toolName || data == null) return null;
+
+  if (toolName === "get_revenue_trend" && Array.isArray(data) && data.length > 1) {
+    const rows = data as { month: string; value: number }[];
+    return (
+      <div className="w-full rounded-xl border border-gray-200 bg-white p-3" style={{ height: 220 }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={rows} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+            <XAxis dataKey="month" tick={{ fontSize: 10 }} />
+            <YAxis tick={{ fontSize: 10 }} tickFormatter={(v) => formatUsd(Number(v))} width={55} />
+            <Tooltip formatter={(v: number) => formatUsd(v)} contentStyle={{ fontSize: 11, borderRadius: 8 }} />
+            <Line type="monotone" dataKey="value" stroke="#3411A3" strokeWidth={2} dot={{ r: 3 }} name="Revenue" />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    );
+  }
+
+  if (toolName === "get_pipeline_outlook" && typeof data === "object" && Array.isArray((data as BreakdownRecord).months)) {
+    const months = (data as BreakdownRecord).months as BreakdownRecord[];
+    if (months.length === 0) return null;
+    return (
+      <div className="w-full rounded-xl border border-gray-200 bg-white p-3" style={{ height: 240 }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={months} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+            <XAxis dataKey="month" tick={{ fontSize: 10 }} />
+            <YAxis tick={{ fontSize: 10 }} width={30} />
+            <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8 }} />
+            <Legend wrapperStyle={{ fontSize: 10 }} />
+            <Bar dataKey="confirmed_demand_count" name="Confirmed demand" fill="#3411A3" radius={[3, 3, 0, 0]} />
+            <Bar dataKey="unconfirmed_demand_count" name="Unconfirmed demand" fill="#C36BDB" radius={[3, 3, 0, 0]} />
+            <Bar dataKey="projected_supply_count" name="Projected supply" fill="#18978E" radius={[3, 3, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    );
+  }
+
+  return null;
 }
 
 // ── Breakdown drill-down ────────────────────────────────────────────────────────
@@ -305,6 +415,53 @@ function extractBreakdown(toolName: string | undefined, data: unknown): Breakdow
     const candidates = (data as BreakdownRecord).candidates as BreakdownRecord[];
     return { groups: groupByField(candidates, "bucket"), buildTable: buildCandidatesTable };
   }
+  return null;
+}
+
+// Same real-data-already-in-hand philosophy as extractBreakdown above, but for
+// the "stats" card grid instead of the "table" format -- each stat tile maps
+// to a specific filter of the same tool result already sitting in the
+// message's `data` field, so a number like "Total shortfall (heads)" opens
+// the exact real rows behind it instead of staying an unverifiable figure.
+function extractStatProof(toolName: string | undefined, label: string, data: unknown): BreakdownTable | null {
+  if (!toolName || data == null || typeof data !== "object") return null;
+  const d = data as BreakdownRecord;
+
+  if (toolName === "get_recommendations_coverage_summary" && Array.isArray(d.rows)) {
+    const rows = d.rows as BreakdownRecord[];
+    const filters: Record<string, (r: BreakdownRecord) => boolean> = {
+      "Ready to redeploy": (r) => r.top_candidate_signal === "redeploy",
+      "Need upskilling": (r) => r.top_candidate_signal === "redeploy_with_training",
+      "Need external hire": (r) => r.top_candidate_signal === "hire",
+      "No skillset specified": (r) => r.has_skillset === false,
+    };
+    const pred = filters[label];
+    if (!pred) return null;
+    return { columns: ["Client", "Role Requested"], rows: rows.filter(pred).map((r) => [s(r.client, "Unnamed"), s(r.resources_requested)]) };
+  }
+
+  if (toolName === "get_pipeline_outlook" && Array.isArray(d.months)) {
+    const months = d.months as BreakdownRecord[];
+    if (label === "Months with shortfall warning") {
+      const flagged = months.filter((m) => m.early_warning);
+      return { columns: ["Month", "Confirmed", "Supply", "Net"], rows: flagged.map((m) => [s(m.month), s(m.confirmed_demand_count), s(m.projected_supply_count), s(m.net_confirmed_surplus_shortfall)]) };
+    }
+    if (label === "Total confirmed demand") {
+      return { columns: ["Month", "Confirmed Demand"], rows: months.map((m) => [s(m.month), s(m.confirmed_demand_count)]) };
+    }
+    if (label === "Total unconfirmed demand") {
+      return { columns: ["Month", "Unconfirmed Demand"], rows: months.map((m) => [s(m.month), s(m.unconfirmed_demand_count)]) };
+    }
+  }
+
+  if (toolName === "get_new_project_forecast" && Array.isArray(d.breakdown) && (label === "Total shortfall (heads)" || label === "Total shortfall value")) {
+    const short = (d.breakdown as BreakdownRecord[]).filter((r) => Number(r.shortfall) > 0);
+    return {
+      columns: ["Designation", "Needed", "Covers", "Shortfall", "Shortfall $/mo"],
+      rows: short.map((r) => [s(r.designation), s(r.needed_headcount), s(r.available_for_redeploy), s(r.shortfall), `$${Number(r.shortfall_value_usd ?? 0).toLocaleString()}`]),
+    };
+  }
+
   return null;
 }
 
@@ -614,6 +771,17 @@ export default function BuddyPage() {
   const [railMobileOpen, setRailMobileOpen] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const skipNextPersist = useRef(true);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Textarea has no natural height of its own (rows=1) -- grow it with the
+  // content up to a cap, then let it scroll, so typing a longer question
+  // never hides earlier lines behind the box's fixed edge.
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  }, [draft]);
 
   useEffect(() => {
     const loaded = loadConversations();
@@ -807,16 +975,23 @@ export default function BuddyPage() {
                   <div className={cn("flex flex-col gap-2", m.role === "assistant" ? "flex-1 min-w-0" : "", m.role === "user" && "order-first ml-auto items-end")}>
                     <div
                       className={cn(
-                        "max-w-[92%] sm:max-w-[80%] px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-2xl text-[13.5px] leading-relaxed whitespace-pre-wrap",
-                        m.role === "user" ? "text-white rounded-br-md bg-primary" : "bg-gray-50 text-gray-800 rounded-bl-md border border-gray-100"
+                        "max-w-[92%] sm:max-w-[80%] px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-2xl text-[13.5px] leading-relaxed",
+                        m.role === "user"
+                          ? "text-white rounded-br-md bg-primary whitespace-pre-wrap"
+                          : "bg-gray-50 text-gray-800 rounded-bl-md border border-gray-100"
                       )}
                     >
-                      {m.content}
+                      {m.role === "assistant" ? <ChatMarkdown content={m.content} /> : m.content}
                     </div>
                     {m.role === "assistant" && m.format === "table" && m.table && (
                       <ChatTable {...m.table} onEmployeeClick={setSelectedEmployee} onProjectClick={setSelectedProject} />
                     )}
-                    {m.role === "assistant" && m.format === "stats" && m.stats && <ChatStats items={m.stats} />}
+                    {m.role === "assistant" && m.format === "stats" && m.stats && (
+                      <ChatStats items={m.stats} toolName={m.toolTrace?.[m.toolTrace.length - 1]?.tool} data={m.data} />
+                    )}
+                    {m.role === "assistant" && (
+                      <BuddyChart toolName={m.toolTrace?.[m.toolTrace.length - 1]?.tool} data={m.data} />
+                    )}
                     {m.role === "assistant" && (
                       <BuddyBreakdown
                         toolName={m.toolTrace?.[m.toolTrace.length - 1]?.tool}
@@ -876,11 +1051,12 @@ export default function BuddyPage() {
           <div className="max-w-2xl mx-auto flex items-end gap-2.5">
             <div className="flex-1 flex items-end gap-2 rounded-2xl border border-gray-200 bg-white px-4 py-2.5 focus-within:border-gray-300 transition">
               <textarea
+                ref={textareaRef}
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
                 placeholder="Ask Buddy…"
-                className="flex-1 text-sm outline-none placeholder:text-gray-400 resize-none leading-relaxed py-0.5"
+                className="flex-1 text-sm outline-none placeholder:text-gray-400 resize-none leading-relaxed py-0.5 max-h-40 overflow-y-auto scrollbar-thin"
                 rows={1}
                 disabled={sending}
               />
