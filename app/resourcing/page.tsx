@@ -66,7 +66,7 @@ export default function RecommendationsPage() {
 type ViewMode = "by-role" | "by-project";
 
 function RecommendationsPageInner() {
-  const [viewMode, setViewMode] = useState<ViewMode>("by-role");
+  const [viewMode, setViewMode] = useState<ViewMode>("by-project");
   const [selectedRow, setSelectedRow] = useState<number | null>(null);
   const [openProfile, setOpenProfile] = useState<{ employeeId: string; tab: ProfileTab; skillMatchContext?: SkillMatchContext } | null>(null);
   const searchParams = useSearchParams();
@@ -310,18 +310,6 @@ function RecommendationsPageInner() {
       {/* View mode toggle */}
       <div className="flex items-center gap-2">
         <button
-          onClick={() => setViewMode("by-role")}
-          className={cn(
-            "flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border transition",
-            viewMode === "by-role"
-              ? "bg-primary text-white border-primary"
-              : "bg-white text-gray-600 border-gray-200 hover:border-primary hover:text-primary"
-          )}
-        >
-          <List className="w-3.5 h-3.5" />
-          By Role
-        </button>
-        <button
           onClick={() => setViewMode("by-project")}
           className={cn(
             "flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border transition",
@@ -332,6 +320,18 @@ function RecommendationsPageInner() {
         >
           <Users className="w-3.5 h-3.5" />
           By Project
+        </button>
+        <button
+          onClick={() => setViewMode("by-role")}
+          className={cn(
+            "flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border transition",
+            viewMode === "by-role"
+              ? "bg-primary text-white border-primary"
+              : "bg-white text-gray-600 border-gray-200 hover:border-primary hover:text-primary"
+          )}
+        >
+          <List className="w-3.5 h-3.5" />
+          By Role
         </button>
         {viewMode === "by-role" && (
           <div className="ml-3 flex items-center gap-3 text-xs flex-wrap">

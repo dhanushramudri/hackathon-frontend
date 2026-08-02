@@ -27,6 +27,7 @@ import { TimesheetProofModal } from "@/components/shared/TimesheetProofModal";
 import { AssignModal } from "@/components/shared/AssignModal";
 import { SearchableSelect } from "@/components/shared/SearchableSelect";
 import { ProjectHealthDetailModal } from "@/components/health/ProjectHealthDetailModal";
+import { AllocationTimeline } from "@/components/shared/AllocationTimeline";
 import { cn } from "@/lib/utils";
 
 export type ProfileTab =
@@ -1088,6 +1089,7 @@ function AllocationsTab({
 
   return (
     <div>
+      <AllocationTimeline allocations={profile.allocations} onOpenProject={onOpenProject} />
       <TableControls
         search={{ value: search, onChange: setSearch, placeholder: "Search project or client…" }}
         filters={[{ value: statusFilter, onChange: setStatusFilter, options: [["all", "All statuses"], ...statuses.map((s) => [s, s] as [string, string])] }]}
