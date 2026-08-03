@@ -42,6 +42,18 @@ const NAV_GROUPS: { label: string; links: NavLinkSpec[] }[] = [
   },
 ];
 
+// Plain `pathname.startsWith(href)` lets a shorter route (e.g. "/forecast")
+// match as active even when the real current route is a more specific child
+// of it (e.g. "/forecast/headcount-prediction") -- highlighting both links at
+// once. Only the single longest href that's a real path-segment match (exact,
+// or followed by "/") counts as active.
+function isRouteActive(pathname: string, href: string, allHrefs: string[]): boolean {
+  const matches = (h: string) => pathname === h || pathname.startsWith(h + "/");
+  if (!matches(href)) return false;
+  const longestMatch = allHrefs.filter(matches).sort((a, b) => b.length - a.length)[0];
+  return href === longestMatch;
+}
+
 function SectionLabel({ children, collapsed }: { children: React.ReactNode; collapsed: boolean }) {
   if (collapsed) return null;
   return (
@@ -175,6 +187,7 @@ export function Sidebar() {
   }, [pathname, setMobileOpen]);
 
   const showExpanded = open || mobileOpen;
+  const allHrefs = [TOP_LINK.href, ...NAV_GROUPS.flatMap((g) => g.links.map((l) => l.href)), "/buddy"];
 
   return (
     <>
@@ -230,7 +243,7 @@ export function Sidebar() {
           </div>
 
           <nav className="flex-1 overflow-y-auto py-4 scrollbar-thin px-3 space-y-0.5">
-            <NavLink link={TOP_LINK} open={showExpanded} isActive={pathname.startsWith(TOP_LINK.href)} />
+            <NavLink link={TOP_LINK} open={showExpanded} isActive={isRouteActive(pathname, TOP_LINK.href, allHrefs)} />
 
             {NAV_GROUPS.map((group, gi) => (
               <div key={group.label}>
@@ -238,7 +251,7 @@ export function Sidebar() {
                 <SectionLabel collapsed={!showExpanded}>{group.label}</SectionLabel>
                 <div className="space-y-0.5">
                   {group.links.map((link) => (
-                    <NavLink key={link.href} link={link} open={showExpanded} isActive={pathname.startsWith(link.href)} />
+                    <NavLink key={link.href} link={link} open={showExpanded} isActive={isRouteActive(pathname, link.href, allHrefs)} />
                   ))}
                 </div>
               </div>
@@ -246,28 +259,33 @@ export function Sidebar() {
 
             {showExpanded && <div className="my-3 border-t border-sidebar-border/50" />}
 
-            <Link
-              href="/buddy"
-              title={showExpanded ? undefined : "Buddy"}
-              className={cn(
-                "flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors",
-                showExpanded ? "justify-start" : "justify-center",
-                pathname.startsWith("/buddy") ? "" : "text-sidebar-foreground hover:bg-sidebar-accent"
-              )}
-              style={
-                pathname.startsWith("/buddy")
-                  ? { backgroundColor: "hsl(var(--primary) / 0.10)", color: "hsl(var(--primary))", fontWeight: 600, borderLeft: "1px solid hsl(var(--primary))" }
-                  : {}
-              }
-            >
-              <Mascot className="w-3.5 h-3.5 flex-shrink-0" />
-              {showExpanded && <span>Buddy</span>}
-              {showExpanded && (
-                <span className="text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full flex-shrink-0" style={{ color: "#ff6196", backgroundColor: "rgba(255, 97, 150, 0.12)" }}>
-                  Beta
-                </span>
-              )}
-            </Link>
+            {(() => {
+              const buddyActive = isRouteActive(pathname, "/buddy", allHrefs);
+              return (
+                <Link
+                  href="/buddy"
+                  title={showExpanded ? undefined : "Buddy"}
+                  className={cn(
+                    "flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors",
+                    showExpanded ? "justify-start" : "justify-center",
+                    buddyActive ? "" : "text-sidebar-foreground hover:bg-sidebar-accent"
+                  )}
+                  style={
+                    buddyActive
+                      ? { backgroundColor: "hsl(var(--primary) / 0.10)", color: "hsl(var(--primary))", fontWeight: 600, borderLeft: "1px solid hsl(var(--primary))" }
+                      : {}
+                  }
+                >
+                  <Mascot className="w-3.5 h-3.5 flex-shrink-0" />
+                  {showExpanded && <span>Buddy</span>}
+                  {showExpanded && (
+                    <span className="text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full flex-shrink-0" style={{ color: "#ff6196", backgroundColor: "rgba(255, 97, 150, 0.12)" }}>
+                      Beta
+                    </span>
+                  )}
+                </Link>
+              );
+            })()}
           </nav>
 
           <div className="border-t border-sidebar-border px-3 py-3">
