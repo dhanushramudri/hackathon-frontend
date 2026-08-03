@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Check, X, Sparkles, RefreshCw } from "lucide-react";
-import { api, type AllocationRow, type DealSummary, type RosterEntry, DEFAULT_INCLUDE_PARAMS } from "@/lib/api";
+import { api, type AllocationRow, type BudgetLineItem, type DealSummary, type RosterEntry, DEFAULT_INCLUDE_PARAMS } from "@/lib/api";
 import { SearchableSelect } from "@/components/shared/SearchableSelect";
 import { AssignWithOverAllocationCheck, OverAllocationWarningModal } from "@/components/shared/OverAllocationWarningModal";
 import { RESOURCING_STATUSES, SHIFT_TYPES } from "@/components/shared/AssignModal";
@@ -61,7 +61,26 @@ export function Step5ResourceAllocation({
   });
   const employees = useQuery({ queryKey: ["employees-list"], queryFn: api.employeesList });
 
-  const lineItems = (budget.data?.line_items ?? []).filter((li) => li.designation);
+  const realBudgetLineItems = (budget.data?.line_items ?? []).filter((li) => li.designation);
+  // No budget was ever created in Step 3 (no FTE/role selected) -- default to
+  // the combination of roles this deal actually requested in the real
+  // pipeline data (e.g. AP, Sol Con, SSE, SE...) instead of showing nothing.
+  const fallbackLineItems: BudgetLineItem[] =
+    realBudgetLineItems.length === 0 && deal
+      ? deal.roles
+          .filter((r) => r.requested_designations.length > 0)
+          .map((r) => ({
+            designation: r.requested_designations[0],
+            location: null,
+            estimated_start_date: r.likely_start_date,
+            hours_per_day: 8,
+            allocation_pct: r.requested_pct ? Number(r.requested_pct) || 100 : 100,
+            working_days: null,
+            base_day_rate: null,
+            eff_day_rate: null,
+          }))
+      : [];
+  const lineItems = realBudgetLineItems.length > 0 ? realBudgetLineItems : fallbackLineItems;
   const distinctDesignations = Array.from(new Set(lineItems.map((li) => li.designation)));
   const asOfDate = projectDates?.startDate ?? todayStr();
 

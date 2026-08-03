@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Trash2 } from "lucide-react";
-import { api, type BudgetLineItem } from "@/lib/api";
+import { api, type BudgetLineItem, type DealSummary } from "@/lib/api";
 import { SearchableSelect } from "@/components/shared/SearchableSelect";
 import { StepPlaceholder } from "@/components/wizard/StepPlaceholder";
 import {
@@ -34,6 +34,7 @@ export function Step3BudgetCreation({
   defaultStartDate,
   defaultEndDate,
   defaultIsBillable,
+  deal,
   onNext,
 }: {
   projectCode: string | null;
@@ -41,6 +42,7 @@ export function Step3BudgetCreation({
   defaultStartDate: string;
   defaultEndDate: string;
   defaultIsBillable: boolean;
+  deal: DealSummary | null;
   onNext: () => void;
 }) {
   const qc = useQueryClient();
@@ -93,20 +95,37 @@ export function Step3BudgetCreation({
     return out;
   }
 
-  // Typical delivery engagements need a predictable team (2 engineers, an
-  // enabler, a consultant -- the real DELIVERY_STANDARD_TEAM template) --
-  // pre-fill it by default on a brand-new budget instead of one blank row,
-  // so the RM edits/removes what doesn't apply rather than building from
-  // scratch every time. Skipped once a real saved budget exists.
+  // The real combination of roles this deal actually requested in the
+  // pipeline data (e.g. AP, Sol Con, SSE, SE...) -- takes priority over the
+  // generic team template below whenever the deal specifies any.
+  function rowsFromDeal(d: DealSummary): BudgetLineItem[] {
+    const items = d.roles.filter((r) => r.requested_designations.length > 0);
+    return items.map((r) => ({
+      designation: r.requested_designations[0],
+      location: defaultLocationForDesignation(r.requested_designations[0]),
+      estimated_start_date: r.likely_start_date || defaultStartDate,
+      hours_per_day: 8,
+      allocation_pct: r.requested_pct ? Number(r.requested_pct) || 100 : 100,
+      working_days: null,
+      base_day_rate: null,
+      eff_day_rate: null,
+    }));
+  }
+
+  // Pre-fill a brand-new budget by default instead of one blank row, so the
+  // RM edits/removes what doesn't apply rather than building from scratch --
+  // the deal's own real requested roles when it specifies any, otherwise the
+  // generic DELIVERY_STANDARD_TEAM template. Skipped once a real saved budget exists.
   useEffect(() => {
     if (templateApplied || loadedFromServer) return;
     if (existing.isLoading || roleMixCategories.isLoading) return;
     const savedLineItems = (existing.data as { line_items?: unknown[] } | null)?.line_items;
     if (Array.isArray(savedLineItems) && savedLineItems.length > 0) { setTemplateApplied(true); return; }
-    setRows(rowsFromTemplate(DELIVERY_STANDARD_TEAM));
+    const dealRows = deal ? rowsFromDeal(deal) : [];
+    setRows(dealRows.length > 0 ? dealRows : rowsFromTemplate(DELIVERY_STANDARD_TEAM));
     setTemplateApplied(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [templateApplied, loadedFromServer, existing.isLoading, existing.data, roleMixCategories.isLoading]);
+  }, [templateApplied, loadedFromServer, existing.isLoading, existing.data, roleMixCategories.isLoading, deal]);
 
   useEffect(() => {
     if (existing.data && !loadedFromServer) {

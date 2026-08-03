@@ -58,11 +58,15 @@ function SemanticMatchPanel({
   if (!result.available) {
     return <p className="text-xs text-red-600 italic">{result.reason ?? "AI matching is not available right now."}</p>;
   }
+  const inferredNote =
+    result.required_skill_source && result.required_skill_source !== "given"
+      ? " No skillset was given for this role, so this searched against an inferred required-skills list, not the deal author's own words."
+      : "";
   if (result.no_match_found || !result.matches || result.matches.length === 0) {
     return (
       <p className="text-xs text-red-600">
         AI reviewed {result.candidates_considered ?? 0} candidates&apos; real skill records and found no semantic match
-        either -- this is a genuine hire signal.
+        either -- this is a genuine hire signal.{inferredNote}
       </p>
     );
   }
@@ -71,7 +75,7 @@ function SemanticMatchPanel({
       <p className="text-[11px] text-red-600">
         AI reviewed {result.candidates_considered} candidates&apos; real skill records and found {result.matches.length}{" "}
         possible semantic match{result.matches.length > 1 ? "es" : ""} below -- each verified against that
-        employee&apos;s actual recorded skills, not just restated by the model.
+        employee&apos;s actual recorded skills, not just restated by the model.{inferredNote}
       </p>
       {result.matches.map((m, i) => (
         <div key={i} className="rounded-lg border border-red-200 bg-white p-2.5 text-xs">
@@ -598,8 +602,35 @@ function DecisionHeader({
 
       {(skillsetText || requiredPhrases.length > 0) && (
         <div className="border-t border-gray-100 pt-2.5">
-          <div className="flex items-center justify-between mb-1">
-            <p className="text-[11px] text-gray-400">Required skillset</p>
+          <div className="flex items-center justify-between mb-1 flex-wrap gap-1">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <p className="text-[11px] text-gray-400">
+                {selected.required_skill_source && selected.required_skill_source !== "given" ? "Preferred skills" : "Required skillset"}
+              </p>
+              {selected.required_skill_source && selected.required_skill_source !== "given" && (
+                <span
+                  title={selected.inferred_skill_info?.detail ?? "No skillset was given for this role -- this is inferred, not specified by the deal author."}
+                  className={cn(
+                    "text-[10px] px-1.5 py-0.5 rounded-full border font-medium whitespace-nowrap",
+                    selected.required_skill_source === "coe_mapping"
+                      ? "bg-violet-50 border-violet-200 text-violet-700"
+                      : selected.required_skill_source === "embedding_match"
+                      ? "bg-blue-50 border-blue-200 text-blue-700"
+                      : "bg-gray-50 border-gray-200 text-gray-500"
+                  )}
+                >
+                  {selected.required_skill_source === "coe_mapping" &&
+                    `Inferred from past ${selected.inferred_skill_info?.matched_coe ?? ""} projects`}
+                  {selected.required_skill_source === "embedding_match" &&
+                    `AI-matched to ${selected.inferred_skill_info?.matched_coe ?? "closest"} skills${
+                      selected.inferred_skill_info?.match_score_pct != null
+                        ? ` (${Math.round(selected.inferred_skill_info.match_score_pct)}%)`
+                        : ""
+                    }`}
+                  {selected.required_skill_source === "org_fallback" && "General baseline skills"}
+                </span>
+              )}
+            </div>
             {selected.skillset_coe_categories.length > 0 && (
               <button
                 onClick={() => setClassificationProofOpen(true)}

@@ -240,7 +240,22 @@ export interface RecommendationResult {
     skillset_coe_categories: string[];
     skillset_classification_proof: SkillsetClassificationProofRow[];
     requested_designations?: string[];
+    // "given" when the deal author's own real skillset text was used;
+    // otherwise which fallback tier supplied it -- see
+    // app/engines/pipeline_skill_inference.py for the exact priority chain.
+    required_skill_source?: "given" | "coe_mapping" | "embedding_match" | "org_fallback";
+    inferred_skill_info?: InferredSkillInfo | null;
   };
+}
+
+export interface InferredSkillInfo {
+  skillset_text: string;
+  required_skills: string[];
+  source: "coe_mapping" | "embedding_match" | "org_fallback";
+  matched_coe: string | null;
+  confidence: "medium" | "low" | "very_low";
+  match_score_pct?: number;
+  detail: string;
 }
 
 export interface DealRole {
@@ -256,6 +271,7 @@ export interface DealRole {
   deal_stage_hubspot: string | null;
   start_date_confirmed: string | null;
   is_late_notice: boolean | null;
+  requested_designations: string[];
 }
 
 export interface DealSummary {
@@ -317,11 +333,19 @@ export interface CoverageSummaryRow {
   top_candidate_signal: StaffingSignal | null;
   top_bucket: CandidateBucket | null;
   has_skillset: boolean;
+  real_skillset_given: boolean;
 }
 
 export interface CoverageSummary {
   total_demand_rows: number;
+  // Now near-zero -- a real fallback (see pipeline_skill_inference.py) is
+  // inferred for any row with no given skillset, so almost nothing is
+  // actually unscoreable anymore.
   no_skillset_specified_count: number;
+  // The real, still-useful data-hygiene signal: how many deals the author
+  // never actually typed a skills list for (even though they're now scored
+  // against an inferred one).
+  no_real_skillset_given_count: number;
   redeploy_ready_count: number;
   redeploy_with_training_count: number;
   hire_signal_count: number;
@@ -1269,6 +1293,7 @@ export interface SemanticMatchResult {
   available: boolean;
   reason?: string;
   requirement?: string | null;
+  required_skill_source?: "given" | "coe_mapping" | "embedding_match" | "org_fallback";
   matches?: SemanticMatchCandidate[];
   candidates_considered?: number;
   no_match_found?: boolean;

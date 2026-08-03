@@ -149,6 +149,7 @@ export function ProjectWizard({
           defaultStartDate={wizardProject?.startDate ?? ""}
           defaultEndDate={wizardProject?.endDate ?? ""}
           defaultIsBillable={isBillableDefault}
+          deal={deal}
           // Skips Step 4 (SOW Creation) -- saving the budget already staffs
           // the project (see autoAssignFromBudget), so the RM should land
           // straight on Resource Allocation to see the result, not pause on
