@@ -1586,6 +1586,19 @@ export interface EmployeeTimesheetResult {
   rows: EmployeeTimesheetRow[];
 }
 
+export interface WeeklyPulseAnswer {
+  question: string;
+  score: number;
+  meaning: string;
+}
+
+export interface WeeklyPulseWeek {
+  week_start_date: string;
+  week_end_date: string;
+  is_not_happy: boolean;
+  answers: WeeklyPulseAnswer[];
+}
+
 export interface AllocationTimesheet extends AllocationRow {
   hours_window_end: string;
   daily_hours: { date: string; hours: number | null; expected_hours: number; utilization_pct: number | null; is_missing: boolean }[];
@@ -1772,6 +1785,7 @@ export const api = {
     const qs = params.toString();
     return getJSON<EmployeeTimesheetResult>(`/employees/${encodeURIComponent(employeeId)}/timesheet${qs ? `?${qs}` : ""}`);
   },
+  employeePulse: (employeeId: string) => getJSON<WeeklyPulseWeek[]>(`/employees/${encodeURIComponent(employeeId)}/pulse`),
   employeeHeadcountSummary: () => getJSON<EmployeeHeadcountSummary>("/employees/headcount-summary"),
   overtimeRiskSummary: () => getJSON<OvertimeRiskSummary>("/employees/overtime-risk-summary"),
   employeesList: () => getJSON<EmployeeListRow[]>("/employees"),

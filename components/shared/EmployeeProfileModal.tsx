@@ -14,6 +14,7 @@ import {
   type BackfillResult, type RecommendationCandidate, type FallbackCandidates,
   type IncludeParams, type RedeployMatch, type EmployeeFeedbackEntry,
   type EmployeeTimesheetRow,
+  type WeeklyPulseWeek,
 } from "@/lib/api";
 import { Modal } from "@/components/shared/Modal";
 import { Badge } from "@/components/shared/Badge";
@@ -1670,6 +1671,7 @@ function TimesheetTab({ employeeId }: { employeeId: string }) {
   const [projectId, setProjectId] = useState("all");
   const [billingStatus, setBillingStatus] = useState("all");
   const [sort, setSort] = useState<TimesheetSort>("date_desc");
+  const [openPulse, setOpenPulse] = useState<WeeklyPulseWeek | null>(null);
 
   const ts = useQuery({
     queryKey: ["employee-timesheet", employeeId, startDate, endDate, projectId, billingStatus],
@@ -1681,10 +1683,18 @@ function TimesheetTab({ employeeId }: { employeeId: string }) {
         billingStatus: billingStatus === "all" ? undefined : billingStatus,
       }),
   });
+  const pulse = useQuery({
+    queryKey: ["employee-pulse", employeeId],
+    queryFn: () => api.employeePulse(employeeId),
+  });
 
   if (ts.isLoading) return <TableSkeleton columns={5} rows={6} />;
   if (ts.error || !ts.data) return <ErrorState message="Could not load timesheet data for this employee." />;
   const data = ts.data;
+
+  function pulseForDate(date: string): WeeklyPulseWeek | undefined {
+    return pulse.data?.find((p) => date >= p.week_start_date && date <= p.week_end_date);
+  }
 
   const rows: EmployeeTimesheetRow[] = [...data.rows];
   switch (sort) {
@@ -1794,23 +1804,58 @@ function TimesheetTab({ employeeId }: { employeeId: string }) {
                     <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5 whitespace-nowrap">Hours</th>
                     <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5 whitespace-nowrap">Status</th>
                     <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5 whitespace-nowrap">Billing</th>
+                    <th className="text-left font-semibold text-gray-500 px-2.5 py-1.5 whitespace-nowrap">Weekly Pulse</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((r, i) => (
+                  {rows.map((r, i) => {
+                    const rowPulse = pulseForDate(r.date);
+                    return (
                     <tr key={i} className="border-b border-gray-50 last:border-0">
                       <td className="px-2.5 py-1.5 text-gray-600 whitespace-nowrap">{r.date}</td>
                       <td className="px-2.5 py-1.5 text-gray-700 font-medium whitespace-nowrap">{r.project_id}</td>
                       <td className="px-2.5 py-1.5 text-gray-700 whitespace-nowrap">{r.hours}h</td>
                       <td className="px-2.5 py-1.5 text-gray-500 whitespace-nowrap">{r.status}</td>
                       <td className="px-2.5 py-1.5 whitespace-nowrap"><Badge variant={r.billing_status.toLowerCase()}>{r.billing_status}</Badge></td>
+                      <td className="px-2.5 py-1.5 whitespace-nowrap">
+                        {rowPulse ? (
+                          <button
+                            onClick={() => setOpenPulse(rowPulse)}
+                            className={cn(
+                              "text-[10px] px-2 py-0.5 rounded-full border font-medium hover:opacity-75 transition",
+                              rowPulse.is_not_happy ? "bg-amber-50 border-amber-200 text-amber-700" : "bg-emerald-50 border-emerald-200 text-emerald-700"
+                            )}
+                          >
+                            Weekly Pulse
+                          </button>
+                        ) : (
+                          <span className="text-gray-300">-</span>
+                        )}
+                      </td>
                     </tr>
-                  ))}
+                  );
+                  })}
                 </tbody>
               </table>
             </div>
           </div>
         </>
+      )}
+      {openPulse && (
+        <Modal
+          title={`Weekly Pulse — ${openPulse.week_start_date} → ${openPulse.week_end_date}`}
+          onClose={() => setOpenPulse(null)}
+          widthClassName="max-w-lg"
+        >
+          <div className="p-4 space-y-2.5">
+            {openPulse.answers.map((a, i) => (
+              <div key={i} className="rounded-lg border border-gray-100 p-2.5">
+                <p className="text-[11px] text-gray-500">{a.question}</p>
+                <p className="text-sm font-medium text-gray-800 mt-0.5">{a.meaning}</p>
+              </div>
+            ))}
+          </div>
+        </Modal>
       )}
     </div>
   );
